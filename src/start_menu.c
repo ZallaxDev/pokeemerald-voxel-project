@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "battle_pike.h"
 #include "battle_pyramid.h"
 #include "battle_pyramid_bag.h"
@@ -84,6 +85,8 @@ EWRAM_DATA static u8 sStartMenuCursorPos = 0;
 EWRAM_DATA static u8 sNumStartMenuActions = 0;
 EWRAM_DATA static u8 sCurrentStartMenuActions[9] = {0};
 EWRAM_DATA static s8 sInitStartMenuData[2] = {0};
+
+static void AX_SpeakStartMenuItem(void);
 
 EWRAM_DATA static u8 (*sSaveDialogCallback)(void) = NULL;
 EWRAM_DATA static u8 sSaveDialogTimer = 0;
@@ -510,6 +513,7 @@ static bool32 InitStartMenuStep(void)
     case 5:
         sStartMenuCursorPos = InitMenuNormal(GetStartMenuWindowId(), FONT_NORMAL, 0, 9, 16, sNumStartMenuActions, sStartMenuCursorPos);
         CopyWindowToVram(GetStartMenuWindowId(), COPYWIN_MAP);
+        AX_SpeakStartMenuItem(); // announce first option on open
         return TRUE;
     }
 
@@ -590,18 +594,29 @@ void ShowStartMenu(void)
     LockPlayerFieldControls();
 }
 
+// Speak the currently-highlighted start menu option (expanding e.g. the
+// player-name placeholder in the PLAYER entry).
+static void AX_SpeakStartMenuItem(void)
+{
+    u8 buf[64];
+    StringExpandPlaceholders(buf, sStartMenuItems[sCurrentStartMenuActions[sStartMenuCursorPos]].text);
+    AX_SayGameString(buf, 1);
+}
+
 static bool8 HandleStartMenuInput(void)
 {
     if (JOY_NEW(DPAD_UP))
     {
         PlaySE(SE_SELECT);
         sStartMenuCursorPos = Menu_MoveCursor(-1);
+        AX_SpeakStartMenuItem();
     }
 
     if (JOY_NEW(DPAD_DOWN))
     {
         PlaySE(SE_SELECT);
         sStartMenuCursorPos = Menu_MoveCursor(1);
+        AX_SpeakStartMenuItem();
     }
 
     if (JOY_NEW(A_BUTTON))

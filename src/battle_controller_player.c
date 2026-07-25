@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_arena.h"
@@ -230,6 +231,13 @@ static void CompleteOnBankSpritePosX_0(void)
         PlayerBufferExecCompleted();
 }
 
+// Speak the highlighted battle action (FIGHT/BAG/POKEMON/RUN).
+static void AX_SpeakBattleAction(void)
+{
+    static const char *const names[4] = { "Fight", "Bag", "Pokemon", "Run" };
+    Speech_Say(names[gActionSelectionCursor[gActiveBattler] & 3], 1);
+}
+
 static void HandleInputChooseAction(void)
 {
     u16 itemId = gBattleBufferA[gActiveBattler][2] | (gBattleBufferA[gActiveBattler][3] << 8);
@@ -271,6 +279,7 @@ static void HandleInputChooseAction(void)
             ActionSelectionDestroyCursorAt(gActionSelectionCursor[gActiveBattler]);
             gActionSelectionCursor[gActiveBattler] ^= 1;
             ActionSelectionCreateCursorAt(gActionSelectionCursor[gActiveBattler], 0);
+        AX_SpeakBattleAction();
         }
     }
     else if (JOY_NEW(DPAD_RIGHT))
@@ -281,6 +290,7 @@ static void HandleInputChooseAction(void)
             ActionSelectionDestroyCursorAt(gActionSelectionCursor[gActiveBattler]);
             gActionSelectionCursor[gActiveBattler] ^= 1;
             ActionSelectionCreateCursorAt(gActionSelectionCursor[gActiveBattler], 0);
+        AX_SpeakBattleAction();
         }
     }
     else if (JOY_NEW(DPAD_UP))
@@ -291,6 +301,7 @@ static void HandleInputChooseAction(void)
             ActionSelectionDestroyCursorAt(gActionSelectionCursor[gActiveBattler]);
             gActionSelectionCursor[gActiveBattler] ^= 2;
             ActionSelectionCreateCursorAt(gActionSelectionCursor[gActiveBattler], 0);
+        AX_SpeakBattleAction();
         }
     }
     else if (JOY_NEW(DPAD_DOWN))
@@ -301,6 +312,7 @@ static void HandleInputChooseAction(void)
             ActionSelectionDestroyCursorAt(gActionSelectionCursor[gActiveBattler]);
             gActionSelectionCursor[gActiveBattler] ^= 2;
             ActionSelectionCreateCursorAt(gActionSelectionCursor[gActiveBattler], 0);
+        AX_SpeakBattleAction();
         }
     }
     else if (JOY_NEW(B_BUTTON) || gPlayerDpadHoldFrames > 59)
@@ -1491,6 +1503,25 @@ static void MoveSelectionDisplayPpNumber(void)
     ConvertIntToDecimalStringN(txtPtr, moveInfo->maxPp[gMoveSelectionCursor[gActiveBattler]], STR_CONV_MODE_RIGHT_ALIGN, 2);
 
     BattlePutTextOnWindow(gDisplayedStringBattle, B_WIN_PP_REMAINING);
+
+    // Speak the highlighted move: "Tackle, 35 of 35".
+    {
+        u8 cursor = gMoveSelectionCursor[gActiveBattler];
+        const char *of = " of ";
+        char buf[80];
+        int o = AX_DecodeString(gMoveNames[moveInfo->moves[cursor]], buf, sizeof(buf));
+        if (o < (int)sizeof(buf) - 2)
+        {
+            buf[o++] = ',';
+            buf[o++] = ' ';
+        }
+        o = AX_AppendUint(buf, o, sizeof(buf), moveInfo->currentPp[cursor]);
+        while (*of != '\0' && o < (int)sizeof(buf) - 1)
+            buf[o++] = *of++;
+        o = AX_AppendUint(buf, o, sizeof(buf), moveInfo->maxPp[cursor]);
+        buf[o] = '\0';
+        Speech_Say(buf, 1);
+    }
 }
 
 static void MoveSelectionDisplayMoveType(void)

@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "trainer_pokemon_sprites.h"
 #include "bg.h"
 #include "constants/rgb.h"
@@ -875,9 +876,42 @@ static void Task_DisplayMainMenu(u8 taskId)
     }
 }
 
+// Speak the highlighted main-menu option. The item list depends on the menu type.
+static void AX_SpeakMainMenuItem(u8 menuType, u8 item)
+{
+    const u8 *s = NULL;
+
+    switch (menuType)
+    {
+    case HAS_NO_SAVED_GAME: // NEW GAME, OPTION
+        s = (item == 0) ? gText_MainMenuNewGame : gText_MainMenuOption;
+        break;
+    case HAS_SAVED_GAME: // CONTINUE, NEW GAME, OPTION
+        s = (item == 0) ? gText_MainMenuContinue
+          : (item == 1) ? gText_MainMenuNewGame
+          :               gText_MainMenuOption;
+        break;
+    case HAS_MYSTERY_GIFT: // CONTINUE, NEW GAME, MYSTERY GIFT, OPTION
+        s = (item == 0) ? gText_MainMenuContinue
+          : (item == 1) ? gText_MainMenuNewGame
+          : (item == 2) ? gText_MainMenuMysteryGift
+          :               gText_MainMenuOption;
+        break;
+    case HAS_MYSTERY_EVENTS: // CONTINUE, NEW GAME, MYSTERY GIFT, MYSTERY EVENTS, OPTION
+        s = (item == 0) ? gText_MainMenuContinue
+          : (item == 1) ? gText_MainMenuNewGame
+          : (item == 2) ? gText_MainMenuMysteryGift2
+          : (item == 3) ? gText_MainMenuMysteryEvents
+          :               gText_MainMenuOption;
+        break;
+    }
+    AX_SayGameString(s, 1);
+}
+
 static void Task_HighlightSelectedMainMenuItem(u8 taskId)
 {
     HighlightSelectedMainMenuItem(gTasks[taskId].tMenuType, gTasks[taskId].tCurrItem, gTasks[taskId].tIsScrolled);
+    AX_SpeakMainMenuItem(gTasks[taskId].tMenuType, gTasks[taskId].tCurrItem);
     gTasks[taskId].func = Task_HandleMainMenuInput;
 }
 

@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "item_menu.h"
 #include "battle.h"
 #include "battle_controllers.h"
@@ -924,8 +925,62 @@ static void GetItemNameFromPocket(u8 *dest, u16 itemId)
     }
 }
 
+// Speak the bag item at the cursor with a clean name and quantity, e.g.
+// "Potion, 3", "TM 46, Thief, 1", "Cheri Berry, 5". This replaces the raw
+// list label (which for TMs/berries reads as garbled run-together text).
+static void AX_SpeakBagItem(s32 itemIndex)
+{
+    char buf[160];
+    int o = 0;
+    u8 pocket = gBagPosition.pocket;
+    u16 itemId, qty;
+
+    if (itemIndex == LIST_CANCEL)
+    {
+        Speech_Say("Close Bag", 1);
+        return;
+    }
+    itemId = BagGetItemIdByPocketPosition(pocket + 1, itemIndex);
+
+    if (pocket == TMHM_POCKET)
+    {
+        bool8 isHM = (itemId >= ITEM_HM01);
+        u32 num = isHM ? (itemId - ITEM_HM01 + 1) : (itemId - ITEM_TM01 + 1);
+
+        buf[o++] = isHM ? 'H' : 'T';
+        buf[o++] = 'M';
+        buf[o++] = ' ';
+        o = AX_AppendUint(buf, o, sizeof(buf), num);
+        buf[o++] = ',';
+        buf[o++] = ' ';
+        o += AX_DecodeString(gMoveNames[ItemIdToBattleMoveId(itemId)], buf + o, sizeof(buf) - o);
+    }
+    else
+    {
+        u8 nameGame[24];
+        CopyItemName(itemId, nameGame);
+        o += AX_DecodeString(nameGame, buf + o, sizeof(buf) - o);
+    }
+
+    // Announce quantity for every pocket except Key Items (always one there).
+    if (pocket != KEYITEMS_POCKET)
+    {
+        qty = BagGetQuantityByPocketPosition(pocket + 1, itemIndex);
+        if (o < (int)sizeof(buf) - 2)
+        {
+            buf[o++] = ',';
+            buf[o++] = ' ';
+        }
+        o = AX_AppendUint(buf, o, sizeof(buf), qty);
+    }
+
+    buf[o] = '\0';
+    Speech_Say(buf, 1);
+}
+
 static void BagMenu_MoveCursorCallback(s32 itemIndex, bool8 onInit, struct ListMenu *list)
 {
+    AX_SpeakBagItem(itemIndex);
     if (onInit != TRUE)
     {
         PlaySE(SE_SELECT);

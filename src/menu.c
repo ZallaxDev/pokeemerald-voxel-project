@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "malloc.h"
 #include "bg.h"
 #include "blit.h"
@@ -63,6 +64,40 @@ static void task_free_buf_after_copying_tile_data_to_vram(u8 taskId);
 static EWRAM_DATA u8 sStartMenuWindowId = 0;
 static EWRAM_DATA u8 sMapNamePopupWindowId = 0;
 static EWRAM_DATA struct Menu sMenu = {0};
+
+// --- Accessibility: remember the current sMenu's option labels so the cursor
+// hook (RedrawMenuCursor) can speak the highlighted one. A Print* helper
+// "captures" pending labels; when the menu's cursor is initialized they are
+// "promoted" to current and the pending slot cleared. That way a later menu
+// that sets no labels of its own can't inherit stale ones and mis-speak.
+static const struct MenuAction *sAxPendActions, *sAxCurActions;
+static const u8 *sAxPendIds, *sAxCurIds;
+static u8 sAxPendYesNo, sAxCurYesNo;
+
+static void AX_MenuCapture(const struct MenuAction *actions, const u8 *ids)
+{
+    sAxPendActions = actions;
+    sAxPendIds = ids;
+    sAxPendYesNo = 0;
+}
+
+static void AX_MenuPromote(void)
+{
+    sAxCurActions = sAxPendActions;
+    sAxCurIds = sAxPendIds;
+    sAxCurYesNo = sAxPendYesNo;
+    sAxPendActions = NULL;
+    sAxPendIds = NULL;
+    sAxPendYesNo = 0;
+}
+
+static void AX_MenuSpeak(u8 pos)
+{
+    if (sAxCurYesNo)
+        Speech_Say(pos == 0 ? "Yes" : "No", 1);
+    else if (sAxCurActions != NULL)
+        AX_SayGameString(sAxCurActions[sAxCurIds ? sAxCurIds[pos] : pos].text, 1);
+}
 static EWRAM_DATA u16 sTileNum = 0;
 static EWRAM_DATA u8 sPaletteNum = 0;
 static EWRAM_DATA u8 sYesNoWindowId = 0;
@@ -192,18 +227,21 @@ void AddTextPrinterForMessage(bool8 allowSkippingDelayWithButtonPress)
 {
     void (*callback)(struct TextPrinterTemplate *, u16) = NULL;
     gTextFlags.canABSpeedUpPrint = allowSkippingDelayWithButtonPress;
+    AX_SayGameString(gStringVar4, TRUE); // speak dialogue
     AddTextPrinterParameterized2(0, FONT_NORMAL, gStringVar4, GetPlayerTextSpeedDelay(), callback, TEXT_COLOR_DARK_GRAY, TEXT_COLOR_WHITE, TEXT_COLOR_LIGHT_GRAY);
 }
 
 void AddTextPrinterForMessage_2(bool8 allowSkippingDelayWithButtonPress)
 {
     gTextFlags.canABSpeedUpPrint = allowSkippingDelayWithButtonPress;
+    AX_SayGameString(gStringVar4, TRUE); // speak dialogue
     AddTextPrinterParameterized2(0, FONT_NORMAL, gStringVar4, GetPlayerTextSpeedDelay(), NULL, TEXT_COLOR_DARK_GRAY, TEXT_COLOR_WHITE, TEXT_COLOR_LIGHT_GRAY);
 }
 
 void AddTextPrinterWithCustomSpeedForMessage(bool8 allowSkippingDelayWithButtonPress, u8 speed)
 {
     gTextFlags.canABSpeedUpPrint = allowSkippingDelayWithButtonPress;
+    AX_SayGameString(gStringVar4, TRUE); // speak dialogue
     AddTextPrinterParameterized2(0, FONT_NORMAL, gStringVar4, speed, NULL, TEXT_COLOR_DARK_GRAY, TEXT_COLOR_WHITE, TEXT_COLOR_LIGHT_GRAY);
 }
 
@@ -919,6 +957,7 @@ static u8 InitMenu(u8 windowId, u8 fontId, u8 left, u8 top, u8 cursorHeight, u8 
     else
         sMenu.cursorPos = pos;
 
+    AX_MenuPromote();
     Menu_MoveCursor(0);
     return sMenu.cursorPos;
 }
@@ -943,6 +982,7 @@ void RedrawMenuCursor(u8 oldPos, u8 newPos)
     height = GetMenuCursorDimensionByFont(sMenu.fontId, 1);
     FillWindowPixelRect(sMenu.windowId, PIXEL_FILL(1), sMenu.left, sMenu.optionHeight * oldPos + sMenu.top, width, height);
     AddTextPrinterParameterized(sMenu.windowId, sMenu.fontId, gText_SelectorArrow3, sMenu.left, sMenu.optionHeight * newPos + sMenu.top, 0, 0);
+    AX_MenuSpeak(newPos); // speak the newly-highlighted option
 }
 
 u8 Menu_MoveCursor(s8 cursorDelta)
@@ -1101,6 +1141,7 @@ s8 Menu_ProcessInputNoWrapAround_other(void)
 void PrintMenuActionTextsAtPos(u8 windowId, u8 fontId, u8 left, u8 top, u8 lineHeight, u8 itemCount, const struct MenuAction *menuActions)
 {
     u8 i;
+    AX_MenuCapture(menuActions, NULL);
     for (i = 0; i < itemCount; i++)
         AddTextPrinterParameterized(windowId, fontId, menuActions[i].text, left, (lineHeight * i) + top, TEXT_SKIP_DRAW, NULL);
     CopyWindowToVram(windowId, COPYWIN_GFX);
@@ -1135,6 +1176,7 @@ void PrintMenuActionTexts(u8 windowId, u8 fontId, u8 left, u8 top, u8 letterSpac
     printer.x = left;
     printer.currentX = left;
 
+    AX_MenuCapture(menuActions, actionIds);
     for (i = 0; i < itemCount; i++)
     {
         printer.currentChar = menuActions[actionIds[i]].text;
@@ -1200,6 +1242,9 @@ static void CreateYesNoMenuAtPos(const struct WindowTemplate *window, u8 fontId,
 
     AddTextPrinter(&printer, TEXT_SKIP_DRAW, NULL);
 
+    sAxPendYesNo = 1; // announce as Yes/No
+    sAxPendActions = NULL;
+    sAxPendIds = NULL;
     InitMenuNormal(sYesNoWindowId, fontId, left, top, GetFontAttribute(fontId, FONTATTR_MAX_LETTER_HEIGHT), 2, initialCursorPos);
 }
 
@@ -1574,6 +1619,7 @@ u8 InitMenuInUpperLeftCorner(u8 windowId, u8 itemCount, u8 initialCursorPos, boo
     else
         sMenu.cursorPos = pos;
 
+    AX_MenuPromote();
     return Menu_MoveCursor(0);
 }
 
@@ -1587,6 +1633,7 @@ void PrintMenuTable(u8 windowId, u8 itemCount, const struct MenuAction *menuActi
 {
     u32 i;
 
+    AX_MenuCapture(menuActions, NULL);
     for (i = 0; i < itemCount; i++)
         AddTextPrinterParameterized(windowId, 1, menuActions[i].text, 8, (i * 16) + 1, TEXT_SKIP_DRAW, NULL);
 
@@ -1609,6 +1656,7 @@ void PrintMenuActionTextsInUpperLeftCorner(u8 windowId, u8 itemCount, const stru
     printer.x = 8;
     printer.currentX = 8;
 
+    AX_MenuCapture(menuActions, actionIds);
     for (i = 0; i < itemCount; i++)
     {
         printer.currentChar = menuActions[actionIds[i]].text;
@@ -1642,6 +1690,9 @@ void CreateYesNoMenu(const struct WindowTemplate *window, u16 baseTileNum, u8 pa
     printer.lineSpacing = 0;
 
     AddTextPrinter(&printer, TEXT_SKIP_DRAW, NULL);
+    sAxPendYesNo = 1; // announce as Yes/No
+    sAxPendActions = NULL;
+    sAxPendIds = NULL;
     InitMenuInUpperLeftCornerNormal(sYesNoWindowId, 2, initialCursorPos);
 }
 

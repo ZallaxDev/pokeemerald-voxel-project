@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "menu.h"
 #include "list_menu.h"
 #include "window.h"
@@ -861,6 +862,8 @@ static bool8 ListMenuChangeSelection(struct ListMenu *list, bool8 updateCursorAn
 
 static void ListMenuCallSelectionChangedCallback(struct ListMenu *list, u8 onInit)
 {
+    // Speak the newly-highlighted list item (also announces the top item on open).
+    AX_SayGameString(list->template.items[list->scrollOffset + list->selectedRow].name, TRUE);
     if (list->template.moveCursorFunc != NULL)
         list->template.moveCursorFunc(list->template.items[list->scrollOffset + list->selectedRow].id, onInit, list);
 }

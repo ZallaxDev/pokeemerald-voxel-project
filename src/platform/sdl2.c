@@ -534,9 +534,16 @@ void Platform_QueueAudio(float *audioBuffer, s32 samplesPerFrame)
     {
         int floatCount = samplesPerFrame / sizeof(float);
         float adjustedAudio[floatCount];
-        float volume = sPlatformSettings[PLATFORM_SETTING_VOLUME] / 10.0f;
+        // The mixer leaves output headroom, so full volume sounds quiet. Apply a
+        // modest make-up gain and hard-clamp to [-1,1] so loud passages can't clip.
+        float volume = (sPlatformSettings[PLATFORM_SETTING_VOLUME] / 10.0f) * 2.0f;
         for (int i = 0; i < floatCount; i++)
-            adjustedAudio[i] = audioBuffer[i] * volume;
+        {
+            float s = audioBuffer[i] * volume;
+            if (s > 1.0f) s = 1.0f;
+            else if (s < -1.0f) s = -1.0f;
+            adjustedAudio[i] = s;
+        }
         if (SDL_QueueAudio(sdlAudioDevice, adjustedAudio, samplesPerFrame) < 0)
             SDL_Log("Failed to queue audio: %s", SDL_GetError());
     }

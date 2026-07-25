@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "crt0.h"
 #include "malloc.h"
 #include "link.h"
@@ -118,6 +119,10 @@ void AgbMain(void)
     ResetBgs();
     SetDefaultFontsPointer();
     InitHeap(gHeap, HEAP_SIZE);
+
+    Speech_Init(); // screen-reader backend (no-op if NVDA absent)
+    Speech_Say("Pokemon Emerald. Screen reader enabled.", 1);
+    Sfx_Init(); // footstep sound-effect engine
 
     gSoftResetDisabled = FALSE;
 

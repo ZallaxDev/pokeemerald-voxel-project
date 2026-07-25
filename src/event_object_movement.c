@@ -1,4 +1,6 @@
 #include "global.h"
+#include "accessibility.h"
+#include "constants/map_types.h"
 #include "malloc.h"
 #include "battle_pyramid.h"
 #include "berry.h"
@@ -4926,6 +4928,48 @@ u8 ObjectEventGetHeldMovementActionId(struct ObjectEvent *objectEvent)
     return MOVEMENT_ACTION_NONE;
 }
 
+// Play a footstep for the player when they move onto a new tile, choosing the
+// sound set from the tile's terrain (and indoor/outdoor for plain ground).
+static void AX_PlayerFootstep(struct ObjectEvent *objEvent)
+{
+    static u16 lastX = 0xFFFF, lastY = 0xFFFF;
+    u8 mb;
+    int mat;
+
+    if (objEvent != &gObjectEvents[gPlayerAvatar.objectEventId])
+        return;
+    if (objEvent->currentCoords.x == lastX && objEvent->currentCoords.y == lastY)
+        return;
+    lastX = objEvent->currentCoords.x;
+    lastY = objEvent->currentCoords.y;
+    mb = objEvent->currentMetatileBehavior;
+
+    if (MetatileBehavior_IsTallGrass(mb) || MetatileBehavior_IsLongGrass(mb) || MetatileBehavior_IsPokeGrass(mb))
+        mat = AX_MAT_GRASS;
+    else if (MetatileBehavior_IsShortGrass(mb))
+        mat = AX_MAT_SHORT_GRASS;
+    else if (MetatileBehavior_IsAshGrass(mb))
+        mat = AX_MAT_ASH;
+    else if (MetatileBehavior_IsDeepSand(mb) || MetatileBehavior_IsSandOrDeepSand(mb) || MetatileBehavior_IsFootprints(mb))
+        mat = AX_MAT_SAND;
+    else if (MetatileBehavior_IsPuddle(mb))
+        mat = AX_MAT_SHALLOW_WATER;
+    else if (MetatileBehavior_IsSurfableWaterOrUnderwater(mb) || MetatileBehavior_IsDeepOrOceanWater(mb))
+        mat = AX_MAT_DEEP_WATER;
+    else if (MetatileBehavior_IsIce(mb))
+        mat = AX_MAT_SNOW;
+    else if (MetatileBehavior_IsMountain(mb))
+        mat = AX_MAT_GRAVEL;
+    else if (IsMapTypeIndoors(gMapHeader.mapType))
+        mat = AX_MAT_WOOD;
+    else if (gMapHeader.mapType == MAP_TYPE_TOWN || gMapHeader.mapType == MAP_TYPE_CITY)
+        mat = AX_MAT_CONCRETE;
+    else
+        mat = AX_MAT_DIRT;
+
+    Sfx_PlayFootstep(mat);
+}
+
 void UpdateObjectEventCurrentMovement(struct ObjectEvent *objectEvent, struct Sprite *sprite, bool8 (*callback)(struct ObjectEvent *, struct Sprite *))
 {
     DoGroundEffects_OnSpawn(objectEvent, sprite);
@@ -4938,6 +4982,7 @@ void UpdateObjectEventCurrentMovement(struct ObjectEvent *objectEvent, struct Sp
 
     DoGroundEffects_OnBeginStep(objectEvent, sprite);
     DoGroundEffects_OnFinishStep(objectEvent, sprite);
+    AX_PlayerFootstep(objectEvent);
     UpdateObjectEventSpriteAnimPause(objectEvent, sprite);
     UpdateObjectEventVisibility(objectEvent, sprite);
     ObjectEventUpdateSubpriority(objectEvent, sprite);

@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "overworld.h"
 #include "battle_pyramid.h"
 #include "battle_setup.h"
@@ -1482,6 +1483,7 @@ static void OverworldBasic(void)
     UpdatePaletteFade();
     UpdateTilesetAnimations();
     DoScheduledBgTilemapCopiesToVram();
+    AX_OverworldScan(); // spatial door/NPC cues
 }
 
 // This CB2 is used when starting

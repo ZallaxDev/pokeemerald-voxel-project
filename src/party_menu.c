@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "malloc.h"
 #include "battle.h"
 #include "battle_anim.h"
@@ -1502,6 +1503,52 @@ static u16 PartyMenuButtonHandler(s8 *slotPtr)
     return JOY_NEW(A_BUTTON | B_BUTTON);
 }
 
+// Speak the highlighted party slot: "Pikachu, level 12, 34 of 34 HP",
+// or "Confirm"/"Cancel" for the two buttons.
+static void AX_SpeakPartySlot(s8 slot)
+{
+    char buf[96];
+    u8 nick[POKEMON_NAME_LENGTH + 1];
+    struct Pokemon *mon;
+    const char *lvltxt = ", level ";
+    const char *ofhp = " of ";
+    const char *hptxt = " HP";
+    int o;
+
+    if (slot == PARTY_SIZE)
+    {
+        Speech_Say("Confirm", 1);
+        return;
+    }
+    if (slot > PARTY_SIZE)
+    {
+        Speech_Say("Cancel", 1);
+        return;
+    }
+    mon = &gPlayerParty[slot];
+    if (GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NONE)
+        return;
+
+    GetMonNickname(mon, nick);
+    o = AX_DecodeString(nick, buf, sizeof(buf));
+    while (*lvltxt != '\0' && o < (int)sizeof(buf) - 1)
+        buf[o++] = *lvltxt++;
+    o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_LEVEL));
+    if (o < (int)sizeof(buf) - 2)
+    {
+        buf[o++] = ',';
+        buf[o++] = ' ';
+    }
+    o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_HP));
+    while (*ofhp != '\0' && o < (int)sizeof(buf) - 1)
+        buf[o++] = *ofhp++;
+    o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_MAX_HP));
+    while (*hptxt != '\0' && o < (int)sizeof(buf) - 1)
+        buf[o++] = *hptxt++;
+    buf[o] = '\0';
+    Speech_Say(buf, 1);
+}
+
 static void UpdateCurrentPartySelection(s8 *slotPtr, s8 movementDir)
 {
     s8 newSlotId = *slotPtr;
@@ -1517,6 +1564,7 @@ static void UpdateCurrentPartySelection(s8 *slotPtr, s8 movementDir)
         PlaySE(SE_SELECT);
         AnimatePartySlot(newSlotId, 0);
         AnimatePartySlot(*slotPtr, 1);
+        AX_SpeakPartySlot(*slotPtr);
     }
 }
 

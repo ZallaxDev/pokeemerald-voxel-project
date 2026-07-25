@@ -79,6 +79,10 @@ OBJ_DIR := build/pc
 endif
 
 CPPFLAGS := -std=gnu99 -iquote include -iquote $(GFLIB_SUBDIR) -Wno-trigraphs -D NONMATCHING -D PORTABLE -D $(TARGET_PLATFORM) -D $(TILE_RENDERER) -D MODERN=$(MODERN) -D UBFIX
+# msys2 gcc defaults SSE2 on, so SDL2 headers pull in the x86 intrinsics headers,
+# which clash with the game's -fno-builtin. Stop SDL including them (we only use
+# the normal SDL API, never the SIMD intrinsics).
+CPPFLAGS += -DSDL_DISABLE_IMMINTRIN_H -DSDL_DISABLE_MMINTRIN_H -DSDL_DISABLE_XMMINTRIN_H -DSDL_DISABLE_EMMINTRIN_H -DSDL_DISABLE_PMMINTRIN_H
 ifeq ($(NATIVE_LINUX),1)
 CPPFLAGS += -m32 -D NATIVE_LINUX $(shell pkg-config --cflags sdl2 SDL2_image)
 else
@@ -98,7 +102,7 @@ ifneq ($(NO_STD_LIB),1)
 endif
 
 ifeq ($(TARGET_PLATFORM), PLATFORM_SDL2)
-	PLATFORM_INCLUDES += -lSDL2main -lSDL2.dll
+	PLATFORM_INCLUDES += -lSDL2main -lSDL2.dll -lSDL2_mixer
 endif
 	
 ifeq ($(TARGET_PLATFORM), PLATFORM_WIN32)
@@ -277,7 +281,7 @@ $(C_BUILDDIR)/%.o : $(C_SUBDIR)/%.c $$(c_dep)
 ifeq ($(NATIVE_LINUX),1)
 	@$(PREPROC) $(C_BUILDDIR)/$*.i charmap.txt | $(CC) $(CFLAGS) -S -x cpp-output -o $(C_BUILDDIR)/$*.s -
 else
-	@$(PREPROC) $(C_BUILDDIR)/$*.i charmap.txt | $(CC1) $(CFLAGS) -o $(C_BUILDDIR)/$*.s
+	@$(PREPROC) $(C_BUILDDIR)/$*.i charmap.txt | $(CC) $(CFLAGS) -S -x cpp-output -o $(C_BUILDDIR)/$*.s -
 endif
 	@echo -e ".text\n\t.align\t2, 0\n" >> $(C_BUILDDIR)/$*.s
 	$(AS) $(ASFLAGS) -o $@ $(C_BUILDDIR)/$*.s
@@ -293,7 +297,7 @@ $(GFLIB_BUILDDIR)/%.o : $(GFLIB_SUBDIR)/%.c $$(c_dep)
 ifeq ($(NATIVE_LINUX),1)
 	@$(PREPROC) $(GFLIB_BUILDDIR)/$*.i charmap.txt | $(CC) $(CFLAGS) -S -x cpp-output -o $(GFLIB_BUILDDIR)/$*.s -
 else
-	@$(PREPROC) $(GFLIB_BUILDDIR)/$*.i charmap.txt | $(CC1) $(CFLAGS) -o $(GFLIB_BUILDDIR)/$*.s
+	@$(PREPROC) $(GFLIB_BUILDDIR)/$*.i charmap.txt | $(CC) $(CFLAGS) -S -x cpp-output -o $(GFLIB_BUILDDIR)/$*.s -
 endif
 	@echo -e ".text\n\t.align\t2, 0\n" >> $(GFLIB_BUILDDIR)/$*.s
 	$(AS) $(ASFLAGS) -o $@ $(GFLIB_BUILDDIR)/$*.s
@@ -366,5 +370,8 @@ $(ROM): $(OBJS) $(WINDOWS_BORDER)
 ifeq ($(NATIVE_LINUX),1)
 	$(CC) $(CFLAGS) -no-pie -Wl,--demangle $(OBJS) $(PLATFORM_INCLUDES) -o $@
 else
-	$(CC) $(CFLAGS) -Wl,--demangle $(OBJS) -static-libgcc -L$(SDL_DIR)/lib $(PLATFORM_INCLUDES) -lwinmm -lxinput -o $@
+	# Windows caps the command line near 32 KB; the full object list overflows it.
+	# Write the objects to a linker response file and pass it with @file instead.
+	$(file >$(OBJ_DIR)/objs.rsp,$(OBJS))
+	$(CC) $(CFLAGS) -Wl,--demangle @$(OBJ_DIR)/objs.rsp -static-libgcc -L$(SDL_DIR)/lib $(PLATFORM_INCLUDES) -lwinmm -lxinput -o $@
 endif

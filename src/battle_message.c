@@ -1,4 +1,5 @@
 #include "global.h"
+#include "accessibility.h"
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_controllers.h"
@@ -2251,6 +2252,7 @@ void BufferStringBattle(u16 stringID)
 u32 BattleStringExpandPlaceholdersToDisplayedString(const u8 *src)
 {
     BattleStringExpandPlaceholders(src, gDisplayedStringBattle);
+    AX_SayGameString(gDisplayedStringBattle, 1); // speak battle message / prompt
 }
 
 static const u8 *TryGetStatusString(u8 *src)
