@@ -12,9 +12,10 @@ game is playable by a blind player entirely by ear.
 - Upstream: https://github.com/gradenGnostic/pokeemerald-multiplatform
 - This fork: https://github.com/KamiKitsune420/pokeemerald-multiplatform
 
-## Maintainer
+## Maintainer & contributors
 
-**Kalahami** — maintains this accessible fork.
+- **KamiKitsune420** — maintainer of this accessible fork.
+- **Kalahami** — contributor.
 
 ## Building (Windows, msys2)
 
