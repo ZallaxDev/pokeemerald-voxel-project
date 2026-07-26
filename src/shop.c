@@ -38,6 +38,7 @@
 #include "constants/metatile_behaviors.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
+#include "accessibility.h"
 
 #define TAG_SCROLL_ARROW   2100
 #define TAG_ITEM_ICON_BASE 2110
@@ -613,6 +614,34 @@ static void BuyMenuPrintItemDescriptionAndShowItemIcon(s32 item, bool8 onInit, s
         description = gText_QuitShopping;
     }
 
+    // Speak name and price as one phrase, replacing the bare name the list menu
+    // just said. The price column is drawn as a money graphic, and a lone
+    // number ("Energy Powder 500") doesn't say what the 500 is.
+    if (item != LIST_CANCEL)
+    {
+        u8 nameGame[ITEM_NAME_LENGTH + 1];
+        char buf[64];
+        u32 price = (sMartInfo.martType == MART_TYPE_NORMAL)
+                  ? (GetItemPrice(item) >> IsPokeNewsActive(POKENEWS_SLATEPORT))
+                  : gDecorations[item].price;
+        int o = 0;
+
+        if (sMartInfo.martType == MART_TYPE_NORMAL)
+        {
+            CopyItemName(item, nameGame);
+            o = AX_AppendGameStr(buf, o, sizeof(buf), nameGame);
+        }
+        else
+        {
+            o = AX_AppendGameStr(buf, o, sizeof(buf), gDecorations[item].name);
+        }
+        o = AX_AppendStr(buf, o, sizeof(buf), ", ");
+        o = AX_AppendUint(buf, o, sizeof(buf), price);
+        o = AX_AppendStr(buf, o, sizeof(buf), AX_MONEY_UNIT);
+        buf[o] = '\0';
+        AX_Say(buf, 1);
+    }
+
     FillWindowPixelBuffer(WIN_ITEM_DESCRIPTION, PIXEL_FILL(0));
     BuyMenuPrint(WIN_ITEM_DESCRIPTION, description, 3, 1, 0, COLORID_NORMAL);
 }
@@ -1182,12 +1211,23 @@ static void BuyMenuReturnToItemList(u8 taskId)
 static void BuyMenuPrintItemQuantityAndPrice(u8 taskId)
 {
     s16 *data = gTasks[taskId].data;
+    char buf[64];
+    int o = 0;
 
     FillWindowPixelBuffer(WIN_QUANTITY_PRICE, PIXEL_FILL(1));
     PrintMoneyAmount(WIN_QUANTITY_PRICE, 38, 1, sShopData->totalCost, TEXT_SKIP_DRAW);
     ConvertIntToDecimalStringN(gStringVar1, tItemCount, STR_CONV_MODE_LEADING_ZEROS, BAG_ITEM_CAPACITY_DIGITS);
     StringExpandPlaceholders(gStringVar4, gText_xVar1);
     BuyMenuPrint(WIN_QUANTITY_PRICE, gStringVar4, 0, 1, 0, COLORID_NORMAL);
+
+    // The quantity and running total are drawn as a money graphic, so read them
+    // out on every change of the count.
+    o = AX_AppendInt(buf, o, sizeof(buf), tItemCount);
+    o = AX_AppendStr(buf, o, sizeof(buf), ", total ");
+    o = AX_AppendUint(buf, o, sizeof(buf), sShopData->totalCost);
+    o = AX_AppendStr(buf, o, sizeof(buf), AX_MONEY_UNIT);
+    buf[o] = '\0';
+    AX_Say(buf, 1);
 }
 
 static void ExitBuyMenu(u8 taskId)

@@ -7,6 +7,7 @@
 #include "pokemon.h"
 #include "constants/songs.h"
 #include "task.h"
+#include "accessibility.h"
 
 struct Fanfare
 {
@@ -454,6 +455,14 @@ void PlayCryInternal(u16 species, s8 pan, s8 volume, u8 priority, u8 mode)
         break;
     }
 
+    // If the player has installed a high-quality cry for this species, play it
+    // and silence the GBA cry. The GBA one still runs (at volume 0) so that cry
+    // priority, IsCryPlaying() timing and BGM ducking behave exactly as before.
+    // This has to sit *after* the mode switch above: several modes reassign
+    // `volume`, which would otherwise un-mute the GBA cry and play both at once.
+    if (Sfx_PlayCry(species + 1, pan, (volume * 100) / CRY_VOLUME))
+        volume = 0;
+
     SetPokemonCryVolume(volume);
     SetPokemonCryPanpot(pan);
     SetPokemonCryPitch(pitch);
@@ -508,6 +517,7 @@ bool8 IsCryFinished(void)
 
 void StopCryAndClearCrySongs(void)
 {
+    Sfx_StopCry();
     if (!gMPlay_PokemonCry)
         return;
     m4aMPlayStop(gMPlay_PokemonCry);

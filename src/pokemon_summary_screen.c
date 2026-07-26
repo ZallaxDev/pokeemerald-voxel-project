@@ -46,6 +46,7 @@
 #include "constants/region_map_sections.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
+#include "accessibility.h"
 
 enum {
     PSS_PAGE_INFO,
@@ -311,6 +312,7 @@ static void DestroyMoveSelectorSprites(u8);
 static void SetMainMoveSelectorColor(u8);
 static void KeepMoveSelectorVisible(u8);
 static void SummaryScreen_DestroyAnimDelayTask(void);
+static void AX_SpeakSummaryPage(int interrupt);
 
 // const rom data
 #include "data/text/move_descriptions.h"
@@ -1260,6 +1262,7 @@ static bool8 LoadGraphics(void)
             CreateTask(Task_HandleInput, 0);
         else
             CreateTask(Task_SetHandleReplaceMoveInput, 0);
+        AX_SpeakSummaryPage(1);
         gMain.state++;
         break;
     case 23:
@@ -1666,6 +1669,7 @@ static void Task_ChangeSummaryMon(u8 taskId)
         if (!MenuHelpers_ShouldWaitForLinkRecv() && !FuncIsActiveTask(Task_ShowStatusWindow))
         {
             data[0] = 0;
+            AX_SpeakSummaryPage(1); // now showing a different Pokemon
             gTasks[taskId].func = Task_HandleInput;
         }
         return;
@@ -1753,6 +1757,7 @@ static void ChangePage(u8 taskId, s8 delta)
     PlaySE(SE_SELECT);
     ClearPageWindowTilemaps(sMonSummaryScreen->currPageIndex);
     sMonSummaryScreen->currPageIndex += delta;
+    AX_SpeakSummaryPage(1);
     data[0] = 0;
     if (delta == 1)
         SetTaskFuncWithFollowupFunc(taskId, PssScrollRight, gTasks[taskId].func);
@@ -3630,9 +3635,170 @@ static void PrintContestMoveDescription(u8 moveSlot)
     }
 }
 
+// --- Screen reader ---------------------------------------------------------
+// The summary screen paints stats and move data straight into tile windows, so
+// none of it reaches the reader. Speak each page as it's scrolled to, and the
+// selected move whenever it changes.
+
+static const char *const sAxPageNames[PSS_PAGE_COUNT] = {
+    [PSS_PAGE_INFO]          = "Info",
+    [PSS_PAGE_SKILLS]        = "Skills",
+    [PSS_PAGE_BATTLE_MOVES]  = "Battle moves",
+    [PSS_PAGE_CONTEST_MOVES] = "Contest moves",
+};
+
+// Append "<label> <value>" as one comma-separated clause.
+static int AX_AppendStat(char *buf, int o, int size, const char *label, u32 value)
+{
+    o = AX_AppendSep(buf, o, size);
+    o = AX_AppendStr(buf, o, size, label);
+    o = AX_AppendStr(buf, o, size, " ");
+    return AX_AppendUint(buf, o, size, value);
+}
+
+static void AX_SpeakSummaryPage(int interrupt)
+{
+    struct PokeSummary *sum;
+    char buf[256];
+    int o = 0;
+
+    if (sMonSummaryScreen == NULL)
+        return;
+    sum = &sMonSummaryScreen->summary;
+
+    o = AX_AppendStr(buf, o, sizeof(buf), sAxPageNames[sMonSummaryScreen->currPageIndex]);
+    o = AX_AppendStr(buf, o, sizeof(buf), ". ");
+
+    if (sum->isEgg)
+    {
+        o = AX_AppendStr(buf, o, sizeof(buf), "Egg");
+        buf[o] = '\0';
+        AX_Say(buf, interrupt);
+        return;
+    }
+
+    {
+        u8 nick[POKEMON_NAME_LENGTH + 1];
+        GetMonData(&sMonSummaryScreen->currentMon, MON_DATA_NICKNAME, nick);
+        o = AX_AppendGameStr(buf, o, sizeof(buf), nick);
+        o = AX_AppendStr(buf, o, sizeof(buf), ", level ");
+        o = AX_AppendUint(buf, o, sizeof(buf), sum->level);
+    }
+
+    switch (sMonSummaryScreen->currPageIndex)
+    {
+    case PSS_PAGE_INFO:
+        o = AX_AppendSep(buf, o, sizeof(buf));
+        o = AX_AppendGameStr(buf, o, sizeof(buf), gSpeciesNames[sum->species2]);
+        o = AX_AppendStr(buf, o, sizeof(buf), ", number ");
+        o = AX_AppendUint(buf, o, sizeof(buf), SpeciesToPokedexNum(sum->species2));
+        if (sum->item != ITEM_NONE)
+        {
+            u8 itemName[ITEM_NAME_LENGTH + 1];
+            CopyItemName(sum->item, itemName);
+            o = AX_AppendStr(buf, o, sizeof(buf), ", holding ");
+            o = AX_AppendGameStr(buf, o, sizeof(buf), itemName);
+        }
+        o = AX_AppendStr(buf, o, sizeof(buf), ", original trainer ");
+        o = AX_AppendGameStr(buf, o, sizeof(buf), sum->OTName);
+        o = AX_AppendStr(buf, o, sizeof(buf), ", I D ");
+        o = AX_AppendUint(buf, o, sizeof(buf), (u16)sum->OTID);
+        break;
+
+    case PSS_PAGE_SKILLS:
+        o = AX_AppendSep(buf, o, sizeof(buf));
+        o = AX_AppendStr(buf, o, sizeof(buf), "HP ");
+        o = AX_AppendUint(buf, o, sizeof(buf), sum->currentHP);
+        o = AX_AppendStr(buf, o, sizeof(buf), " of ");
+        o = AX_AppendUint(buf, o, sizeof(buf), sum->maxHP);
+        o = AX_AppendStat(buf, o, sizeof(buf), "Attack", sum->atk);
+        o = AX_AppendStat(buf, o, sizeof(buf), "Defense", sum->def);
+        o = AX_AppendStat(buf, o, sizeof(buf), "Special Attack", sum->spatk);
+        o = AX_AppendStat(buf, o, sizeof(buf), "Special Defense", sum->spdef);
+        o = AX_AppendStat(buf, o, sizeof(buf), "Speed", sum->speed);
+        o = AX_AppendSep(buf, o, sizeof(buf));
+        o = AX_AppendStr(buf, o, sizeof(buf), "Ability ");
+        o = AX_AppendGameStr(buf, o, sizeof(buf), gAbilityNames[GetAbilityBySpecies(sum->species, sum->abilityNum)]);
+        break;
+
+    case PSS_PAGE_BATTLE_MOVES:
+    case PSS_PAGE_CONTEST_MOVES:
+    {
+        u8 i;
+        for (i = 0; i < MAX_MON_MOVES; i++)
+        {
+            if (sum->moves[i] == MOVE_NONE)
+                continue;
+            o = AX_AppendSep(buf, o, sizeof(buf));
+            o = AX_AppendGameStr(buf, o, sizeof(buf), gMoveNames[sum->moves[i]]);
+        }
+        break;
+    }
+    }
+
+    buf[o] = '\0';
+    AX_Say(buf, interrupt);
+}
+
+// Speak the move the cursor is on, with the numbers that are drawn as tiles.
+static void AX_SpeakMoveDetails(u16 move)
+{
+    struct PokeSummary *sum;
+    char buf[160];
+    int o = 0;
+    u8 i;
+
+    if (sMonSummaryScreen == NULL)
+        return;
+
+    if (move == MOVE_NONE)
+    {
+        AX_Say("Cancel", 1);
+        return;
+    }
+
+    sum = &sMonSummaryScreen->summary;
+    o = AX_AppendGameStr(buf, o, sizeof(buf), gMoveNames[move]);
+    o = AX_AppendStr(buf, o, sizeof(buf), ", ");
+    o = AX_AppendGameStr(buf, o, sizeof(buf), gTypeNames[gBattleMoves[move].type]);
+    o = AX_AppendStr(buf, o, sizeof(buf), " type");
+
+    if (sMonSummaryScreen->currPageIndex == PSS_PAGE_BATTLE_MOVES)
+    {
+        o = AX_AppendStr(buf, o, sizeof(buf), ", power ");
+        if (gBattleMoves[move].power < 2)
+            o = AX_AppendStr(buf, o, sizeof(buf), "none");
+        else
+            o = AX_AppendUint(buf, o, sizeof(buf), gBattleMoves[move].power);
+
+        o = AX_AppendStr(buf, o, sizeof(buf), ", accuracy ");
+        if (gBattleMoves[move].accuracy == 0)
+            o = AX_AppendStr(buf, o, sizeof(buf), "never misses");
+        else
+            o = AX_AppendUint(buf, o, sizeof(buf), gBattleMoves[move].accuracy);
+    }
+
+    // PP isn't passed in, so match the move back to its slot to read its PP.
+    for (i = 0; i < MAX_MON_MOVES; i++)
+    {
+        if (sum->moves[i] != move)
+            continue;
+        o = AX_AppendStr(buf, o, sizeof(buf), ", PP ");
+        o = AX_AppendUint(buf, o, sizeof(buf), sum->pp[i]);
+        o = AX_AppendStr(buf, o, sizeof(buf), " of ");
+        o = AX_AppendUint(buf, o, sizeof(buf),
+                          CalculatePPWithBonus(move, sum->ppBonuses, i));
+        break;
+    }
+
+    buf[o] = '\0';
+    AX_Say(buf, 1);
+}
+
 static void PrintMoveDetails(u16 move)
 {
     u8 windowId = AddWindowFromTemplateList(sPageMovesTemplate, PSS_DATA_WINDOW_MOVE_DESCRIPTION);
+    AX_SpeakMoveDetails(move);
     FillWindowPixelBuffer(windowId, PIXEL_FILL(0));
     if (move != MOVE_NONE)
     {

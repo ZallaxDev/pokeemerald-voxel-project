@@ -5,6 +5,7 @@
 #include "palette.h"
 #include "sound.h"
 #include "constants/songs.h"
+#include "accessibility.h"
 #include "string_util.h"
 #include "window.h"
 #include "text.h"
@@ -1171,6 +1172,9 @@ static u16 RenderText(struct TextPrinter *textPrinter)
     case RENDER_STATE_CLEAR:
         if (TextPrinterWaitWithDownArrow(textPrinter))
         {
+            // The player pressed A: currentChar now points at the next page,
+            // which nothing else will announce.
+            AX_SayGameString(textPrinter->printerTemplate.currentChar, 1);
             FillWindowPixelBuffer(textPrinter->printerTemplate.windowId, PIXEL_FILL(textPrinter->printerTemplate.bgColor));
             textPrinter->printerTemplate.currentX = textPrinter->printerTemplate.x;
             textPrinter->printerTemplate.currentY = textPrinter->printerTemplate.y;
@@ -1180,6 +1184,7 @@ static u16 RenderText(struct TextPrinter *textPrinter)
     case RENDER_STATE_SCROLL_START:
         if (TextPrinterWaitWithDownArrow(textPrinter))
         {
+            AX_SayGameString(textPrinter->printerTemplate.currentChar, 1);
             TextPrinterClearDownArrow(textPrinter);
             textPrinter->scrollDistance = gFonts[textPrinter->printerTemplate.fontId].maxLetterHeight + textPrinter->printerTemplate.lineSpacing;
             textPrinter->printerTemplate.currentX = textPrinter->printerTemplate.x;

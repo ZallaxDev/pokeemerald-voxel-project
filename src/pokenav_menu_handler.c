@@ -4,6 +4,7 @@
 #include "main.h"
 #include "sound.h"
 #include "constants/songs.h"
+#include "accessibility.h"
 
 struct Pokenav_Menu
 {
@@ -461,6 +462,36 @@ static void ReturnToConditionMenu(struct Pokenav_Menu *menu)
     menu->callback = HandleConditionMenuInput;
 }
 
+// The Pokenav menu is drawn as sprites with no text printer behind it, so name
+// each entry for the reader. Indexed by POKENAV_MENUITEM_*.
+static const char *const sAxPokenavItems[] = {
+    [POKENAV_MENUITEM_MAP]                      = "Hoenn map",
+    [POKENAV_MENUITEM_CONDITION]                = "Condition",
+    [POKENAV_MENUITEM_MATCH_CALL]               = "Match Call",
+    [POKENAV_MENUITEM_RIBBONS]                  = "Ribbons",
+    [POKENAV_MENUITEM_SWITCH_OFF]               = "Switch off",
+    [POKENAV_MENUITEM_CONDITION_PARTY]          = "Party",
+    [POKENAV_MENUITEM_CONDITION_SEARCH]         = "Search",
+    [POKENAV_MENUITEM_CONDITION_CANCEL]         = "Cancel",
+    [POKENAV_MENUITEM_CONDITION_SEARCH_COOL]    = "Cool",
+    [POKENAV_MENUITEM_CONDITION_SEARCH_BEAUTY]  = "Beauty",
+    [POKENAV_MENUITEM_CONDITION_SEARCH_CUTE]    = "Cute",
+    [POKENAV_MENUITEM_CONDITION_SEARCH_SMART]   = "Smart",
+    [POKENAV_MENUITEM_CONDITION_SEARCH_TOUGH]   = "Tough",
+    [POKENAV_MENUITEM_CONDITION_SEARCH_CANCEL]  = "Cancel",
+};
+
+static void AX_SpeakPokenavItem(struct Pokenav_Menu *menu)
+{
+    u32 item;
+
+    if (menu == NULL)
+        return;
+    item = sMenuItems[menu->menuType][menu->cursorPos];
+    if (item < ARRAY_COUNT(sAxPokenavItems) && sAxPokenavItems[item] != NULL)
+        AX_Say(sAxPokenavItems[item], 1);
+}
+
 static bool32 UpdateMenuCursorPos(struct Pokenav_Menu *menu)
 {
     if (JOY_NEW(DPAD_UP))
@@ -469,6 +500,7 @@ static bool32 UpdateMenuCursorPos(struct Pokenav_Menu *menu)
             menu->cursorPos = sLastCursorPositions[menu->menuType];
 
         menu->currMenuItem = sMenuItems[menu->menuType][menu->cursorPos];
+        AX_SpeakPokenavItem(menu);
         return TRUE;
     }
     else if (JOY_NEW(DPAD_DOWN))
@@ -478,6 +510,7 @@ static bool32 UpdateMenuCursorPos(struct Pokenav_Menu *menu)
             menu->cursorPos = 0;
 
         menu->currMenuItem = sMenuItems[menu->menuType][menu->cursorPos];
+        AX_SpeakPokenavItem(menu);
         return TRUE;
     }
     else

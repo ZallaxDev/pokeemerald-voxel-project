@@ -41,6 +41,7 @@
 #include "constants/rgb.h"
 #include "constants/songs.h"
 #include "constants/pokemon_icon.h"
+#include "accessibility.h"
 
 /*
     NOTE: This file is large. Some general groups of functions have
@@ -764,6 +765,7 @@ static bool8 UpdateCursorPos(void);
 static void DoCursorNewPosUpdate(void);
 static void SetCursorInParty(void);
 static void SetCursorBoxPosition(u8);
+static void AX_SpeakStorageCursor(int interrupt);
 static void ClearSavedCursorPos(void);
 static void SaveCursorPos(void);
 static u8 GetSavedCursorPos(void);
@@ -2465,6 +2467,8 @@ static void Task_PokeStorageMain(u8 taskId)
                 RefreshDisplayMon();
                 StartDisplayMonMosaicEffect();
             }
+            AX_SayGameString(GetBoxNamePtr(StorageGetCurrentBox()), 1);
+            AX_SpeakStorageCursor(0); // now describes the slot in the new box
 
             if (sStorage->boxOption == OPTION_MOVE_ITEMS)
             {
@@ -6068,6 +6072,76 @@ static void SetCursorPosition(u8 newCursorArea, u8 newCursorPosition)
     }
 }
 
+// Speak whatever the storage cursor has landed on. Nothing in the PC goes
+// through a text printer or list menu — the boxes are sprite grids — so this is
+// the only place the reader can learn where the cursor is.
+static void AX_SpeakStorageCursor(int interrupt)
+{
+    char buf[144];
+    int o = 0;
+
+    if (sStorage == NULL)
+        return;
+
+    switch (sCursorArea)
+    {
+    case CURSOR_AREA_BOX_TITLE:
+        if (sStorage->boxOption == OPTION_MOVE_ITEMS)
+        {
+            // Same area id doubles as the "in hand" slot when moving items.
+            o = AX_AppendStr(buf, o, sizeof(buf), "In hand");
+            break;
+        }
+        o = AX_AppendStr(buf, o, sizeof(buf), "Box name, ");
+        o = AX_AppendGameStr(buf, o, sizeof(buf), GetBoxNamePtr(StorageGetCurrentBox()));
+        break;
+
+    case CURSOR_AREA_BUTTONS:
+        o = AX_AppendStr(buf, o, sizeof(buf), sCursorPosition == 0 ? "Party Pokemon" : "Close Box");
+        break;
+
+    case CURSOR_AREA_IN_BOX:
+    case CURSOR_AREA_IN_PARTY:
+        if (sStorage->displayMonSpecies == SPECIES_NONE)
+            o = AX_AppendStr(buf, o, sizeof(buf), "Empty");
+        else if (sStorage->displayMonIsEgg)
+            o = AX_AppendStr(buf, o, sizeof(buf), "Egg");
+        else
+        {
+            o = AX_AppendGameStr(buf, o, sizeof(buf), sStorage->displayMonName);
+            o = AX_AppendStr(buf, o, sizeof(buf), ", level ");
+            o = AX_AppendUint(buf, o, sizeof(buf), sStorage->displayMonLevel);
+            if (sStorage->displayMonItemId != ITEM_NONE)
+            {
+                o = AX_AppendStr(buf, o, sizeof(buf), ", holding ");
+                o = AX_AppendGameStr(buf, o, sizeof(buf), sStorage->displayMonItemName);
+            }
+        }
+
+        // Always follow with the grid position, so the box can be navigated
+        // even when most of it is empty.
+        if (sCursorArea == CURSOR_AREA_IN_BOX)
+        {
+            o = AX_AppendStr(buf, o, sizeof(buf), ", row ");
+            o = AX_AppendUint(buf, o, sizeof(buf), (sCursorPosition / IN_BOX_COLUMNS) + 1);
+            o = AX_AppendStr(buf, o, sizeof(buf), ", column ");
+            o = AX_AppendUint(buf, o, sizeof(buf), (sCursorPosition % IN_BOX_COLUMNS) + 1);
+        }
+        else
+        {
+            o = AX_AppendStr(buf, o, sizeof(buf), ", party slot ");
+            o = AX_AppendUint(buf, o, sizeof(buf), sCursorPosition + 1);
+        }
+        break;
+
+    default:
+        return;
+    }
+
+    buf[o] = '\0';
+    AX_Say(buf, 1);
+}
+
 static void DoCursorNewPosUpdate(void)
 {
     sCursorArea = sStorage->newCursorArea;
@@ -6084,6 +6158,7 @@ static void DoCursorNewPosUpdate(void)
     }
 
     TryRefreshDisplayMon();
+    AX_SpeakStorageCursor(1);
     switch (sCursorArea)
     {
     case CURSOR_AREA_BUTTONS:

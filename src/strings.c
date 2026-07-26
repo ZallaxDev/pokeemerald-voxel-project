@@ -1504,6 +1504,7 @@ const u8 gText_IntegerScale[] = _("INTEGER SCALE");
 const u8 gText_VSync[] = _("VSYNC");
 const u8 gText_BorderFrame[] = _("BORDER FRAME");
 const u8 gText_Volume[] = _("VOLUME");
+const u8 gText_CryVolume[] = _("CRY VOLUME");
 const u8 gText_Back[] = _("BACK");
 const u8 gText_NumPlayerLink[] = _("{STR_VAR_1}P LINK");
 const u8 gText_BronzeCard[] = _("BRONZE");

@@ -26,6 +26,7 @@
 #include "constants/heal_locations.h"
 #include "constants/map_types.h"
 #include "constants/rgb.h"
+#include "accessibility.h"
 #include "constants/weather.h"
 
 /*
@@ -640,6 +641,30 @@ void FreeRegionMapIconResources(void)
     }
 }
 
+// --- Screen reader ---------------------------------------------------------
+// The region map is a tile grid: only the map-section name box is text, and it
+// is redrawn by the caller rather than printed. Announce the section under the
+// cursor whenever it changes, with whether it is a Fly destination.
+static void AX_SpeakRegionMapSec(void)
+{
+    char buf[64];
+    int o = 0;
+
+    if (sRegionMap == NULL)
+        return;
+
+    o = AX_AppendGameStr(buf, o, sizeof(buf), sRegionMap->mapSecName);
+    if (o == 0)
+    {
+        AX_Say("Open sea", 1);
+        return;
+    }
+    if (sRegionMap->mapSecType == MAPSECTYPE_CITY_CANFLY)
+        o = AX_AppendStr(buf, o, sizeof(buf), ", can fly here");
+    buf[o] = '\0';
+    AX_Say(buf, 1);
+}
+
 u8 DoRegionMapInputCallback(void)
 {
     return sRegionMap->inputCallback();
@@ -719,6 +744,7 @@ static u8 MoveRegionMapCursor_Full(void)
         sRegionMap->mapSecId = mapSecId;
         GetMapName(sRegionMap->mapSecName, sRegionMap->mapSecId, MAP_NAME_LENGTH);
     }
+    AX_SpeakRegionMapSec();
     GetPositionOfCursorWithinMapSec();
     sRegionMap->inputCallback = ProcessRegionMapInput_Full;
     return MAP_INPUT_MOVE_END;
@@ -792,6 +818,7 @@ static u8 MoveRegionMapCursor_Zoomed(void)
                 sRegionMap->mapSecId = mapSecId;
                 GetMapName(sRegionMap->mapSecName, sRegionMap->mapSecId, MAP_NAME_LENGTH);
             }
+            AX_SpeakRegionMapSec();
             GetPositionOfCursorWithinMapSec();
         }
         sRegionMap->zoomedCursorMovementFrameCounter = 0;

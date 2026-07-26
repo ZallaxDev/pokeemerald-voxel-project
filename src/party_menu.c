@@ -1,5 +1,6 @@
 #include "global.h"
 #include "accessibility.h"
+#include "platform.h"
 #include "malloc.h"
 #include "battle.h"
 #include "battle_anim.h"
@@ -339,6 +340,7 @@ static u8 GetPartyMenuActionsTypeInBattle(struct Pokemon *);
 static u8 GetPartySlotEntryStatus(s8);
 static void Task_UpdateHeldItemSprite(u8);
 static void Task_HandleSelectionMenuInput(u8);
+static void AX_HandlePartyReaderKeys(void);
 static void CB2_ShowPokemonSummaryScreen(void);
 static void UpdatePartyToBattleOrder(void);
 static void CB2_ReturnToPartyMenuFromSummaryScreen(void);
@@ -492,6 +494,9 @@ static void InitPartyMenu(u8 menuType, u8 layout, u8 partyAction, bool8 keepCurs
     u16 i;
 
     ResetPartyMenu();
+    // Reader hotkeys latch globally, so drop any pressed outside this menu
+    // rather than firing them all the moment it opens.
+    Platform_GetReaderKeys();
     sPartyMenuInternal = Alloc(sizeof(struct PartyMenuInternal));
     if (sPartyMenuInternal == NULL)
     {
@@ -1263,6 +1268,8 @@ void Task_HandleChooseMonInput(u8 taskId)
     {
         s8 *slotPtr = GetCurrentPartySlotPtr();
 
+        AX_HandlePartyReaderKeys();
+
         switch (PartyMenuButtonHandler(slotPtr))
         {
         case A_BUTTON: // Selected mon
@@ -1505,15 +1512,13 @@ static u16 PartyMenuButtonHandler(s8 *slotPtr)
 
 // Speak the highlighted party slot: "Pikachu, level 12, 34 of 34 HP",
 // or "Confirm"/"Cancel" for the two buttons.
+// Moving between party slots says the nickname and nothing else — hearing the
+// full stat line on every keypress makes the list slow to walk. The details are
+// on demand instead, via the READER_KEY_* hotkeys handled below.
 static void AX_SpeakPartySlot(s8 slot)
 {
-    char buf[96];
     u8 nick[POKEMON_NAME_LENGTH + 1];
     struct Pokemon *mon;
-    const char *lvltxt = ", level ";
-    const char *ofhp = " of ";
-    const char *hptxt = " HP";
-    int o;
 
     if (slot == PARTY_SIZE)
     {
@@ -1530,23 +1535,122 @@ static void AX_SpeakPartySlot(s8 slot)
         return;
 
     GetMonNickname(mon, nick);
-    o = AX_DecodeString(nick, buf, sizeof(buf));
-    while (*lvltxt != '\0' && o < (int)sizeof(buf) - 1)
-        buf[o++] = *lvltxt++;
-    o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_LEVEL));
-    if (o < (int)sizeof(buf) - 2)
+    AX_SayGameString(nick, 1);
+}
+
+// Append the mon's status ailment, or "OK" when it has none.
+static int AX_AppendMonStatus(char *buf, int o, int size, struct Pokemon *mon)
+{
+    u32 status = GetMonData(mon, MON_DATA_STATUS);
+
+    if (GetMonData(mon, MON_DATA_HP) == 0)
+        return AX_AppendStr(buf, o, size, "fainted");
+    if (status & STATUS1_SLEEP)
+        return AX_AppendStr(buf, o, size, "asleep");
+    if (status & STATUS1_POISON)
+        return AX_AppendStr(buf, o, size, "poisoned");
+    if (status & STATUS1_TOXIC_POISON)
+        return AX_AppendStr(buf, o, size, "badly poisoned");
+    if (status & STATUS1_BURN)
+        return AX_AppendStr(buf, o, size, "burned");
+    if (status & STATUS1_FREEZE)
+        return AX_AppendStr(buf, o, size, "frozen");
+    if (status & STATUS1_PARALYSIS)
+        return AX_AppendStr(buf, o, size, "paralysed");
+    return AX_AppendStr(buf, o, size, "OK");
+}
+
+// Read one field of the highlighted party Pokemon on demand.
+// L level, shift+L experience to next level, H hit points, U held item,
+// T status, Y everything.
+static void AX_HandlePartyReaderKeys(void)
+{
+    u16 keys = Platform_GetReaderKeys();
+    struct Pokemon *mon;
+    char buf[160];
+    int o = 0;
+    s8 slot = gPartyMenu.slotId;
+
+    if (keys == 0)
+        return;
+    if (slot < 0 || slot >= PARTY_SIZE)
+        return;
+    mon = &gPlayerParty[slot];
+    if (GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NONE)
+        return;
+
+    if (keys & READER_KEY_ALL)
     {
-        buf[o++] = ',';
-        buf[o++] = ' ';
+        u8 nick[POKEMON_NAME_LENGTH + 1];
+        GetMonNickname(mon, nick);
+        o = AX_AppendGameStr(buf, o, sizeof(buf), nick);
+        o = AX_AppendStr(buf, o, sizeof(buf), ", level ");
+        o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_LEVEL));
+        o = AX_AppendStr(buf, o, sizeof(buf), ", ");
+        o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_HP));
+        o = AX_AppendStr(buf, o, sizeof(buf), " of ");
+        o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_MAX_HP));
+        o = AX_AppendStr(buf, o, sizeof(buf), " HP, ");
+        o = AX_AppendMonStatus(buf, o, sizeof(buf), mon);
     }
-    o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_HP));
-    while (*ofhp != '\0' && o < (int)sizeof(buf) - 1)
-        buf[o++] = *ofhp++;
-    o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_MAX_HP));
-    while (*hptxt != '\0' && o < (int)sizeof(buf) - 1)
-        buf[o++] = *hptxt++;
+    else if (keys & READER_KEY_LEVEL)
+    {
+        o = AX_AppendStr(buf, o, sizeof(buf), "Level ");
+        o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_LEVEL));
+    }
+    else if (keys & READER_KEY_EXP)
+    {
+        u16 species = GetMonData(mon, MON_DATA_SPECIES);
+        u8 level = GetMonData(mon, MON_DATA_LEVEL);
+
+        if (level >= MAX_LEVEL)
+        {
+            o = AX_AppendStr(buf, o, sizeof(buf), "At maximum level");
+        }
+        else
+        {
+            u32 exp = GetMonData(mon, MON_DATA_EXP);
+            u32 nextLvlExp = gExperienceTables[gSpeciesInfo[species].growthRate][level + 1];
+
+            o = AX_AppendUint(buf, o, sizeof(buf), nextLvlExp - exp);
+            o = AX_AppendStr(buf, o, sizeof(buf), " experience to level ");
+            o = AX_AppendUint(buf, o, sizeof(buf), level + 1);
+        }
+    }
+    else if (keys & READER_KEY_HP)
+    {
+        o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_HP));
+        o = AX_AppendStr(buf, o, sizeof(buf), " of ");
+        o = AX_AppendUint(buf, o, sizeof(buf), GetMonData(mon, MON_DATA_MAX_HP));
+        o = AX_AppendStr(buf, o, sizeof(buf), " HP");
+    }
+    else if (keys & READER_KEY_ITEM)
+    {
+        u16 item = GetMonData(mon, MON_DATA_HELD_ITEM);
+
+        if (item == ITEM_NONE)
+        {
+            o = AX_AppendStr(buf, o, sizeof(buf), "No held item");
+        }
+        else
+        {
+            u8 itemName[ITEM_NAME_LENGTH + 1];
+            CopyItemName(item, itemName);
+            o = AX_AppendStr(buf, o, sizeof(buf), "Holding ");
+            o = AX_AppendGameStr(buf, o, sizeof(buf), itemName);
+        }
+    }
+    else if (keys & READER_KEY_STATUS)
+    {
+        o = AX_AppendMonStatus(buf, o, sizeof(buf), mon);
+    }
+    else
+    {
+        return;
+    }
+
     buf[o] = '\0';
-    Speech_Say(buf, 1);
+    AX_Say(buf, 1);
 }
 
 static void UpdateCurrentPartySelection(s8 *slotPtr, s8 movementDir)
@@ -2604,6 +2708,11 @@ static u8 DisplaySelectionWindow(u8 windowType)
         u8 fontColorsId = (sPartyMenuInternal->actions[i] >= MENU_FIELD_MOVES) ? 4 : 3;
         AddTextPrinterParameterized4(sPartyMenuInternal->windowId[0], FONT_NORMAL, cursorDimension, (i * 16) + 1, letterSpacing, 0, sFontColorTable[fontColorsId], 0, sCursorOptions[sPartyMenuInternal->actions[i]].text);
     }
+
+    // This window prints its own labels, so tell the reader where they are
+    // before InitMenu* announces the starting cursor position. sCursorOptions
+    // has the same {text, func} layout as struct MenuAction.
+    AX_MenuCaptureActions((const struct MenuAction *)sCursorOptions, sPartyMenuInternal->actions);
 
     InitMenuInUpperLeftCorner(sPartyMenuInternal->windowId[0], sPartyMenuInternal->numActions, 0, TRUE);
     ScheduleBgCopyTilemapToVram(2);

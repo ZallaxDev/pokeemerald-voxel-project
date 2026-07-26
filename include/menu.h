@@ -40,6 +40,10 @@ struct MenuAction
     } func;
 };
 
+// Screen reader: register the labels of a menu that prints its own text, so the
+// cursor hook in menu.c can speak them. Call before InitMenu*.
+void AX_MenuCaptureActions(const struct MenuAction *actions, const u8 *ids);
+
 extern const u16 gStandardMenuPalette[];
 
 void FreeAllOverworldWindowBuffers(void);

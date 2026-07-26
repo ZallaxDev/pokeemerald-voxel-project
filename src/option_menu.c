@@ -16,6 +16,9 @@
 #include "window.h"
 #include "gba/m4a_internal.h"
 #include "constants/rgb.h"
+#include "constants/species.h"
+#include "sound.h"
+#include "accessibility.h"
 
 #define tMenuSelection data[0]
 #define tTextSpeed data[1]
@@ -32,8 +35,14 @@
 #define tVSync data[12]
 #define tBorderFrame data[13]
 #define tVolume data[14]
+#define tCryVolume data[15]
 
 #define OPTION_ROW_HEIGHT 14
+
+// The options window holds 112px of content, so only 8 rows fit at the normal
+// spacing. The display sub-page has 9 on desktop (Cry volume pushed it over),
+// so it uses tighter rows; the main page keeps its original layout.
+#define DISPLAY_ROW_HEIGHT 12
 
 enum
 {
@@ -73,6 +82,7 @@ enum
     DISPLAY_BORDER_FRAME,
     DISPLAY_BACKGROUND,
     DISPLAY_VOLUME,
+    DISPLAY_CRY_VOLUME,
     DISPLAY_BACK,
     DISPLAY_COUNT,
 };
@@ -107,6 +117,7 @@ static void DrawDisplaySettingChoice(u8 row, const u8 *text);
 static void DrawHeaderText(void);
 static void DrawOptionMenuTexts(void);
 static void DrawBgWindowFrames(void);
+static void AX_SpeakOption(u8 taskId, int interrupt);
 
 EWRAM_DATA static bool8 sArrowPressed = FALSE;
 
@@ -283,10 +294,12 @@ void CB2_InitOptionMenu(void)
         gTasks[taskId].tVSync = Platform_GetSetting(PLATFORM_SETTING_VSYNC);
         gTasks[taskId].tBorderFrame = Platform_GetSetting(PLATFORM_SETTING_BORDER);
         gTasks[taskId].tVolume = Platform_GetSetting(PLATFORM_SETTING_VOLUME);
+        gTasks[taskId].tCryVolume = Platform_GetSetting(PLATFORM_SETTING_CRY_VOLUME);
 #else
         gTasks[taskId].tWindowScale = 4;
         gTasks[taskId].tBorderFrame = 1;
         gTasks[taskId].tVolume = 10;
+        gTasks[taskId].tCryVolume = 5;
 #endif
 
         TextSpeed_DrawChoices(gTasks[taskId].tTextSpeed);
@@ -312,7 +325,11 @@ void CB2_InitOptionMenu(void)
 static void Task_OptionMenuFadeIn(u8 taskId)
 {
     if (!gPaletteFade.active)
+    {
+        AX_Say("Option menu", 1);
+        AX_SpeakOption(taskId, 0);
         gTasks[taskId].func = Task_OptionMenuProcessInput;
+    }
 }
 
 static void Task_OptionMenuProcessInput(u8 taskId)
@@ -341,6 +358,7 @@ static void Task_OptionMenuProcessInput(u8 taskId)
         else
             gTasks[taskId].tMenuSelection = MENUITEM_CANCEL;
         HighlightOptionMenuItem(gTasks[taskId].tMenuSelection);
+        AX_SpeakOption(taskId, 1);
     }
     else if (JOY_NEW(DPAD_DOWN))
     {
@@ -349,6 +367,7 @@ static void Task_OptionMenuProcessInput(u8 taskId)
         else
             gTasks[taskId].tMenuSelection = 0;
         HighlightOptionMenuItem(gTasks[taskId].tMenuSelection);
+        AX_SpeakOption(taskId, 1);
     }
     else
     {
@@ -406,6 +425,7 @@ static void Task_OptionMenuProcessInput(u8 taskId)
         {
             sArrowPressed = FALSE;
             CopyWindowToVram(WIN_OPTIONS, COPYWIN_GFX);
+            AX_SpeakOption(taskId, 1);
         }
     }
 }
@@ -435,10 +455,124 @@ static void Task_OptionMenuFadeOut(u8 taskId)
     }
 }
 
+// Row spacing of the page currently on screen; see DISPLAY_ROW_HEIGHT.
+static u8 sRowHeight = OPTION_ROW_HEIGHT;
+
 static void HighlightOptionMenuItem(u8 index)
 {
     SetGpuReg(REG_OFFSET_WIN0H, WIN_RANGE(16, DISPLAY_WIDTH - 16));
-    SetGpuReg(REG_OFFSET_WIN0V, WIN_RANGE(index * OPTION_ROW_HEIGHT + 40, index * OPTION_ROW_HEIGHT + 54));
+    SetGpuReg(REG_OFFSET_WIN0V, WIN_RANGE(index * sRowHeight + 40, index * sRowHeight + 40 + sRowHeight));
+}
+
+// The options screen draws its values as coloured text rather than as menu
+// actions, so the generic menu capture in menu.c can't see them. Speak the
+// highlighted row as "<label>, <current value>" instead.
+static const char *const sAxTextSpeeds[] = { "Slow", "Mid", "Fast" };
+static const char *const sAxButtonModes[] = { "Normal", "L R", "L equals A" };
+
+static const char *AX_OnOff(int on)
+{
+    return on ? "On" : "Off";
+}
+
+static void AX_SpeakOption(u8 taskId, int interrupt)
+{
+    s16 *data = gTasks[taskId].data;
+    char buf[96];
+    int o = 0;
+
+    if (tPlatformPage)
+    {
+        switch (tMenuSelection)
+        {
+#ifndef __ANDROID__
+        case DISPLAY_FULLSCREEN:
+            o = AX_AppendStr(buf, o, sizeof(buf), "Fullscreen, ");
+            o = AX_AppendStr(buf, o, sizeof(buf), AX_OnOff(tFullscreen));
+            break;
+        case DISPLAY_WINDOW_SCALE:
+            o = AX_AppendStr(buf, o, sizeof(buf), "Window scale, ");
+            o = AX_AppendInt(buf, o, sizeof(buf), tWindowScale);
+            o = AX_AppendStr(buf, o, sizeof(buf), " times");
+            break;
+        case DISPLAY_INTEGER_SCALE:
+            o = AX_AppendStr(buf, o, sizeof(buf), "Integer scale, ");
+            o = AX_AppendStr(buf, o, sizeof(buf), AX_OnOff(tIntegerScale));
+            break;
+        case DISPLAY_VSYNC:
+            o = AX_AppendStr(buf, o, sizeof(buf), "V sync, ");
+            o = AX_AppendStr(buf, o, sizeof(buf), AX_OnOff(tVSync));
+            break;
+#endif
+        case DISPLAY_BORDER_FRAME:
+            o = AX_AppendStr(buf, o, sizeof(buf), "Border frame, ");
+            o = AX_AppendStr(buf, o, sizeof(buf), AX_OnOff(tBorderFrame));
+            break;
+        case DISPLAY_BACKGROUND:
+            o = AX_AppendStr(buf, o, sizeof(buf), "Background, ");
+            if (tBorderBackground == GetBorderBackgroundCount() - 1)
+                o = AX_AppendStr(buf, o, sizeof(buf), "Off");
+            else
+                o = AX_AppendInt(buf, o, sizeof(buf), tBorderBackground);
+            break;
+        case DISPLAY_VOLUME:
+            o = AX_AppendStr(buf, o, sizeof(buf), "Volume, ");
+            o = AX_AppendInt(buf, o, sizeof(buf), tVolume * 10);
+            o = AX_AppendStr(buf, o, sizeof(buf), " percent");
+            break;
+        case DISPLAY_CRY_VOLUME:
+            o = AX_AppendStr(buf, o, sizeof(buf), "Cry volume, ");
+            o = AX_AppendInt(buf, o, sizeof(buf), tCryVolume * 10);
+            o = AX_AppendStr(buf, o, sizeof(buf), " percent");
+            break;
+        case DISPLAY_BACK:
+            o = AX_AppendStr(buf, o, sizeof(buf), "Back");
+            break;
+        default:
+            return;
+        }
+        buf[o] = '\0';
+        AX_Say(buf, interrupt);
+        return;
+    }
+
+    switch (tMenuSelection)
+    {
+    case MENUITEM_TEXTSPEED:
+        o = AX_AppendStr(buf, o, sizeof(buf), "Text speed, ");
+        o = AX_AppendStr(buf, o, sizeof(buf), sAxTextSpeeds[tTextSpeed % ARRAY_COUNT(sAxTextSpeeds)]);
+        break;
+    case MENUITEM_BATTLESCENE:
+        o = AX_AppendStr(buf, o, sizeof(buf), "Battle scene, ");
+        o = AX_AppendStr(buf, o, sizeof(buf), AX_OnOff(!tBattleSceneOff));
+        break;
+    case MENUITEM_BATTLESTYLE:
+        o = AX_AppendStr(buf, o, sizeof(buf), "Battle style, ");
+        o = AX_AppendStr(buf, o, sizeof(buf), tBattleStyle ? "Set" : "Shift");
+        break;
+    case MENUITEM_SOUND:
+        o = AX_AppendStr(buf, o, sizeof(buf), "Sound, ");
+        o = AX_AppendStr(buf, o, sizeof(buf), tSound ? "Stereo" : "Mono");
+        break;
+    case MENUITEM_BUTTONMODE:
+        o = AX_AppendStr(buf, o, sizeof(buf), "Button mode, ");
+        o = AX_AppendStr(buf, o, sizeof(buf), sAxButtonModes[tButtonMode % ARRAY_COUNT(sAxButtonModes)]);
+        break;
+    case MENUITEM_FRAMETYPE:
+        o = AX_AppendStr(buf, o, sizeof(buf), "Frame type, ");
+        o = AX_AppendInt(buf, o, sizeof(buf), tWindowFrameType + 1);
+        break;
+    case MENUITEM_DISPLAY:
+        o = AX_AppendStr(buf, o, sizeof(buf), "Display settings");
+        break;
+    case MENUITEM_CANCEL:
+        o = AX_AppendStr(buf, o, sizeof(buf), "Cancel");
+        break;
+    default:
+        return;
+    }
+    buf[o] = '\0';
+    AX_Say(buf, interrupt);
 }
 
 static void DrawOptionMenuChoice(const u8 *text, u8 x, u8 y, u8 style)
@@ -725,14 +859,18 @@ static void OpenDisplaySettings(u8 taskId)
 {
     gTasks[taskId].tPlatformPage = TRUE;
     gTasks[taskId].tMenuSelection = 0;
+    sRowHeight = DISPLAY_ROW_HEIGHT;
     DrawDisplaySettings(taskId);
     HighlightOptionMenuItem(0);
+    AX_Say("Display settings", 1);
+    AX_SpeakOption(taskId, 0);
 }
 
 static void CloseDisplaySettings(u8 taskId)
 {
     gTasks[taskId].tPlatformPage = FALSE;
     gTasks[taskId].tMenuSelection = MENUITEM_DISPLAY;
+    sRowHeight = OPTION_ROW_HEIGHT;
     DrawOptionMenuTexts();
     TextSpeed_DrawChoices(gTasks[taskId].tTextSpeed);
     BattleScene_DrawChoices(gTasks[taskId].tBattleSceneOff);
@@ -742,12 +880,14 @@ static void CloseDisplaySettings(u8 taskId)
     FrameType_DrawChoices(gTasks[taskId].tWindowFrameType);
     HighlightOptionMenuItem(MENUITEM_DISPLAY);
     CopyWindowToVram(WIN_OPTIONS, COPYWIN_FULL);
+    AX_Say("Option menu", 1);
+    AX_SpeakOption(taskId, 0);
 }
 
 static void DrawDisplaySettingChoice(u8 row, const u8 *text)
 {
-    FillWindowPixelRect(WIN_OPTIONS, PIXEL_FILL(1), 100, row * OPTION_ROW_HEIGHT, 108, OPTION_ROW_HEIGHT);
-    DrawOptionMenuChoice(text, 104, row * OPTION_ROW_HEIGHT, 1);
+    FillWindowPixelRect(WIN_OPTIONS, PIXEL_FILL(1), 100, row * DISPLAY_ROW_HEIGHT, 108, DISPLAY_ROW_HEIGHT);
+    DrawOptionMenuChoice(text, 104, row * DISPLAY_ROW_HEIGHT, 1);
 }
 
 static void DrawDisplayNumberChoice(u8 row, u8 value, bool8 percent)
@@ -773,23 +913,25 @@ static void DrawDisplaySettings(u8 taskId)
 
     FillWindowPixelBuffer(WIN_OPTIONS, PIXEL_FILL(1));
 #ifndef __ANDROID__
-    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_Fullscreen, 8, row * OPTION_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_Fullscreen, 8, row * DISPLAY_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
     DrawDisplaySettingChoice(row++, gTasks[taskId].tFullscreen ? gText_BattleSceneOn : gText_BattleSceneOff);
-    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_WindowScale, 8, row * OPTION_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_WindowScale, 8, row * DISPLAY_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
     DrawDisplayNumberChoice(row++, gTasks[taskId].tWindowScale, FALSE);
-    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_IntegerScale, 8, row * OPTION_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_IntegerScale, 8, row * DISPLAY_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
     DrawDisplaySettingChoice(row++, gTasks[taskId].tIntegerScale ? gText_BattleSceneOn : gText_BattleSceneOff);
-    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_VSync, 8, row * OPTION_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_VSync, 8, row * DISPLAY_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
     DrawDisplaySettingChoice(row++, gTasks[taskId].tVSync ? gText_BattleSceneOn : gText_BattleSceneOff);
 #endif
-    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_BorderFrame, 8, row * OPTION_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_BorderFrame, 8, row * DISPLAY_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
     DrawDisplaySettingChoice(row++, gTasks[taskId].tBorderFrame ? gText_BattleSceneOn : gText_BattleSceneOff);
-    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_BorderBackground, 8, row * OPTION_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_BorderBackground, 8, row * DISPLAY_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
     BorderBackground_DrawChoices(gTasks[taskId].tBorderBackground);
     row++;
-    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_Volume, 8, row * OPTION_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_Volume, 8, row * DISPLAY_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
     DrawDisplayNumberChoice(row++, gTasks[taskId].tVolume * 10, TRUE);
-    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_Back, 8, row * OPTION_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
+    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_CryVolume, 8, row * DISPLAY_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
+    DrawDisplayNumberChoice(row++, gTasks[taskId].tCryVolume * 10, TRUE);
+    AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, gText_Back, 8, row * DISPLAY_ROW_HEIGHT + 1, TEXT_SKIP_DRAW, NULL);
     CopyWindowToVram(WIN_OPTIONS, COPYWIN_FULL);
 }
 
@@ -853,6 +995,17 @@ static void ProcessDisplaySettingsInput(u8 taskId)
             Platform_SetSetting(PLATFORM_SETTING_VOLUME, gTasks[taskId].tVolume);
 #endif
             break;
+        case DISPLAY_CRY_VOLUME:
+            if (right)
+                gTasks[taskId].tCryVolume = gTasks[taskId].tCryVolume == 10 ? 0 : gTasks[taskId].tCryVolume + 1;
+            else
+                gTasks[taskId].tCryVolume = gTasks[taskId].tCryVolume == 0 ? 10 : gTasks[taskId].tCryVolume - 1;
+#ifdef PLATFORM_SDL2
+            Platform_SetSetting(PLATFORM_SETTING_CRY_VOLUME, gTasks[taskId].tCryVolume);
+#endif
+            // Play a cry at the new level so it can be set by ear.
+            PlayCry_Normal(SPECIES_PIKACHU, 0);
+            break;
         default:
             return;
         }
@@ -863,11 +1016,13 @@ static void ProcessDisplaySettingsInput(u8 taskId)
     {
         gTasks[taskId].tMenuSelection = selection;
         HighlightOptionMenuItem(selection);
+        AX_SpeakOption(taskId, 1);
     }
     if (changed)
     {
         DrawDisplaySettings(taskId);
         HighlightOptionMenuItem(selection);
+        AX_SpeakOption(taskId, 1);
     }
 }
 

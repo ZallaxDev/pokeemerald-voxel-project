@@ -7,6 +7,7 @@
 #include "menu.h"
 #include "decompress.h"
 #include "international_string_util.h"
+#include "accessibility.h"
 
 #define GFXTAG_ARROW 10
 #define PALTAG_ARROW 20
@@ -352,7 +353,35 @@ static struct PokenavListWindowState *GetPokenavListWindowState(void)
     return &list->windowState;
 }
 
-int PokenavList_MoveCursorUp(void)
+// --- Screen reader ---------------------------------------------------------
+// Pokenav lists (Match Call, Ribbons, Condition) print each row straight into a
+// tile window, so re-run the list's own row formatter for the selected entry
+// and speak the result. Uses a local buffer rather than sub.itemTextBuffer so
+// it can never disturb an in-progress print task.
+static void AX_SpeakPokenavListItem(void)
+{
+    struct PokenavList *list = GetSubstructPtr(POKENAV_SUBSTRUCT_LIST);
+    struct PokenavListWindowState *ws;
+    u8 text[64];
+    u32 index;
+
+    if (list == NULL || list->sub.bufferItemFunc == NULL)
+        return;
+    ws = &list->windowState;
+    if (ws->listPtr == NULL || ws->listLength == 0)
+        return;
+    index = ws->windowTopIndex + ws->selectedIndexOffset;
+    if (index >= ws->listLength)
+        return;
+
+    text[0] = EOS;
+    list->sub.bufferItemFunc((struct PokenavListItem *)((u8 *)ws->listPtr + index * ws->listItemSize), text);
+    AX_SayGameString(text, 1);
+}
+
+// The four cursor movers below return non-zero when the selection actually
+// moved, so wrap them once instead of patching every return path.
+static int MoveCursorUp_Internal(void)
 {
     struct PokenavListWindowState *windowState = GetPokenavListWindowState();
 
@@ -369,7 +398,16 @@ int PokenavList_MoveCursorUp(void)
     return 0;
 }
 
-int PokenavList_MoveCursorDown(void)
+int PokenavList_MoveCursorUp(void)
+{
+    int moved = MoveCursorUp_Internal();
+
+    if (moved)
+        AX_SpeakPokenavListItem();
+    return moved;
+}
+
+static int MoveCursorDown_Internal(void)
 {
     struct PokenavListWindowState *windowState = GetPokenavListWindowState();
 
@@ -388,7 +426,16 @@ int PokenavList_MoveCursorDown(void)
     return 0;
 }
 
-int PokenavList_PageUp(void)
+int PokenavList_MoveCursorDown(void)
+{
+    int moved = MoveCursorDown_Internal();
+
+    if (moved)
+        AX_SpeakPokenavListItem();
+    return moved;
+}
+
+static int PageUp_Internal(void)
 {
     s32 scroll;
     struct PokenavListWindowState *windowState = GetPokenavListWindowState();
@@ -410,7 +457,16 @@ int PokenavList_PageUp(void)
     return 0;
 }
 
-int PokenavList_PageDown(void)
+int PokenavList_PageUp(void)
+{
+    int moved = PageUp_Internal();
+
+    if (moved)
+        AX_SpeakPokenavListItem();
+    return moved;
+}
+
+static int PageDown_Internal(void)
 {
     struct PokenavListWindowState *windowState = GetPokenavListWindowState();
 
@@ -444,6 +500,15 @@ int PokenavList_PageDown(void)
         windowState->selectedIndexOffset = lastVisibleIndex;
         return 1;
     }
+}
+
+int PokenavList_PageDown(void)
+{
+    int moved = PageDown_Internal();
+
+    if (moved)
+        AX_SpeakPokenavListItem();
+    return moved;
 }
 
 u32 PokenavList_GetSelectedIndex(void)

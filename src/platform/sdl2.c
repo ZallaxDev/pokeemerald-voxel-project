@@ -21,6 +21,7 @@
 
 #include "global.h"
 #include "platform.h"
+#include "accessibility.h"
 #include "rtc.h"
 #include "gba/defines.h"
 #include "gba/m4a_internal.h"
@@ -61,7 +62,7 @@ static char sConfigPath[1024] = "pokeemerald.cfg";
 static u8 sBorderBackground;
 static bool sHasBorderBackgroundConfig;
 static u8 sBackgroundOrderVersion;
-static u8 sPlatformSettings[PLATFORM_SETTING_COUNT] = {0, 4, 0, 1, 1, 10};
+static u8 sPlatformSettings[PLATFORM_SETTING_COUNT] = {0, 4, 0, 1, 1, 10, 5};
 #ifdef __ANDROID__
 static SDL_GameController *androidController;
 #endif
@@ -75,6 +76,10 @@ void VDraw(SDL_Texture *texture);
 
 static void ReadSaveFile(const char *path);
 static void ReadConfigFile(void);
+static void ApplySfxVolumes(void);
+
+// Latched screen-reader hotkeys; see READER_KEY_* in platform.h.
+static u16 sReaderKeys = 0;
 static void StoreConfigFile(void);
 static void ApplyPlatformSettings(void);
 static void StoreSaveFile(void);
@@ -130,6 +135,7 @@ int main(int argc, char **argv)
 #endif
     ReadSaveFile(sSavePath);
     ReadConfigFile();
+    ApplySfxVolumes();
 
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
@@ -456,6 +462,8 @@ static void ReadConfigFile(void)
             sPlatformSettings[PLATFORM_SETTING_BORDER] = value != 0;
         else if (sscanf(line, "volume=%u", &value) == 1 && value <= 10)
             sPlatformSettings[PLATFORM_SETTING_VOLUME] = value;
+        else if (sscanf(line, "cryVolume=%u", &value) == 1 && value <= 10)
+            sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME] = value;
     }
     fclose(configFile);
 }
@@ -474,6 +482,7 @@ static void StoreConfigFile(void)
     fprintf(configFile, "vsync=%u\n", sPlatformSettings[PLATFORM_SETTING_VSYNC]);
     fprintf(configFile, "border=%u\n", sPlatformSettings[PLATFORM_SETTING_BORDER]);
     fprintf(configFile, "volume=%u\n", sPlatformSettings[PLATFORM_SETTING_VOLUME]);
+    fprintf(configFile, "cryVolume=%u\n", sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME]);
     fclose(configFile);
 }
 
@@ -576,14 +585,32 @@ void Platform_SetBorderBackground(u8 selection)
     StoreConfigFile();
 }
 
+u16 Platform_GetReaderKeys(void)
+{
+    u16 keys = sReaderKeys;
+
+    sReaderKeys = 0;
+    return keys;
+}
+
 u8 Platform_GetSetting(enum PlatformSetting setting)
 {
     return sPlatformSettings[setting];
 }
 
+// The footstep/cry mixer is a separate audio device, so it can't see the
+// Volume option the way Platform_QueueAudio can -- push the values to it.
+static void ApplySfxVolumes(void)
+{
+    Sfx_SetMasterVolume(sPlatformSettings[PLATFORM_SETTING_VOLUME] * 10);
+    Sfx_SetCryGain(sPlatformSettings[PLATFORM_SETTING_CRY_VOLUME] * 10);
+}
+
 void Platform_SetSetting(enum PlatformSetting setting, u8 value)
 {
     sPlatformSettings[setting] = value;
+    if (setting == PLATFORM_SETTING_VOLUME || setting == PLATFORM_SETTING_CRY_VOLUME)
+        ApplySfxVolumes();
     if (setting == PLATFORM_SETTING_VSYNC)
         SDL_RenderSetVSync(sdlRenderer, value);
 #if defined(NATIVE_LINUX) || defined(_WIN32)
@@ -1000,6 +1027,23 @@ void ProcessEvents(void)
                     timeScale = 5.0;
                     SDL_PauseAudioDevice(sdlAudioDevice, 1);
                 }
+                break;
+            // Screen-reader hotkeys. These aren't GBA buttons, so they're
+            // latched here and drained by whichever screen is listening.
+            case SDLK_l:
+                sReaderKeys |= (event.key.keysym.mod & KMOD_SHIFT) ? READER_KEY_EXP : READER_KEY_LEVEL;
+                break;
+            case SDLK_h:
+                sReaderKeys |= READER_KEY_HP;
+                break;
+            case SDLK_u:
+                sReaderKeys |= READER_KEY_ITEM;
+                break;
+            case SDLK_t:
+                sReaderKeys |= READER_KEY_STATUS;
+                break;
+            case SDLK_y:
+                sReaderKeys |= READER_KEY_ALL;
                 break;
             }
             break;

@@ -28,6 +28,7 @@
 #include "window.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
+#include "accessibility.h"
 
 enum
 {
@@ -206,6 +207,7 @@ struct PokedexView
 // this file's functions
 static void CB2_Pokedex(void);
 static void Task_OpenPokedexMainPage(u8);
+static void AX_DexListReset(void);
 static void Task_HandlePokedexInput(u8);
 static void Task_WaitForScroll(u8);
 static void Task_HandlePokedexStartMenuInput(u8);
@@ -1599,6 +1601,7 @@ void CB2_OpenPokedex(void)
         DmaFillLarge16(3, 0, (u8 *)VRAM, VRAM_SIZE, 0x1000);
         DmaClear32(3, OAM, OAM_SIZE);
         DmaClear16(3, PLTT, PLTT_SIZE);
+        AX_DexListReset(); // re-announce the cursor entry on every open
         gMain.state = 1;
         break;
     case 1:
@@ -1662,8 +1665,61 @@ void Task_OpenPokedexMainPage(u8 taskId)
 
 #define tLoadScreenTaskId data[0]
 
+// --- Screen reader ---------------------------------------------------------
+// The dex list is a sprite grid with no text printer or list menu behind it,
+// and `selectedPokemon` is reassigned from a dozen places (scroll, page jump,
+// wrap-around). Rather than hook each one, poll it from the two list tasks and
+// speak whenever it moves.
+
+static void AX_SpeakDexEntry(u16 index, int interrupt)
+{
+    const struct PokedexListItem *item;
+    char buf[96];
+    int o = 0;
+
+    if (sPokedexView == NULL || index > NATIONAL_DEX_COUNT)
+        return;
+    item = &sPokedexView->pokedexList[index];
+    if (item->dexNum == 0xFFFF)
+        return;
+
+    o = AX_AppendStr(buf, o, sizeof(buf), "Number ");
+    o = AX_AppendUint(buf, o, sizeof(buf), item->dexNum);
+    o = AX_AppendStr(buf, o, sizeof(buf), ", ");
+    if (!item->seen)
+    {
+        o = AX_AppendStr(buf, o, sizeof(buf), "not yet seen");
+    }
+    else
+    {
+        o = AX_AppendGameStr(buf, o, sizeof(buf), gSpeciesNames[NationalPokedexNumToSpecies(item->dexNum)]);
+        o = AX_AppendStr(buf, o, sizeof(buf), item->owned ? ", caught" : ", seen");
+    }
+    buf[o] = '\0';
+    AX_Say(buf, interrupt);
+}
+
+// -1 so the first poll after opening the dex always announces.
+static s32 sAxLastDexIndex = -1;
+
+static void AX_DexListCheck(void)
+{
+    if (sPokedexView == NULL)
+        return;
+    if ((s32)sPokedexView->selectedPokemon == sAxLastDexIndex)
+        return;
+    sAxLastDexIndex = sPokedexView->selectedPokemon;
+    AX_SpeakDexEntry(sPokedexView->selectedPokemon, 1);
+}
+
+static void AX_DexListReset(void)
+{
+    sAxLastDexIndex = -1;
+}
+
 static void Task_HandlePokedexInput(u8 taskId)
 {
+    AX_DexListCheck();
     SetGpuReg(REG_OFFSET_BG0VOFS, sPokedexView->menuY);
 
     if (sPokedexView->menuY)
@@ -1867,6 +1923,7 @@ static void Task_OpenSearchResults(u8 taskId)
 
 static void Task_HandleSearchResultsInput(u8 taskId)
 {
+    AX_DexListCheck();
     SetGpuReg(REG_OFFSET_BG0VOFS, sPokedexView->menuY);
 
     if (sPokedexView->menuY)
@@ -3190,11 +3247,57 @@ static void PrintInfoScreenText(const u8 *str, u8 left, u8 top)
 #define tMonSpriteId     data[4]
 #define tTrainerSpriteId data[5]
 
+// Read out the whole entry page: the sprite, category, height/weight and the
+// description text are all drawn as tiles or graphics.
+static void AX_SpeakDexInfoScreen(void)
+{
+    const struct PokedexEntry *entry;
+    char buf[320];
+    u16 dexNum;
+    int o = 0;
+
+    if (sPokedexListItem == NULL)
+        return;
+    dexNum = sPokedexListItem->dexNum;
+
+    o = AX_AppendGameStr(buf, o, sizeof(buf), gSpeciesNames[NationalPokedexNumToSpecies(dexNum)]);
+    o = AX_AppendStr(buf, o, sizeof(buf), ", number ");
+    o = AX_AppendUint(buf, o, sizeof(buf), dexNum);
+
+    // Seen-but-not-caught entries hide everything below the name in-game, so
+    // don't read out data the player isn't supposed to have yet.
+    if (!sPokedexListItem->owned)
+    {
+        o = AX_AppendStr(buf, o, sizeof(buf), ", not yet caught");
+        buf[o] = '\0';
+        AX_Say(buf, 1);
+        return;
+    }
+
+    entry = &gPokedexEntries[dexNum];
+    o = AX_AppendStr(buf, o, sizeof(buf), ", the ");
+    o = AX_AppendGameStr(buf, o, sizeof(buf), entry->categoryName);
+    o = AX_AppendStr(buf, o, sizeof(buf), " Pokemon. Height ");
+    o = AX_AppendUint(buf, o, sizeof(buf), entry->height / 10);
+    o = AX_AppendStr(buf, o, sizeof(buf), ".");
+    o = AX_AppendUint(buf, o, sizeof(buf), entry->height % 10);
+    o = AX_AppendStr(buf, o, sizeof(buf), " meters, weight ");
+    o = AX_AppendUint(buf, o, sizeof(buf), entry->weight / 10);
+    o = AX_AppendStr(buf, o, sizeof(buf), ".");
+    o = AX_AppendUint(buf, o, sizeof(buf), entry->weight % 10);
+    o = AX_AppendStr(buf, o, sizeof(buf), " kilograms. ");
+    o = AX_AppendGameStr(buf, o, sizeof(buf), entry->description);
+
+    buf[o] = '\0';
+    AX_Say(buf, 1);
+}
+
 static u8 LoadInfoScreen(struct PokedexListItem *item, u8 monSpriteId)
 {
     u8 taskId;
 
     sPokedexListItem = item;
+    AX_SpeakDexInfoScreen();
     taskId = CreateTask(Task_LoadInfoScreen, 0);
     gTasks[taskId].tScrolling = FALSE;
     gTasks[taskId].tMonSpriteDone = TRUE; // Already has sprite from list view
@@ -3225,6 +3328,7 @@ static bool8 IsInfoScreenScrolling(u8 taskId)
 static u8 StartInfoScreenScroll(struct PokedexListItem *item, u8 taskId)
 {
     sPokedexListItem = item;
+    AX_SpeakDexInfoScreen();
     gTasks[taskId].tScrolling = TRUE;
     gTasks[taskId].tMonSpriteDone = FALSE;
     gTasks[taskId].tBgLoaded = FALSE;

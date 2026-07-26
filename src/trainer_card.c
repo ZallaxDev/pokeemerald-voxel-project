@@ -33,6 +33,7 @@
 #include "constants/rgb.h"
 #include "constants/trainers.h"
 #include "constants/union_room.h"
+#include "accessibility.h"
 
 enum {
     WIN_MSG,
@@ -922,12 +923,44 @@ static void SetUpTrainerCardTask(void)
     SetDataFromTrainerCard();
 }
 
+// The card is one big graphic with values printed into it, so read the whole
+// front out in one go when it finishes drawing.
+static void AX_SpeakTrainerCard(void)
+{
+    struct TrainerCard *card = &sData->trainerCard;
+    char buf[224];
+    int o = 0;
+
+    o = AX_AppendStr(buf, o, sizeof(buf), "Trainer card. Name ");
+    o = AX_AppendGameStr(buf, o, sizeof(buf), card->playerName);
+    o = AX_AppendStr(buf, o, sizeof(buf), ", I D ");
+    o = AX_AppendUint(buf, o, sizeof(buf), card->trainerId);
+    o = AX_AppendStr(buf, o, sizeof(buf), ", money ");
+    o = AX_AppendUint(buf, o, sizeof(buf), card->money);
+    o = AX_AppendStr(buf, o, sizeof(buf), AX_MONEY_UNIT);
+    if (card->hasPokedex)
+    {
+        o = AX_AppendStr(buf, o, sizeof(buf), ", Pokedex ");
+        o = AX_AppendUint(buf, o, sizeof(buf), card->caughtMonsCount);
+    }
+    o = AX_AppendStr(buf, o, sizeof(buf), ", play time ");
+    o = AX_AppendUint(buf, o, sizeof(buf), card->playTimeHours);
+    o = AX_AppendStr(buf, o, sizeof(buf), " hours ");
+    o = AX_AppendUint(buf, o, sizeof(buf), card->playTimeMinutes);
+    o = AX_AppendStr(buf, o, sizeof(buf), " minutes, ");
+    o = AX_AppendUint(buf, o, sizeof(buf), card->stars);
+    o = AX_AppendStr(buf, o, sizeof(buf), card->stars == 1 ? " star" : " stars");
+    buf[o] = '\0';
+    AX_Say(buf, 1);
+}
+
 static bool8 PrintAllOnCardFront(void)
 {
     switch (sData->printState)
     {
     case 0:
         PrintNameOnCardFront();
+        AX_SpeakTrainerCard();
         break;
     case 1:
         PrintIdOnCard();

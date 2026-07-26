@@ -20,6 +20,7 @@
 #include "easy_chat.h"
 #include "graphics.h"
 #include "constants/rgb.h"
+#include "accessibility.h"
 
 // Bead and Dream mail feature an icon of the Pokémon holding it.
 enum {
@@ -690,6 +691,26 @@ static void PrintMailText(void)
     }
     bufptr = StringCopy(signature, gText_FromSpace);
     StringCopy(bufptr, sMailRead->playerName);
+
+    // Read the whole letter out: each line is printed separately into the mail
+    // graphic, so nothing here reaches the dialogue hook in menu.c.
+    {
+        char buf[256];
+        int o = 0;
+
+        for (i = 0; i < sMailRead->layout->numLines; i++)
+        {
+            if (sMailRead->message[i][0] == EOS || sMailRead->message[i][0] == CHAR_SPACE)
+                continue;
+            o = AX_AppendSep(buf, o, sizeof(buf));
+            o = AX_AppendGameStr(buf, o, sizeof(buf), sMailRead->message[i]);
+        }
+        o = AX_AppendStr(buf, o, sizeof(buf), ". ");
+        o = AX_AppendGameStr(buf, o, sizeof(buf), signature);
+        buf[o] = '\0';
+        AX_Say(buf, 1);
+    }
+
     box_x = GetStringCenterAlignXOffset(FONT_NORMAL, signature, sMailRead->signatureWidth) + 104;
     box_y = sMailRead->layout->signatureYPos + 88;
     AddTextPrinterParameterized3(0, FONT_NORMAL, box_x, box_y, sTextColors, 0, signature);

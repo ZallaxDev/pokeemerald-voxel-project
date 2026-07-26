@@ -29,6 +29,7 @@
 #include "main.h"
 #include "constants/event_objects.h"
 #include "constants/rgb.h"
+#include "accessibility.h"
 
 enum {
     INPUT_NONE,
@@ -354,6 +355,10 @@ static void StartButtonFlash(struct Task *, u8, bool8);
 static void CreateSprites(void);
 static void CreateCursorSprite(void);
 static void SetCursorPos(s16, s16);
+static u8 GetCharAtKeyboardPos(s16, s16);
+static void AX_SpeakNamingKey(s16, s16, int interrupt);
+static void AX_SpeakNamingText(int interrupt);
+static void AX_SayKeyboardPage(void);
 static void GetCursorPos(s16 *x, s16 *y);
 static void MoveCursorToOKButton(void);
 static void SetCursorInvisibility(u8);
@@ -643,9 +648,16 @@ static bool8 MainState_WaitFadeIn(void)
 {
     if (!gPaletteFade.active)
     {
+        s16 cursorX, cursorY;
+
         SetInputState(INPUT_STATE_ENABLED);
         SetCursorFlashing(TRUE);
         sNamingScreen->state++;
+
+        AX_Say("Name entry.", 1);
+        AX_SpeakNamingText(0);
+        GetCursorPos(&cursorX, &cursorY);
+        AX_SpeakNamingKey(cursorX, cursorY, 0);
     }
     return FALSE;
 }
@@ -789,6 +801,10 @@ static bool8 MainState_WaitPageSwap(void)
         }
 
         SetCursorPos(cursorX, cursorY);
+        // Lead with the page we just switched to, then the key under the cursor
+        // (this replaces the announcement SetCursorPos just made).
+        AX_SayKeyboardPage();
+        AX_SpeakNamingKey(cursorX, cursorY, 0);
         DrawKeyboardPageOnDeck();
         SetInputState(INPUT_STATE_ENABLED);
         SetCursorInvisibility(FALSE);
@@ -1148,6 +1164,7 @@ static void SetCursorPos(s16 x, s16 y)
     cursorSprite->sPrevY = cursorSprite->sY;
     cursorSprite->sX = x;
     cursorSprite->sY = y;
+    AX_SpeakNamingKey(x, y, 1);
 }
 
 static void GetCursorPos(s16 *x, s16 *y)
@@ -1204,6 +1221,110 @@ static u8 GetKeyRoleAtCursorPos(void)
 static u8 GetCurrentPageColumnCount(void)
 {
     return sPageColumnCounts[CurrentPageToKeyboardId()];
+}
+
+// --- Screen reader ---------------------------------------------------------
+// The keyboard is drawn as tiles, so nothing here goes through the normal text
+// printers. Announce the key under the cursor on every move, and re-read the
+// entry field whenever a character is added or deleted.
+
+static const char *const sAxPageNames[KBPAGE_COUNT] = {
+    [KBPAGE_SYMBOLS]       = "symbols",
+    [KBPAGE_LETTERS_UPPER] = "upper case",
+    [KBPAGE_LETTERS_LOWER] = "lower case",
+};
+
+static void AX_SayKeyboardPage(void)
+{
+    char buf[48];
+    int o = 0;
+
+    if (sNamingScreen == NULL)
+        return;
+    o = AX_AppendStr(buf, o, sizeof(buf), sAxPageNames[sNamingScreen->currentPage]);
+    o = AX_AppendStr(buf, o, sizeof(buf), " keyboard");
+    buf[o] = '\0';
+    AX_Say(buf, 1);
+}
+
+static void AX_SpeakNamingKey(s16 x, s16 y, int interrupt)
+{
+    char buf[64];
+    int o = 0;
+
+    if (sNamingScreen == NULL)
+        return;
+    // CreateSprites() positions the cursor once before MainState_FadeIn sets
+    // currentPage, and the struct is Alloc'd rather than zeroed — so the page
+    // index can be garbage on that first call. Everything below indexes tables
+    // by it, so bail out instead.
+    if (sNamingScreen->currentPage >= KBPAGE_COUNT)
+        return;
+    if (y < 0 || y >= (s16)ARRAY_COUNT(sButtonKeyRoles))
+        return;
+
+    if (x < GetCurrentPageColumnCount())
+    {
+        u8 ch = GetCharAtKeyboardPos(x, y);
+        u8 tmp[2];
+
+        if (ch == CHAR_SPACE)
+        {
+            o = AX_AppendStr(buf, o, sizeof(buf), "space");
+        }
+        else
+        {
+            // Say "capital A" rather than "A": most voices read the two the
+            // same way, and the distinction matters when naming.
+            if (ch >= CHAR_A && ch <= CHAR_A + 25)
+                o = AX_AppendStr(buf, o, sizeof(buf), "capital ");
+            tmp[0] = ch;
+            tmp[1] = EOS;
+            o = AX_AppendGameStr(buf, o, sizeof(buf), tmp);
+        }
+    }
+    else
+    {
+        switch (sButtonKeyRoles[y])
+        {
+        case KEY_ROLE_PAGE:
+        {
+            u8 next = (sNamingScreen->currentPage + 1) % KBPAGE_COUNT;
+            o = AX_AppendStr(buf, o, sizeof(buf), "Switch to ");
+            o = AX_AppendStr(buf, o, sizeof(buf), sAxPageNames[next]);
+            break;
+        }
+        case KEY_ROLE_BACKSPACE:
+            o = AX_AppendStr(buf, o, sizeof(buf), "Back space");
+            break;
+        case KEY_ROLE_OK:
+            o = AX_AppendStr(buf, o, sizeof(buf), "OK");
+            break;
+        default:
+            return;
+        }
+    }
+
+    if (o == 0)
+        return;
+    buf[o] = '\0';
+    AX_Say(buf, interrupt);
+}
+
+static void AX_SpeakNamingText(int interrupt)
+{
+    char buf[64];
+    int o;
+
+    if (sNamingScreen == NULL)
+        return;
+
+    o = AX_AppendGameStr(buf, 0, sizeof(buf), sNamingScreen->textBuffer);
+    // Trim the trailing spaces the entry field is padded with.
+    while (o > 0 && buf[o - 1] == ' ')
+        o--;
+    buf[o] = '\0';
+    AX_Say(o > 0 ? buf : "blank", interrupt);
 }
 
 #undef sX
@@ -1829,6 +1950,7 @@ static void DeleteTextCharacter(void)
     if (keyRole == KEY_ROLE_CHAR || keyRole == KEY_ROLE_BACKSPACE)
         TryStartButtonFlash(BUTTON_BACK, FALSE, TRUE);
     PlaySE(SE_BALL);
+    AX_SpeakNamingText(1);
 }
 
 // Returns TRUE if the text entry is now full
@@ -1842,6 +1964,7 @@ static bool8 AddTextCharacter(void)
     DrawTextEntry();
     CopyBgTilemapBufferToVram(3);
     PlaySE(SE_SELECT);
+    AX_SpeakNamingText(1);
 
     if (GetPreviousTextCaretPosition() != sNamingScreen->template->maxChars - 1)
         return FALSE;

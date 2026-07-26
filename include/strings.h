@@ -326,6 +326,7 @@ extern const u8 gText_IntegerScale[];
 extern const u8 gText_VSync[];
 extern const u8 gText_BorderFrame[];
 extern const u8 gText_Volume[];
+extern const u8 gText_CryVolume[];
 extern const u8 gText_Back[];
 
 extern const u8 gText_MaleSymbol[];

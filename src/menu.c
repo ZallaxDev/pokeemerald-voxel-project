@@ -81,6 +81,14 @@ static void AX_MenuCapture(const struct MenuAction *actions, const u8 *ids)
     sAxPendYesNo = 0;
 }
 
+// Menus that draw their own labels (the party selection window) can't be seen
+// by the PrintMenuActionTexts capture below, so let them register their labels
+// directly. `ids` maps cursor position -> index into `actions`.
+void AX_MenuCaptureActions(const struct MenuAction *actions, const u8 *ids)
+{
+    AX_MenuCapture(actions, ids);
+}
+
 static void AX_MenuPromote(void)
 {
     sAxCurActions = sAxPendActions;

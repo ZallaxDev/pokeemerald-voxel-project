@@ -1248,19 +1248,37 @@ static void AddItemQuantityWindow(u8 windowType)
 static void PrintItemQuantity(u8 windowId, s16 quantity)
 {
     u8 numDigits = (gBagPosition.pocket == BERRIES_POCKET) ? BERRY_CAPACITY_DIGITS : BAG_ITEM_CAPACITY_DIGITS;
+    char buf[16];
+    int o;
+
     ConvertIntToDecimalStringN(gStringVar1, quantity, STR_CONV_MODE_LEADING_ZEROS, numDigits);
     StringExpandPlaceholders(gStringVar4, gText_xVar1);
     AddTextPrinterParameterized(windowId, FONT_NORMAL, gStringVar4, GetStringCenterAlignXOffset(FONT_NORMAL, gStringVar4, 0x28), 2, 0, 0);
+
+    // Speak the running count as it's adjusted (toss / give / use quantities).
+    o = AX_AppendInt(buf, 0, sizeof(buf), quantity);
+    buf[o] = '\0';
+    AX_Say(buf, 1);
 }
 
 // Prints the quantity of items to be sold and the amount that would be earned
 static void PrintItemSoldAmount(int windowId, int numSold, int moneyEarned)
 {
     u8 numDigits = (gBagPosition.pocket == BERRIES_POCKET) ? BERRY_CAPACITY_DIGITS : BAG_ITEM_CAPACITY_DIGITS;
+    char buf[48];
+    int o = 0;
+
     ConvertIntToDecimalStringN(gStringVar1, numSold, STR_CONV_MODE_LEADING_ZEROS, numDigits);
     StringExpandPlaceholders(gStringVar4, gText_xVar1);
     AddTextPrinterParameterized(windowId, FONT_NORMAL, gStringVar4, 0, 1, TEXT_SKIP_DRAW, 0);
     PrintMoneyAmount(windowId, 38, 1, moneyEarned, 0);
+
+    o = AX_AppendInt(buf, o, sizeof(buf), numSold);
+    o = AX_AppendStr(buf, o, sizeof(buf), ", for ");
+    o = AX_AppendInt(buf, o, sizeof(buf), moneyEarned);
+    o = AX_AppendStr(buf, o, sizeof(buf), AX_MONEY_UNIT);
+    buf[o] = '\0';
+    AX_Say(buf, 1);
 }
 
 static void Task_BagMenu_HandleInput(u8 taskId)
