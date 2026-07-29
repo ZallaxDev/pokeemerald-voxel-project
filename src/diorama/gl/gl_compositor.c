@@ -10,11 +10,20 @@
 #include "diorama/gl_loader.h"
 #include "diorama/gl_object_renderer.h"
 #include "diorama/gl_terrain_renderer.h"
+#include "diorama/rules.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/scene_snapshot.h"
 #include "gba/defines.h"
 
 #define MAX_BORDER_BACKGROUNDS 15
+#define CAMERA_DEFAULT_PITCH 0.70758444f
+#define CAMERA_MIN_PITCH 0.34906585f
+#define CAMERA_MAX_PITCH 1.22173048f
+#define CAMERA_PITCH_STEP 0.08726646f
+#define CAMERA_DEFAULT_FOCAL_LENGTH 130.0f
+#define CAMERA_MIN_FOCAL_LENGTH 80.0f
+#define CAMERA_MAX_FOCAL_LENGTH 200.0f
+#define CAMERA_ZOOM_STEP 10.0f
 
 struct DioramaTexture
 {
@@ -31,6 +40,8 @@ static GLuint sVertexBuffer;
 static struct DioramaTexture sFrameTexture;
 static struct DioramaTexture sDebugTexture;
 static struct DioramaTexture sAtlasTexture;
+static struct DioramaTexture sBaseAtlasTexture;
+static struct DioramaTexture sForegroundAtlasTexture;
 static struct DioramaTexture sBackgroundTextures[MAX_BORDER_BACKGROUNDS];
 static struct DioramaTexture sBorderTexture;
 static u8 sBackgroundCount;
@@ -39,6 +50,10 @@ static struct DioramaSceneSnapshot sPreviousSceneSnapshot;
 static struct DioramaSceneSnapshot sIncomingSceneSnapshot;
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
+static u32 sBaseAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
+static u32 sForegroundAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
+static struct DioramaResolvedCell sAtlasResolvedCells[DIORAMA_MAX_VISIBLE_CELLS];
+static u16 sCutoutBaseMetatiles[DIORAMA_TILE_COUNT];
 static u8 sPresentMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
 static u32 sAtlasMapGeneration;
 static u32 sAtlasPaletteGeneration;
@@ -48,6 +63,8 @@ static bool sHasPreviousSceneSnapshot;
 static bool sTerrainAvailable;
 static bool sObjectsAvailable;
 static bool sTerrainDebug;
+static float sCameraPitch = CAMERA_DEFAULT_PITCH;
+static float sCameraFocalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
 static enum DioramaRenderMode sRenderMode = DIORAMA_RENDER_AUTO;
 
 #define RGB(r, g, b) (0xFF000000u | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
@@ -313,21 +330,50 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
               || snapshot->paletteGeneration != sAtlasPaletteGeneration
               || snapshot->tilesetAnimationGeneration != sAtlasAnimationGeneration;
     bool changed;
+    unsigned cellCount = snapshot->visibleCellCount;
+    unsigned i;
 
     if (reset)
     {
         DioramaAtlas_Clear(sAtlasPixels, sPresentMetatiles);
+        memset(sBaseAtlasPixels, 0, sizeof(sBaseAtlasPixels));
+        memset(sForegroundAtlasPixels, 0, sizeof(sForegroundAtlasPixels));
         sAtlasMapGeneration = snapshot->mapGeneration;
         sAtlasPaletteGeneration = snapshot->paletteGeneration;
         sAtlasAnimationGeneration = snapshot->tilesetAnimationGeneration;
     }
-    changed = DioramaAtlas_Update(snapshot, sAtlasPixels, sPresentMetatiles);
+    if (cellCount > DIORAMA_MAX_VISIBLE_CELLS)
+        cellCount = DIORAMA_MAX_VISIBLE_CELLS;
+    DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
+    for (i = 0; i < DIORAMA_TILE_COUNT; i++)
+        sCutoutBaseMetatiles[i] = 0xFFFF;
+    for (i = 0; i < cellCount; i++)
+    {
+        uint16_t metatileId = snapshot->cells[i].metatileId;
+        uint16_t baseMetatileId = sAtlasResolvedCells[i].baseMetatileId;
+
+        if (metatileId >= DIORAMA_TILE_COUNT || baseMetatileId >= DIORAMA_TILE_COUNT)
+            continue;
+        if (sCutoutBaseMetatiles[metatileId] == 0xFFFF)
+            sCutoutBaseMetatiles[metatileId] = baseMetatileId;
+        else if (sCutoutBaseMetatiles[metatileId] != baseMetatileId)
+            sCutoutBaseMetatiles[metatileId] = 0xFFFE;
+    }
+    changed = DioramaAtlas_Update(snapshot, sCutoutBaseMetatiles,
+                                  sAtlasPixels, sBaseAtlasPixels,
+                                  sForegroundAtlasPixels, sPresentMetatiles);
     if (reset || changed)
     {
         glBindTexture(GL_TEXTURE_2D, sAtlasTexture.id);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT,
                         GL_BGRA, GL_UNSIGNED_BYTE, sAtlasPixels);
+        glBindTexture(GL_TEXTURE_2D, sBaseAtlasTexture.id);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT,
+                        GL_BGRA, GL_UNSIGNED_BYTE, sBaseAtlasPixels);
+        glBindTexture(GL_TEXTURE_2D, sForegroundAtlasTexture.id);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT,
+                        GL_BGRA, GL_UNSIGNED_BYTE, sForegroundAtlasPixels);
     }
 }
 
@@ -406,13 +452,29 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     ConfigureTexture(sAtlasTexture.id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT, 0,
                  GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+    glGenTextures(1, &sBaseAtlasTexture.id);
+    sBaseAtlasTexture.width = DIORAMA_ATLAS_WIDTH;
+    sBaseAtlasTexture.height = DIORAMA_ATLAS_HEIGHT;
+    ConfigureTexture(sBaseAtlasTexture.id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT, 0,
+                 GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+    glGenTextures(1, &sForegroundAtlasTexture.id);
+    sForegroundAtlasTexture.width = DIORAMA_ATLAS_WIDTH;
+    sForegroundAtlasTexture.height = DIORAMA_ATLAS_HEIGHT;
+    ConfigureTexture(sForegroundAtlasTexture.id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT, 0,
+                 GL_BGRA, GL_UNSIGNED_BYTE, NULL);
     DioramaAtlas_Clear(sAtlasPixels, sPresentMetatiles);
+    memset(sBaseAtlasPixels, 0, sizeof(sBaseAtlasPixels));
+    memset(sForegroundAtlasPixels, 0, sizeof(sForegroundAtlasPixels));
     sAtlasMapGeneration = 0;
     sAtlasPaletteGeneration = 0;
     sAtlasAnimationGeneration = 0;
     sHasSceneSnapshot = false;
     sHasPreviousSceneSnapshot = false;
     sTerrainDebug = false;
+    sCameraPitch = CAMERA_DEFAULT_PITCH;
+    sCameraFocalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     return true;
 }
@@ -476,7 +538,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
      && sTerrainAvailable
      && sObjectsAvailable
      && sHasSceneSnapshot
-     && DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot))
+     && DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot)
+     && DioramaRules_IsMapSupported(sSceneSnapshot.mapGroup, sSceneSnapshot.mapNum,
+                                    sSceneSnapshot.mapLayoutId))
     {
         EnsureAtlas(&sSceneSnapshot);
         drawTerrain = DioramaGLTerrain_Sync(&sSceneSnapshot)
@@ -527,8 +591,11 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glViewport(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
-        DioramaGLTerrain_Draw(sAtlasTexture.id, cameraX, cameraZ, sTerrainDebug);
-        DioramaGLObjects_Draw(frameAlpha, cameraX, cameraZ);
+        DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
+                              sForegroundAtlasTexture.id, cameraX, cameraZ,
+                              sCameraPitch, sCameraFocalLength, sTerrainDebug);
+        DioramaGLObjects_Draw(frameAlpha, cameraX, cameraZ, sCameraPitch,
+                              sCameraFocalLength);
         glDisable(GL_SCISSOR_TEST);
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
@@ -571,6 +638,24 @@ void DioramaGL_ToggleTerrainDebug(void)
     sTerrainDebug = !sTerrainDebug;
 }
 
+void DioramaGL_AdjustCameraZoom(int steps)
+{
+    sCameraFocalLength += steps * CAMERA_ZOOM_STEP;
+    if (sCameraFocalLength < CAMERA_MIN_FOCAL_LENGTH)
+        sCameraFocalLength = CAMERA_MIN_FOCAL_LENGTH;
+    if (sCameraFocalLength > CAMERA_MAX_FOCAL_LENGTH)
+        sCameraFocalLength = CAMERA_MAX_FOCAL_LENGTH;
+}
+
+void DioramaGL_AdjustCameraPitch(int steps)
+{
+    sCameraPitch += steps * CAMERA_PITCH_STEP;
+    if (sCameraPitch < CAMERA_MIN_PITCH)
+        sCameraPitch = CAMERA_MIN_PITCH;
+    if (sCameraPitch > CAMERA_MAX_PITCH)
+        sCameraPitch = CAMERA_MAX_PITCH;
+}
+
 void DioramaGL_Shutdown(void)
 {
     DioramaGLObjects_Shutdown();
@@ -586,6 +671,10 @@ void DioramaGL_Shutdown(void)
         glDeleteTextures(1, &sDebugTexture.id);
     if (sAtlasTexture.id != 0)
         glDeleteTextures(1, &sAtlasTexture.id);
+    if (sBaseAtlasTexture.id != 0)
+        glDeleteTextures(1, &sBaseAtlasTexture.id);
+    if (sForegroundAtlasTexture.id != 0)
+        glDeleteTextures(1, &sForegroundAtlasTexture.id);
     if (sVertexBuffer != 0)
         dglDeleteBuffers(1, &sVertexBuffer);
     if (sVertexArray != 0)

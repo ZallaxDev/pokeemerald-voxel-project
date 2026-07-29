@@ -1,44 +1,13 @@
 #ifdef ENABLE_DIORAMA
 
 #include <float.h>
+#include <math.h>
 #include <string.h>
 
-#include "constants/metatile_behaviors.h"
 #include "diorama/terrain_mesh.h"
 
 #define FNV_OFFSET UINT64_C(1469598103934665603)
 #define FNV_PRIME UINT64_C(1099511628211)
-
-static bool IsLedge(uint8_t behavior)
-{
-    return behavior >= MB_JUMP_EAST && behavior <= MB_JUMP_SOUTHWEST;
-}
-
-static bool IsWater(uint8_t behavior)
-{
-    switch (behavior)
-    {
-    case MB_POND_WATER:
-    case MB_INTERIOR_DEEP_WATER:
-    case MB_DEEP_WATER:
-    case MB_WATERFALL:
-    case MB_SOOTOPOLIS_DEEP_WATER:
-    case MB_OCEAN_WATER:
-    case MB_NO_SURFACING:
-    case MB_SEAWEED:
-    case MB_SEAWEED_NO_SURFACING:
-    case MB_EASTWARD_CURRENT:
-    case MB_WESTWARD_CURRENT:
-    case MB_NORTHWARD_CURRENT:
-    case MB_SOUTHWARD_CURRENT:
-    case MB_WATER_DOOR:
-    case MB_WATER_SOUTH_ARROW_WARP:
-    case MB_UNUSED_6F:
-        return true;
-    default:
-        return false;
-    }
-}
 
 static uint64_t HashByte(uint64_t hash, uint8_t value)
 {
@@ -78,7 +47,7 @@ static float ResolveHeight(const struct DioramaTerrainChunkInput *input, int x, 
 
 static bool AppendVertex(struct DioramaTerrainVertex *vertices, uint32_t capacity,
                          uint32_t *count, float x, float y, float z,
-                         float u, float v, float shade)
+                         float u, float v, float shade, float textureLayer)
 {
     struct DioramaTerrainVertex *vertex;
 
@@ -91,12 +60,13 @@ static bool AppendVertex(struct DioramaTerrainVertex *vertices, uint32_t capacit
     vertex->u = u;
     vertex->v = v;
     vertex->shade = shade;
+    vertex->textureLayer = textureLayer;
     return true;
 }
 
 static bool AppendQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
-                       uint32_t *count, const float positions[4][3],
-                       const struct DioramaTerrainCell *cell, float shade)
+                        uint32_t *count, const float positions[4][3],
+                        const struct DioramaTerrainMaterial *material, float shade)
 {
     static const uint8_t order[6] = {0, 1, 2, 0, 2, 3};
     static const uint8_t uvX[4] = {0, 1, 1, 0};
@@ -106,15 +76,34 @@ static bool AppendQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
     for (i = 0; i < 6; i++)
     {
         int corner = order[i];
-        float u = uvX[corner] ? cell->u1 : cell->u0;
-        float v = uvY[corner] ? cell->v1 : cell->v0;
+        float u = uvX[corner] ? material->u1 : material->u0;
+        float v = uvY[corner] ? material->v1 : material->v0;
 
         if (!AppendVertex(vertices, capacity, count,
                           positions[corner][0], positions[corner][1], positions[corner][2],
-                          u, v, shade))
+                          u, v, shade, material->layer))
             return false;
     }
     return true;
+}
+
+static float ResolveRoofHeight(const struct DioramaTerrainCell *cell, float worldX)
+{
+    float factor;
+    float localX;
+
+    if (cell->structureId == 0 || cell->profile != DIORAMA_ROOF_GABLE_X)
+        return cell->visualHeight;
+    localX = worldX - (cell->structureX - 0.5f);
+    factor = 1.0f - fabsf(2.0f * localX / cell->structureWidth - 1.0f);
+    if ((cell->structureWidth & 1) != 0)
+        factor /= 1.0f - 1.0f / cell->structureWidth;
+    if (factor < 0.0f)
+        factor = 0.0f;
+    if (factor > 1.0f)
+        factor = 1.0f;
+    return cell->groundHeight + cell->structureBodyHeight
+         + cell->structureRoofHeight * factor;
 }
 
 static void GetSidePositions(enum DioramaTerrainFace face,
@@ -163,22 +152,7 @@ int32_t DioramaTerrain_FloorDiv(int32_t value, int32_t divisor)
 float DioramaTerrain_NormalizeElevation(uint8_t rawElevation, uint8_t behavior)
 {
     (void)rawElevation;
-    if (behavior >= MB_BRIDGE_OVER_OCEAN && behavior <= MB_BRIDGE_OVER_POND_HIGH)
-    {
-        static const float bridgeHeights[] = {0.75f, 0.75f, 1.75f, 2.75f};
-        return bridgeHeights[behavior - MB_BRIDGE_OVER_OCEAN];
-    }
-    if (behavior >= MB_BRIDGE_OVER_POND_MED_EDGE_1 && behavior <= MB_BRIDGE_OVER_POND_MED_EDGE_2)
-        return 1.75f;
-    if (behavior >= MB_BRIDGE_OVER_POND_HIGH_EDGE_1 && behavior <= MB_BRIDGE_OVER_POND_HIGH_EDGE_2)
-        return 2.75f;
-    if (behavior == MB_FORTREE_BRIDGE || behavior == MB_BIKE_BRIDGE_OVER_BARRIER)
-        return 0.75f;
-    if (IsLedge(behavior))
-        return DIORAMA_TERRAIN_LEDGE_HEIGHT;
-    if (IsWater(behavior))
-        return DIORAMA_TERRAIN_WATER_HEIGHT;
-    return 0.0f;
+    return DioramaRules_DefaultGroundHeight(behavior);
 }
 
 void DioramaTerrain_BuildHeightField(const struct DioramaTerrainHeightCell *cells,
@@ -201,6 +175,7 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
 
     hash = HashU16(hash, input->chunkX);
     hash = HashU16(hash, input->chunkY);
+    hash = HashU32(hash, input->rulesGeneration);
     for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
     {
         const struct DioramaTerrainCell *cell = &input->cells[i];
@@ -211,8 +186,27 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         hash = HashU16(hash, cell->metatileId);
         hash = HashByte(hash, cell->behavior);
         hash = HashByte(hash, cell->layerType);
-        hash = HashByte(hash, cell->rawElevation);
+        hash = HashByte(hash, cell->shape);
+        hash = HashByte(hash, cell->profile);
+        hash = HashByte(hash, cell->planeAxis);
+        hash = HashU16(hash, cell->structureId);
+        hash = HashU16(hash, cell->structureX);
+        hash = HashU16(hash, cell->structureY);
+        hash = HashByte(hash, cell->structureWidth);
+        hash = HashByte(hash, cell->structureHeight);
+        hash = HashByte(hash, cell->structureRoofRows);
+        hash = HashByte(hash, cell->structureLocalX);
+        hash = HashByte(hash, cell->structureLocalY);
+        hash = HashFloat(hash, cell->groundHeight);
         hash = HashFloat(hash, cell->visualHeight);
+        hash = HashFloat(hash, cell->featureHeight);
+        hash = HashFloat(hash, cell->structureBodyHeight);
+        hash = HashFloat(hash, cell->structureRoofHeight);
+        for (unsigned face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
+        {
+            hash = HashU16(hash, cell->materials[face].metatileId);
+            hash = HashByte(hash, cell->materials[face].layer);
+        }
     }
     return hash;
 }
@@ -251,17 +245,73 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
             };
             int face;
 
-            if (!cell->present)
+            if (!cell->present || cell->shape == DIORAMA_SHAPE_HIDDEN)
                 continue;
-            if (!AppendQuad(vertices, vertexCapacity, &vertexCount, topPositions, cell, 1.0f))
-                return false;
-            mesh->topFaceCount++;
+            if (cell->shape == DIORAMA_SHAPE_ROOF && cell->structureId != 0)
+            {
+                topPositions[0][1] = ResolveRoofHeight(cell, left);
+                topPositions[1][1] = ResolveRoofHeight(cell, right);
+                topPositions[2][1] = ResolveRoofHeight(cell, right);
+                topPositions[3][1] = ResolveRoofHeight(cell, left);
+            }
+            if (cell->materials[DIORAMA_MATERIAL_FACE_TOP].layer != DIORAMA_MATERIAL_NONE)
+            {
+                if (!AppendQuad(vertices, vertexCapacity, &vertexCount, topPositions,
+                                &cell->materials[DIORAMA_MATERIAL_FACE_TOP], 1.0f))
+                    return false;
+                mesh->topFaceCount++;
+            }
             if (left < mesh->bounds.minX) mesh->bounds.minX = left;
             if (right > mesh->bounds.maxX) mesh->bounds.maxX = right;
             if (south < mesh->bounds.minZ) mesh->bounds.minZ = south;
             if (north > mesh->bounds.maxZ) mesh->bounds.maxZ = north;
-            if (height < mesh->bounds.minY) mesh->bounds.minY = height;
-            if (height > mesh->bounds.maxY) mesh->bounds.maxY = height;
+            for (int corner = 0; corner < 4; corner++)
+            {
+                if (topPositions[corner][1] < mesh->bounds.minY)
+                    mesh->bounds.minY = topPositions[corner][1];
+                if (topPositions[corner][1] > mesh->bounds.maxY)
+                    mesh->bounds.maxY = topPositions[corner][1];
+            }
+
+            if (cell->shape == DIORAMA_SHAPE_CUTOUT)
+            {
+                float bottom = cell->groundHeight;
+                float top = bottom + cell->featureHeight;
+                float centerX = (left + right) * 0.5f;
+                float centerZ = (north + south) * 0.5f;
+                const float cutoutX[4][3] = {
+                    {left, top, centerZ}, {right, top, centerZ},
+                    {right, bottom, centerZ}, {left, bottom, centerZ},
+                };
+                const float cutoutZ[4][3] = {
+                    {centerX, top, south}, {centerX, top, north},
+                    {centerX, bottom, north}, {centerX, bottom, south},
+                };
+
+                const struct DioramaTerrainMaterial *planeMaterial =
+                    &cell->materials[DIORAMA_MATERIAL_FACE_PLANE];
+
+                if (planeMaterial->layer != DIORAMA_MATERIAL_NONE)
+                {
+                    if ((cell->planeAxis == DIORAMA_PLANE_AXIS_X
+                      || cell->planeAxis == DIORAMA_PLANE_AXIS_CROSS)
+                     && !AppendQuad(vertices, vertexCapacity, &vertexCount, cutoutX,
+                                    planeMaterial, 1.0f))
+                        return false;
+                    if (cell->planeAxis == DIORAMA_PLANE_AXIS_X
+                     || cell->planeAxis == DIORAMA_PLANE_AXIS_CROSS)
+                        mesh->featureFaceCount++;
+                    if ((cell->planeAxis == DIORAMA_PLANE_AXIS_Z
+                      || cell->planeAxis == DIORAMA_PLANE_AXIS_CROSS)
+                     && !AppendQuad(vertices, vertexCapacity, &vertexCount, cutoutZ,
+                                    planeMaterial, 0.86f))
+                        return false;
+                    if (cell->planeAxis == DIORAMA_PLANE_AXIS_Z
+                     || cell->planeAxis == DIORAMA_PLANE_AXIS_CROSS)
+                        mesh->featureFaceCount++;
+                }
+                if (top > mesh->bounds.maxY) mesh->bounds.maxY = top;
+            }
 
             for (face = DIORAMA_TERRAIN_FACE_NORTH; face <= DIORAMA_TERRAIN_FACE_WEST; face++)
             {
@@ -271,8 +321,13 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                 float neighborHeight;
                 float bottom;
                 float sidePositions[4][3];
+                const struct DioramaTerrainMaterial *sideMaterial = &cell->materials[face];
 
                 if (!neighbor->present)
+                    continue;
+                if (sideMaterial->layer == DIORAMA_MATERIAL_NONE)
+                    continue;
+                if (cell->structureId != 0 && neighbor->structureId == cell->structureId)
                     continue;
                 neighborHeight = ResolveHeight(input,
                                                x + neighborOffsets[face - 1][0],
@@ -281,8 +336,24 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                 if (height <= neighborHeight)
                     continue;
                 GetSidePositions(face, left, right, north, south, height, bottom, sidePositions);
-                if (!AppendQuad(vertices, vertexCapacity, &vertexCount, sidePositions, cell,
-                                face == DIORAMA_TERRAIN_FACE_NORTH ? 0.82f : 0.68f))
+                if (cell->shape == DIORAMA_SHAPE_ROOF && cell->structureId != 0)
+                {
+                    if (face == DIORAMA_TERRAIN_FACE_NORTH || face == DIORAMA_TERRAIN_FACE_SOUTH)
+                    {
+                        sidePositions[0][1] = ResolveRoofHeight(cell, sidePositions[0][0]);
+                        sidePositions[1][1] = ResolveRoofHeight(cell, sidePositions[1][0]);
+                    }
+                    else
+                    {
+                        float edgeHeight = ResolveRoofHeight(cell,
+                            face == DIORAMA_TERRAIN_FACE_EAST ? right : left);
+                        sidePositions[0][1] = edgeHeight;
+                        sidePositions[1][1] = edgeHeight;
+                    }
+                }
+                if (!AppendQuad(vertices, vertexCapacity, &vertexCount, sidePositions,
+                                 sideMaterial,
+                                 face == DIORAMA_TERRAIN_FACE_NORTH ? 0.82f : 0.68f))
                     return false;
                 mesh->sideFaceCount++;
                 if (bottom < mesh->bounds.minY) mesh->bounds.minY = bottom;
@@ -291,7 +362,7 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
     }
 
     mesh->vertexCount = vertexCount;
-    mesh->faceCount = mesh->topFaceCount + mesh->sideFaceCount;
+    mesh->faceCount = mesh->topFaceCount + mesh->sideFaceCount + mesh->featureFaceCount;
     mesh->geometryHash = FNV_OFFSET;
     for (uint32_t i = 0; i < vertexCount; i++)
     {
@@ -301,18 +372,20 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].u);
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].v);
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].shade);
+        mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].textureLayer);
     }
     return true;
 }
 
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
-                                    float cameraX, float cameraZ)
+                                    float cameraX, float cameraZ,
+                                    float cameraPitch, float focalLength)
 {
     const float cameraHeight = 16.0f;
-    const float cameraDistance = 18.0f;
-    const float pitchSin = 0.65f;
-    const float pitchCos = 0.759934f;
-    const float focalLength = 130.0f;
+    const float cameraTargetVertical = -0.458944f;
+    const float pitchSin = sinf(cameraPitch);
+    const float pitchCos = cosf(cameraPitch);
+    const float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;
     const float nearDepth = 0.1f;
     const float farDepth = 80.0f;
     bool outside[6] = {true, true, true, true, true, true};

@@ -22,8 +22,9 @@ struct DioramaTerrainMetrics
 bool DioramaGLTerrain_Init(void);
 void DioramaGLTerrain_Reset(void);
 bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot);
-void DioramaGLTerrain_Draw(GLuint atlasTexture, float cameraX, float cameraZ,
-                           bool debug);
+void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
+                           GLuint foregroundAtlasTexture, float cameraX, float cameraZ,
+                           float cameraPitch, float focalLength, bool debug);
 const struct DioramaTerrainMetrics *DioramaGLTerrain_GetMetrics(void);
 void DioramaGLTerrain_Shutdown(void);
 

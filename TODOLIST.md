@@ -258,6 +258,11 @@ anclaje estable en los pies, sombras sobre el terreno, orden de profundidad,
 transiciones sin interpolacion residual y ausencia de vibracion con la camara
 y speedup.
 
+Mejora posterior: en el renderer diorama, la rueda del raton ajusta el zoom
+de la camara y las teclas `,` y `.` reducen y aumentan respectivamente su
+angulo de perspectiva. Los dos controles estan acotados y no modifican estado
+de gameplay.
+
 Validacion solicitada: en Villa Raiz, caminar y correr en las cuatro
 direcciones junto a NPC y bordes de edificios, hablar con un NPC, cruzar un
 warp y repetir con speedup. Confirmar que cada frame y flip coincide con el
@@ -269,21 +274,67 @@ mostrar los personajes visibles, `CAC` los frames residentes y `UPL` volver a
 
 ## Fase 6: reglas y vertical slice Villa Raiz + Ruta 101
 
-- [ ] Definir JSON versionado para defaults, behaviors, tilesets, mapas y edificios.
-- [ ] Crear compilador Python de JSON a tablas C, sin parser JSON en runtime.
-- [ ] Validar mapas, simbolos, rangos, alturas, perfiles y duplicados.
-- [ ] Implementar prioridad completa de resolucion y fallback plano.
-- [ ] Clasificar suelo, arboles, hierba, carteles, casas, agua y bordes.
-- [ ] Implementar bloques y perfiles basicos de tejado.
-- [ ] Crear reglas de Villa Raiz y Ruta 101.
-- [ ] Añadir tests de reglas y capturas golden locales.
-- [ ] Implementar fallback 2D en dialogos, menus y combates.
+- [x] Definir JSON versionado para defaults, behaviors, tilesets, mapas y edificios.
+- [x] Crear compilador Python de JSON a tablas C, sin parser JSON en runtime.
+- [x] Validar mapas, simbolos, rangos, alturas, perfiles y duplicados.
+- [x] Implementar prioridad completa de resolucion y fallback plano.
+- [x] Clasificar suelo, arboles, hierba, carteles, casas, agua y bordes.
+- [x] Implementar bloques y perfiles basicos de tejado.
+- [x] Agrupar edificios multicelda y eliminar sus caras internas.
+- [x] Definir materiales por cara y planos orientados sin estirar texturas arbitrarias.
+- [x] Inferir bases inequívocas y generar carteles desde eventos de mapa.
+- [x] Crear reglas de Villa Raiz y Ruta 101.
+- [x] Añadir tests de reglas y goldens deterministas de ambos mapas.
+- [x] Implementar fallback 2D en dialogos, menus y combates.
+
+Implementacion completada el 2026-07-29. Los JSON bajo `data/diorama/`
+describen defaults por behavior, metatiles por tileset, overrides de mapa y
+plantillas de edificios. `tools/diorama_rules/compile_rules.py` valida los
+simbolos contra mapas, layouts, behaviors y tablas binarias del repositorio,
+rechaza claves y coordenadas duplicadas, comprueba rangos y perfiles, y genera
+tablas C inmutables sin parser JSON en runtime. El build regenera y comprueba
+estas tablas mediante `diorama_rules.mk`.
+
+El resolver aplica la prioridad mapa -> tileset -> edificio -> behavior ->
+colision/elevacion -> heuristica -> plano seguro. Solo Villa Raiz y Ruta 101
+habilitan 3D en modo `AUTO`; interiores y cualquier mapa sin cobertura usan el
+framebuffer 2D completo, igual que dialogos, menus, fades y combates. Terreno y
+personajes consultan el mismo resolver, por lo que los volumenes decorativos no
+alteran el plano de gameplay ni el anclaje de los pies.
+
+El vertical slice clasifica arboles y hierba como recortes orientados, agua y
+ledges por behavior, y las dos casas y el laboratorio mediante estructuras
+multicelda con perfil gable-x continuo. Cada cara elige metatile y capa
+`full`, `base`, `foreground` o `none`; las caras internas no se generan y las
+puertas permanecen integradas en la fachada. Los carteles se derivan de los
+`bg_events` y usan un solo plano. El compilador infiere el suelo base de un
+recorte solo cuando existe una coincidencia binaria unica; los demas casos
+siguen siendo explicitos. Los recortes separan atlas completo, suelo base y
+silueta por diferencia para no elevar el suelo ni duplicar el fondo. Los hashes
+golden de las rejillas completas 20x20 de ambos mapas detectan cambios de reglas
+o contenido; las capturas con assets permanecen locales y fuera de Git.
+
+`make -f Makefile_pc test-diorama` cubre orden de prioridad, soporte de mapa,
+coordenadas con offset, tilesets primario/secundario, perfiles, fallback,
+determinismo del compilador, validaciones, hashes golden, firmas, recortes,
+volumenes y anclaje de sprites. Los builds i386 clasico y diorama compilan.
 
 Prueba manual realizable por el usuario: jugar el recorrido completo Villa Raiz
 -> Ruta 101, entrar en casas, hablar, abrir menus, combatir, guardar y cargar;
 confirmar volumen coherente, ausencia de huecos y fallback 2D correcto.
 
-Resultado del usuario: **PENDIENTE**
+Resultado del usuario: **APROBADO** (2026-07-29)
+
+Primera validacion visual rechazada el 2026-07-29: los edificios aparecian como
+bloques independientes, los tejados repetian arte en escalones, los arboles
+elevaban tambien el suelo y los carteles formaban cruces. Se sustituyo el
+modelo por estructuras multicelda, tejados continuos, materiales por cara y
+planos orientados. La herramienta visual prevista para la Fase 10 no se
+adelanta; la Fase 6 debe validarse con este modelo declarativo y automatizado.
+
+La segunda validacion manual confirmo que el modelo corregido representa de
+forma coherente las estructuras, materiales por cara, arboles y carteles. La
+Fase 6 queda cerrada y se desbloquea la Fase 7.
 
 ## Fase 7: cambios dinamicos, conexiones y transiciones
 
@@ -298,7 +349,7 @@ Prueba manual realizable por el usuario: ejecutar cada caso dinamico disponible,
 cruzar conexiones y encadenar warps con speedup; comprobar que no aparece vacio,
 un frame antiguo ni una recarga completa innecesaria.
 
-Resultado del usuario: **BLOQUEADO POR FASE 6**
+Resultado del usuario: **PENDIENTE**
 
 ## Fase 8: agua, animaciones y clima basico
 

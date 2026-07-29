@@ -30,9 +30,14 @@ uint8_t DioramaMetatile_DecodePixel(const uint8_t *tileGraphics, uint16_t tileEn
 uint32_t DioramaMetatile_ConvertColor(uint16_t bgr555, bool transparent);
 void DioramaMetatile_Compose(const uint8_t *tileGraphics, const uint16_t *tileEntries,
                              const uint16_t *palette, uint32_t *pixels);
+void DioramaMetatile_ComposeLayer(const uint8_t *tileGraphics, const uint16_t *tileEntries,
+                                  const uint16_t *palette, uint8_t layer,
+                                  uint32_t *pixels);
 void DioramaAtlas_Clear(uint32_t *atlasPixels, uint8_t *presentMetatiles);
 bool DioramaAtlas_Update(const struct DioramaSceneSnapshot *snapshot,
-                         uint32_t *atlasPixels, uint8_t *presentMetatiles);
+                         const uint16_t *cutoutBaseMetatileIds,
+                         uint32_t *atlasPixels, uint32_t *baseAtlasPixels,
+                         uint32_t *foregroundAtlasPixels, uint8_t *presentMetatiles);
 struct DioramaAtlasUv DioramaAtlas_GetUv(uint16_t metatileId);
 
 #endif

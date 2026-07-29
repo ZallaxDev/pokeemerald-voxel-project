@@ -1,5 +1,6 @@
 #ifdef ENABLE_DIORAMA
 
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 #include <SDL2/SDL.h>
@@ -54,6 +55,8 @@ static GLuint sProgram;
 static GLuint sVertexArray;
 static GLuint sVertexBuffer;
 static GLint sCameraLocation;
+static GLint sCameraPitchLocation;
+static GLint sFocalLengthLocation;
 static GLint sImageLocation;
 static GLint sDrawModeLocation;
 
@@ -62,15 +65,17 @@ static const char sObjectVertexShader[] =
     "layout(location = 0) in vec3 position;\n"
     "layout(location = 1) in vec2 texCoord;\n"
     "uniform vec2 cameraPosition;\n"
+    "uniform float cameraPitch;\n"
+    "uniform float focalLength;\n"
     "out vec2 uv;\n"
     "void main() {\n"
     "  const float cameraHeight = 16.0;\n"
-    "  const float cameraDistance = 18.0;\n"
-    "  const float pitchSin = 0.65;\n"
-    "  const float pitchCos = 0.759934;\n"
-    "  const float focalLength = 130.0;\n"
+    "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = 80.0;\n"
+    "  float pitchSin = sin(cameraPitch);\n"
+    "  float pitchCos = cos(cameraPitch);\n"
+    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
     "  float relativeX = position.x - cameraPosition.x;\n"
     "  float relativeZ = position.z - cameraPosition.y;\n"
     "  float depth = (cameraHeight - position.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
@@ -148,9 +153,13 @@ static bool CreateProgram(void)
         return false;
     }
     sCameraLocation = dglGetUniformLocation(sProgram, "cameraPosition");
+    sCameraPitchLocation = dglGetUniformLocation(sProgram, "cameraPitch");
+    sFocalLengthLocation = dglGetUniformLocation(sProgram, "focalLength");
     sImageLocation = dglGetUniformLocation(sProgram, "image");
     sDrawModeLocation = dglGetUniformLocation(sProgram, "drawMode");
-    return sCameraLocation >= 0 && sImageLocation >= 0 && sDrawModeLocation >= 0;
+    return sCameraLocation >= 0 && sCameraPitchLocation >= 0
+        && sFocalLengthLocation >= 0 && sImageLocation >= 0
+        && sDrawModeLocation >= 0;
 }
 
 static void ClearTextureCache(void)
@@ -375,12 +384,13 @@ static void DrawShadow(const struct ObjectRenderItem *item, struct DioramaSprite
     UploadAndDraw(vertices);
 }
 
-static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpritePose pose)
+static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpritePose pose,
+                          float pitchSin, float pitchCos)
 {
     float halfWidth = item->width / 32.0f;
     float height = item->height / 16.0f;
-    float topY = pose.y + height * 0.759934f;
-    float topZ = pose.z + height * 0.65f;
+    float topY = pose.y + height * pitchCos;
+    float topZ = pose.z + height * pitchSin;
     const struct ObjectVertex vertices[6] = {
         {pose.x - halfWidth, pose.y, pose.z, 0, 1},
         {pose.x + halfWidth, pose.y, pose.z, 1, 1},
@@ -394,10 +404,13 @@ static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpr
     UploadAndDraw(vertices);
 }
 
-void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ)
+void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
+                           float cameraPitch, float focalLength)
 {
     struct DioramaSpritePose poses[DIORAMA_MAX_OBJECTS];
     uint8_t order[DIORAMA_MAX_OBJECTS];
+    float pitchSin = sinf(cameraPitch);
+    float pitchCos = cosf(cameraPitch);
     int i;
 
     if (!sReady)
@@ -421,9 +434,9 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ)
             const struct ObjectRenderItem *left = &sItems[order[position - 1]];
             const struct ObjectRenderItem *right = &sItems[value];
             if (DioramaSprite_CompareDepth(&poses[order[position - 1]], left->object.priority,
-                    left->object.subpriority, left->object.oamOrder, &poses[value],
-                    right->object.priority, right->object.subpriority,
-                    right->object.oamOrder, cameraZ) <= 0)
+                     left->object.subpriority, left->object.oamOrder, &poses[value],
+                     right->object.priority, right->object.subpriority,
+                     right->object.oamOrder, cameraZ, cameraPitch) <= 0)
                 break;
             order[position] = order[position - 1];
             position--;
@@ -435,6 +448,8 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ)
     dglUseProgram(sProgram);
     dglBindVertexArray(sVertexArray);
     dglUniform2f(sCameraLocation, cameraX, cameraZ);
+    dglUniform1f(sCameraPitchLocation, cameraPitch);
+    dglUniform1f(sFocalLengthLocation, focalLength);
     dglUniform1i(sImageLocation, 0);
     dglActiveTexture(GL_TEXTURE0);
     glEnable(GL_DEPTH_TEST);
@@ -456,7 +471,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ)
     for (i = 0; i < sItemCount; i++)
     {
         int index = order[i];
-        DrawBillboard(&sItems[index], poses[index]);
+        DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
     }
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);

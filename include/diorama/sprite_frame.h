@@ -52,8 +52,8 @@ struct DioramaSpritePose DioramaSprite_InterpolatePose(struct DioramaSpritePose 
                                                         float alpha);
 int DioramaSprite_CompareDepth(const struct DioramaSpritePose *left, uint8_t leftPriority,
                                uint8_t leftSubpriority, uint8_t leftOamOrder,
-                               const struct DioramaSpritePose *right, uint8_t rightPriority,
-                               uint8_t rightSubpriority, uint8_t rightOamOrder,
-                               float cameraZ);
+                                const struct DioramaSpritePose *right, uint8_t rightPriority,
+                                uint8_t rightSubpriority, uint8_t rightOamOrder,
+                                float cameraZ, float cameraPitch);
 
 #endif

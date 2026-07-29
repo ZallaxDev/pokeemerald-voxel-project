@@ -1050,6 +1050,15 @@ void ProcessEvents(void)
                 ApplyDioramaVideoSetting((enum PlatformSetting)(uintptr_t)event.user.data1,
                                          (u8)(uintptr_t)event.user.data2);
             break;
+        case SDL_MOUSEWHEEL:
+        {
+            int steps = event.wheel.y;
+
+            if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
+                steps = -steps;
+            DioramaGL_AdjustCameraZoom(steps);
+            break;
+        }
 #endif
 #ifdef __ANDROID__
         case SDL_CONTROLLERDEVICEADDED:
@@ -1148,6 +1157,12 @@ void ProcessEvents(void)
             case SDLK_F3:
                 if (event.key.repeat == 0)
                     DioramaGL_ToggleTerrainDebug();
+                break;
+            case SDLK_COMMA:
+                DioramaGL_AdjustCameraPitch(-1);
+                break;
+            case SDLK_PERIOD:
+                DioramaGL_AdjustCameraPitch(1);
                 break;
 #endif
             // Screen-reader hotkeys. These aren't GBA buttons, so they're

@@ -1,9 +1,11 @@
 #ifdef ENABLE_DIORAMA
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "diorama/sprite_frame.h"
+#include "diorama/rules.h"
 #include "diorama/terrain_mesh.h"
 
 static uint32_t ConvertColor(uint16_t bgr555)
@@ -138,6 +140,8 @@ bool DioramaSprite_BuildPose(const struct DioramaSceneSnapshot *snapshot,
 {
     const struct DioramaCellSnapshot *currentCell;
     const struct DioramaCellSnapshot *previousCell;
+    struct DioramaResolvedCell currentRule;
+    struct DioramaResolvedCell previousRule;
     float currentHeight;
     float previousHeight;
     float moveProgress = 1.0f;
@@ -150,10 +154,13 @@ bool DioramaSprite_BuildPose(const struct DioramaSceneSnapshot *snapshot,
     previousCell = FindCell(snapshot, object->previousMapX, object->previousMapY);
     if (currentCell == NULL)
         return false;
-    currentHeight = DioramaTerrain_NormalizeElevation(currentCell->elevation,
-                                                       currentCell->behavior);
-    previousHeight = previousCell == NULL ? currentHeight
-        : DioramaTerrain_NormalizeElevation(previousCell->elevation, previousCell->behavior);
+    if (!DioramaRules_ResolveCell(snapshot, currentCell, &currentRule))
+        return false;
+    currentHeight = currentRule.groundHeight;
+    previousHeight = currentHeight;
+    if (previousCell != NULL
+     && DioramaRules_ResolveCell(snapshot, previousCell, &previousRule))
+        previousHeight = previousRule.groundHeight;
     deltaX = object->currentMapX - object->previousMapX;
     deltaY = object->currentMapY - object->previousMapY;
     if (deltaX != 0)
@@ -238,12 +245,14 @@ int DioramaSprite_CompareDepth(const struct DioramaSpritePose *left, uint8_t lef
                                uint8_t leftSubpriority, uint8_t leftOamOrder,
                                const struct DioramaSpritePose *right, uint8_t rightPriority,
                                uint8_t rightSubpriority, uint8_t rightOamOrder,
-                               float cameraZ)
+                               float cameraZ, float cameraPitch)
 {
-    float leftDepth = (16.0f - left->y) * 0.65f
-                    + (left->z - cameraZ + 18.0f) * 0.759934f;
-    float rightDepth = (16.0f - right->y) * 0.65f
-                     + (right->z - cameraZ + 18.0f) * 0.759934f;
+    float pitchSin = sinf(cameraPitch);
+    float pitchCos = cosf(cameraPitch);
+    float leftDepth = (16.0f - left->y) * pitchSin
+                    + (left->z - cameraZ) * pitchCos;
+    float rightDepth = (16.0f - right->y) * pitchSin
+                     + (right->z - cameraZ) * pitchCos;
 
     if (leftDepth < rightDepth) return 1;
     if (leftDepth > rightDepth) return -1;

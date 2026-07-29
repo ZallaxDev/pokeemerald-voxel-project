@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "map": "MAP_ROUTE101",
+  "layout": "LAYOUT_ROUTE101",
+  "supported": true,
+  "buildings": [],
+  "eventRules": {
+    "sign": { "shape": "cutout", "axis": "x", "height": 0.85, "baseMetatile": 1,
+      "faces": { "top": { "metatile": "self", "layer": "base" } } }
+  },
+  "overrides": []
+}

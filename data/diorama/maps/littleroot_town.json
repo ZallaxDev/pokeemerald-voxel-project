@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "map": "MAP_LITTLEROOT_TOWN",
+  "layout": "LAYOUT_LITTLEROOT_TOWN",
+  "supported": true,
+  "buildings": [
+    { "template": "littleroot_house", "x": 2, "y": 4 },
+    { "template": "littleroot_house", "x": 13, "y": 4 },
+    { "template": "birch_lab", "x": 3, "y": 12 }
+  ],
+  "eventRules": {
+    "sign": { "shape": "cutout", "axis": "x", "height": 0.85, "baseMetatile": 1,
+      "faces": { "top": { "metatile": "self", "layer": "base" } } }
+  },
+  "overrides": []
+}

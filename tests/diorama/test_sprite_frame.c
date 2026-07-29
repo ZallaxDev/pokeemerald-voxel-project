@@ -284,11 +284,19 @@ static void TestDepthOrder(void)
     struct DioramaSpritePose nearPose = {0, 0, 2, 0};
 
     CHECK(DioramaSprite_CompareDepth(&farPose, 1, 10, 1,
-                                     &nearPose, 1, 10, 2, 0) < 0);
+                                     &nearPose, 1, 10, 2, 0, 0.70758444f) < 0);
     CHECK(DioramaSprite_CompareDepth(&nearPose, 2, 10, 1,
-                                     &nearPose, 1, 10, 2, 0) < 0);
+                                     &nearPose, 1, 10, 2, 0, 0.70758444f) < 0);
     CHECK(DioramaSprite_CompareDepth(&nearPose, 1, 10, 1,
-                                     &nearPose, 1, 10, 2, 0) > 0);
+                                     &nearPose, 1, 10, 2, 0, 0.70758444f) > 0);
+    farPose.y = 2.0f;
+    farPose.z = 1.0f;
+    nearPose.y = 0.0f;
+    nearPose.z = 0.0f;
+    CHECK(DioramaSprite_CompareDepth(&farPose, 1, 10, 1,
+                                     &nearPose, 1, 10, 2, 0, 0.34906585f) < 0);
+    CHECK(DioramaSprite_CompareDepth(&farPose, 1, 10, 1,
+                                     &nearPose, 1, 10, 2, 0, 1.22173048f) > 0);
 }
 
 int main(void)

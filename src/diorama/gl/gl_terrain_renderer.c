@@ -7,6 +7,7 @@
 #include "diorama/gl_loader.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
+#include "diorama/rules.h"
 #include "diorama/terrain_mesh.h"
 
 #define TERRAIN_CHUNK_CACHE_SIZE 36
@@ -19,6 +20,7 @@ struct GLTerrainChunk
     int16_t chunkX;
     int16_t chunkY;
     uint32_t mapGeneration;
+    uint32_t rulesGeneration;
     uint64_t signature;
     uint64_t lastSeenSequence;
     GLuint vertexArray;
@@ -29,33 +31,41 @@ struct GLTerrainChunk
 static struct GLTerrainChunk sChunks[TERRAIN_CHUNK_CACHE_SIZE];
 static struct DioramaTerrainVertex sScratchVertices[DIORAMA_TERRAIN_MAX_VERTICES];
 static struct DioramaTerrainVertex sDebugVertices[TERRAIN_DEBUG_MAX_VERTICES];
-static struct DioramaTerrainHeightCell sHeightCells[DIORAMA_MAX_VISIBLE_CELLS];
-static float sVisualHeights[DIORAMA_MAX_VISIBLE_CELLS];
+static struct DioramaResolvedCell sResolvedCells[DIORAMA_MAX_VISIBLE_CELLS];
 static struct DioramaTerrainMetrics sMetrics;
 static GLuint sProgram;
 static GLuint sDebugVertexArray;
 static GLuint sDebugVertexBuffer;
 static GLint sCameraLocation;
+static GLint sCameraPitchLocation;
+static GLint sFocalLengthLocation;
 static GLint sImageLocation;
+static GLint sBaseImageLocation;
+static GLint sForegroundImageLocation;
 static GLint sDebugColorLocation;
 static uint32_t sMapGeneration;
+static uint32_t sRulesGeneration;
 
 static const char sTerrainVertexShader[] =
     "#version 330 core\n"
     "layout(location = 0) in vec3 position;\n"
     "layout(location = 1) in vec2 texCoord;\n"
     "layout(location = 2) in float vertexShade;\n"
+    "layout(location = 3) in float vertexTextureLayer;\n"
     "uniform vec2 cameraPosition;\n"
+    "uniform float cameraPitch;\n"
+    "uniform float focalLength;\n"
     "out vec2 uv;\n"
     "out float shade;\n"
+    "flat out int textureLayer;\n"
     "void main() {\n"
     "  const float cameraHeight = 16.0;\n"
-    "  const float cameraDistance = 18.0;\n"
-    "  const float pitchSin = 0.65;\n"
-    "  const float pitchCos = 0.759934;\n"
-    "  const float focalLength = 130.0;\n"
+    "  const float cameraTargetVertical = -0.458944;\n"
     "  const float nearDepth = 0.1;\n"
     "  const float farDepth = 80.0;\n"
+    "  float pitchSin = sin(cameraPitch);\n"
+    "  float pitchCos = cos(cameraPitch);\n"
+    "  float cameraDistance = (cameraHeight * pitchCos + cameraTargetVertical) / pitchSin;\n"
     "  float relativeX = position.x - cameraPosition.x;\n"
     "  float relativeZ = position.z - cameraPosition.y;\n"
     "  float depth = (cameraHeight - position.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
@@ -67,18 +77,23 @@ static const char sTerrainVertexShader[] =
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
     "  uv = texCoord;\n"
     "  shade = vertexShade;\n"
+    "  textureLayer = int(vertexTextureLayer);\n"
     "}\n";
 
 static const char sTerrainFragmentShader[] =
     "#version 330 core\n"
     "in vec2 uv;\n"
     "in float shade;\n"
+    "flat in int textureLayer;\n"
     "out vec4 color;\n"
     "uniform sampler2D image;\n"
+    "uniform sampler2D baseImage;\n"
+    "uniform sampler2D foregroundImage;\n"
     "uniform vec4 debugColor;\n"
     "void main() {\n"
     "  if (debugColor.a >= 0.0) { color = debugColor; return; }\n"
-    "  vec4 texel = texture(image, uv);\n"
+    "  vec4 texel = textureLayer == 1 ? texture(baseImage, uv)\n"
+    "             : (textureLayer == 2 ? texture(foregroundImage, uv) : texture(image, uv));\n"
     "  if (texel.a < 0.5) discard;\n"
     "  color = vec4(texel.rgb * shade, texel.a);\n"
     "}\n";
@@ -129,9 +144,16 @@ static bool CreateProgram(void)
         return false;
     }
     sCameraLocation = dglGetUniformLocation(sProgram, "cameraPosition");
+    sCameraPitchLocation = dglGetUniformLocation(sProgram, "cameraPitch");
+    sFocalLengthLocation = dglGetUniformLocation(sProgram, "focalLength");
     sImageLocation = dglGetUniformLocation(sProgram, "image");
+    sBaseImageLocation = dglGetUniformLocation(sProgram, "baseImage");
+    sForegroundImageLocation = dglGetUniformLocation(sProgram, "foregroundImage");
     sDebugColorLocation = dglGetUniformLocation(sProgram, "debugColor");
-    return sCameraLocation >= 0 && sImageLocation >= 0 && sDebugColorLocation >= 0;
+    return sCameraLocation >= 0 && sCameraPitchLocation >= 0
+        && sFocalLengthLocation >= 0 && sImageLocation >= 0
+        && sBaseImageLocation >= 0 && sForegroundImageLocation >= 0
+        && sDebugColorLocation >= 0;
 }
 
 static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
@@ -149,6 +171,10 @@ static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
     dglVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE,
                            sizeof(struct DioramaTerrainVertex),
                            (void *)offsetof(struct DioramaTerrainVertex, shade));
+    dglEnableVertexAttribArray(3);
+    dglVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE,
+                           sizeof(struct DioramaTerrainVertex),
+                           (void *)offsetof(struct DioramaTerrainVertex, textureLayer));
 }
 
 static struct GLTerrainChunk *FindChunk(int chunkX, int chunkY)
@@ -178,7 +204,7 @@ static struct GLTerrainChunk *AllocateChunk(void)
 }
 
 static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
-                       const float *visualHeights,
+                        const struct DioramaResolvedCell *resolvedCells,
                        int chunkX, int chunkY,
                        struct DioramaTerrainChunkInput *input)
 {
@@ -192,6 +218,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
     input->chunkX = chunkX;
     input->chunkY = chunkY;
     input->mapGeneration = snapshot->mapGeneration;
+    input->rulesGeneration = DioramaRules_GetGeneration();
     for (y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
     {
         for (x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
@@ -203,7 +230,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             int gridIndex;
             const struct DioramaCellSnapshot *source;
             struct DioramaTerrainCell *cell;
-            struct DioramaAtlasUv uv;
+            int face;
 
             cell = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
             cell->mapX = mapX;
@@ -216,7 +243,6 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             source = &snapshot->cells[gridIndex];
             if (source->mapX != mapX || source->mapY != mapY || source->metatileId >= DIORAMA_TILE_COUNT)
                 continue;
-            uv = DioramaAtlas_GetUv(source->metatileId);
             cell->present = true;
             cell->mapX = source->mapX;
             cell->mapY = source->mapY;
@@ -225,11 +251,37 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->layerType = source->layerType;
             cell->collision = source->collision;
             cell->rawElevation = source->elevation;
-            cell->visualHeight = visualHeights[gridIndex];
-            cell->u0 = uv.u0;
-            cell->v0 = uv.v0;
-            cell->u1 = uv.u1;
-            cell->v1 = uv.v1;
+            cell->shape = resolvedCells[gridIndex].shape;
+            cell->profile = resolvedCells[gridIndex].profile;
+            cell->planeAxis = resolvedCells[gridIndex].planeAxis;
+            cell->structureId = resolvedCells[gridIndex].structureId;
+            cell->structureX = resolvedCells[gridIndex].structureX;
+            cell->structureY = resolvedCells[gridIndex].structureY;
+            cell->structureWidth = resolvedCells[gridIndex].structureWidth;
+            cell->structureHeight = resolvedCells[gridIndex].structureHeight;
+            cell->structureRoofRows = resolvedCells[gridIndex].structureRoofRows;
+            cell->structureLocalX = resolvedCells[gridIndex].structureLocalX;
+            cell->structureLocalY = resolvedCells[gridIndex].structureLocalY;
+            cell->groundHeight = resolvedCells[gridIndex].groundHeight;
+            cell->visualHeight = resolvedCells[gridIndex].topHeight;
+            cell->featureHeight = resolvedCells[gridIndex].featureHeight;
+            cell->structureBodyHeight = resolvedCells[gridIndex].structureBodyHeight;
+            cell->structureRoofHeight = resolvedCells[gridIndex].structureRoofHeight;
+            for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
+            {
+                uint16_t materialId = resolvedCells[gridIndex].materials[face].metatileId;
+                struct DioramaAtlasUv uv;
+
+                if (materialId == DIORAMA_MATERIAL_METATILE_SELF)
+                    materialId = source->metatileId;
+                uv = DioramaAtlas_GetUv(materialId);
+                cell->materials[face].metatileId = materialId;
+                cell->materials[face].layer = resolvedCells[gridIndex].materials[face].layer;
+                cell->materials[face].u0 = uv.u0;
+                cell->materials[face].v0 = uv.v0;
+                cell->materials[face].u1 = uv.u1;
+                cell->materials[face].v1 = uv.v1;
+            }
             if (x >= DIORAMA_TERRAIN_HALO && x < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE
              && y >= DIORAMA_TERRAIN_HALO && y < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE)
                 hasInterior = true;
@@ -261,6 +313,7 @@ static bool UploadChunk(struct GLTerrainChunk *chunk,
     chunk->chunkX = input->chunkX;
     chunk->chunkY = input->chunkY;
     chunk->mapGeneration = input->mapGeneration;
+    chunk->rulesGeneration = input->rulesGeneration;
     chunk->signature = signature;
     chunk->mesh = mesh;
     return true;
@@ -271,6 +324,7 @@ bool DioramaGLTerrain_Init(void)
     memset(sChunks, 0, sizeof(sChunks));
     memset(&sMetrics, 0, sizeof(sMetrics));
     sMapGeneration = 0;
+    sRulesGeneration = 0;
     if (!CreateProgram())
         return false;
     dglGenVertexArrays(1, &sDebugVertexArray);
@@ -302,24 +356,18 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
     int chunkX;
     int chunkY;
     int i;
+    uint32_t rulesGeneration = DioramaRules_GetGeneration();
 
     sMetrics.rebuiltChunks = 0;
-    if (snapshot->mapGeneration != sMapGeneration)
+    if (snapshot->mapGeneration != sMapGeneration || rulesGeneration != sRulesGeneration)
     {
         DioramaGLTerrain_Reset();
         sMapGeneration = snapshot->mapGeneration;
+        sRulesGeneration = rulesGeneration;
     }
     for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
         sChunks[i].active = false;
-    for (i = 0; i < snapshot->visibleCellCount; i++)
-    {
-        sHeightCells[i].mapX = snapshot->cells[i].mapX;
-        sHeightCells[i].mapY = snapshot->cells[i].mapY;
-        sHeightCells[i].behavior = snapshot->cells[i].behavior;
-        sHeightCells[i].rawElevation = snapshot->cells[i].elevation;
-    }
-    DioramaTerrain_BuildHeightField(sHeightCells, DIORAMA_GRID_WIDTH,
-                                    DIORAMA_GRID_HEIGHT, sVisualHeights);
+    DioramaRules_ResolveGrid(snapshot, sResolvedCells);
 
     minChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX, DIORAMA_TERRAIN_CHUNK_SIZE);
     maxChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + DIORAMA_GRID_WIDTH - 1,
@@ -335,7 +383,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
             uint64_t signature;
             bool newIdentity = false;
 
-            if (!BuildInput(snapshot, sVisualHeights, chunkX, chunkY, &input))
+            if (!BuildInput(snapshot, sResolvedCells, chunkX, chunkY, &input))
                 continue;
             signature = DioramaTerrain_ChunkSignature(&input);
             chunk = FindChunk(chunkX, chunkY);
@@ -347,6 +395,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
             if (chunk == NULL)
                 return false;
             if (newIdentity || !chunk->occupied || chunk->mapGeneration != snapshot->mapGeneration
+             || chunk->rulesGeneration != rulesGeneration
              || chunk->signature != signature)
             {
                 if (!UploadChunk(chunk, &input, signature))
@@ -385,12 +434,14 @@ static uint32_t AppendBoundsVertices(uint32_t count, const struct DioramaTerrain
         sDebugVertices[count].u = 0.0f;
         sDebugVertices[count].v = 0.0f;
         sDebugVertices[count].shade = 1.0f;
+        sDebugVertices[count].textureLayer = DIORAMA_TERRAIN_TEXTURE_FULL;
     }
     return count;
 }
 
-void DioramaGLTerrain_Draw(GLuint atlasTexture, float cameraX, float cameraZ,
-                           bool debug)
+void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
+                           GLuint foregroundAtlasTexture, float cameraX, float cameraZ,
+                           float cameraPitch, float focalLength, bool debug)
 {
     uint32_t debugVertexCount = 0;
     int i;
@@ -402,10 +453,18 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, float cameraX, float cameraZ,
     sMetrics.drawCalls = 0;
     dglUseProgram(sProgram);
     dglUniform2f(sCameraLocation, cameraX, cameraZ);
+    dglUniform1f(sCameraPitchLocation, cameraPitch);
+    dglUniform1f(sFocalLengthLocation, focalLength);
     dglUniform1i(sImageLocation, 0);
+    dglUniform1i(sBaseImageLocation, 1);
+    dglUniform1i(sForegroundImageLocation, 2);
     dglUniform4f(sDebugColorLocation, 0.0f, 0.0f, 0.0f, -1.0f);
     dglActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, atlasTexture);
+    dglActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, baseAtlasTexture);
+    dglActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, foregroundAtlasTexture);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_TRUE);
@@ -419,7 +478,8 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, float cameraX, float cameraZ,
 
         if (!chunk->active)
             continue;
-        if (!DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, cameraX, cameraZ))
+        if (!DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, cameraX, cameraZ,
+                                             cameraPitch, focalLength))
         {
             sMetrics.culledChunks++;
             continue;

@@ -68,6 +68,38 @@ void DioramaMetatile_Compose(const uint8_t *tileGraphics, const uint16_t *tileEn
     }
 }
 
+void DioramaMetatile_ComposeLayer(const uint8_t *tileGraphics, const uint16_t *tileEntries,
+                                  const uint16_t *palette, uint8_t layer,
+                                  uint32_t *pixels)
+{
+    int tile;
+
+    memset(pixels, 0, DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE * sizeof(*pixels));
+    if (layer > 1)
+        return;
+    for (tile = 0; tile < 4; tile++)
+    {
+        uint16_t entry = tileEntries[layer * 4 + tile];
+        uint8_t paletteId = entry >> TILE_PALETTE_SHIFT;
+        int tileX = (tile & 1) * 8;
+        int tileY = (tile >> 1) * 8;
+        int y;
+        int x;
+
+        for (y = 0; y < 8; y++)
+        {
+            for (x = 0; x < 8; x++)
+            {
+                uint8_t colorId = DioramaMetatile_DecodePixel(tileGraphics, entry, x, y);
+
+                if (colorId != 0)
+                    pixels[(tileY + y) * DIORAMA_METATILE_SIZE + tileX + x]
+                        = DioramaMetatile_ConvertColor(palette[paletteId * 16 + colorId], false);
+            }
+        }
+    }
+}
+
 void DioramaAtlas_Clear(uint32_t *atlasPixels, uint8_t *presentMetatiles)
 {
     memset(atlasPixels, 0, DIORAMA_ATLAS_PIXEL_COUNT * sizeof(*atlasPixels));
@@ -101,9 +133,12 @@ static void BlitWithGutter(uint32_t *atlasPixels, uint16_t metatileId, const uin
 }
 
 bool DioramaAtlas_Update(const struct DioramaSceneSnapshot *snapshot,
-                         uint32_t *atlasPixels, uint8_t *presentMetatiles)
+                         const uint16_t *cutoutBaseMetatileIds,
+                         uint32_t *atlasPixels, uint32_t *baseAtlasPixels,
+                         uint32_t *foregroundAtlasPixels, uint8_t *presentMetatiles)
 {
     uint32_t metatilePixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint32_t layerPixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
     bool changed = false;
     unsigned i;
 
@@ -120,6 +155,51 @@ bool DioramaAtlas_Update(const struct DioramaSceneSnapshot *snapshot,
         DioramaMetatile_Compose(snapshot->tileGraphics, cell->tileEntries,
                                 snapshot->fadedPalette, metatilePixels);
         BlitWithGutter(atlasPixels, cell->metatileId, metatilePixels);
+        if (cutoutBaseMetatileIds != NULL
+         && cutoutBaseMetatileIds[cell->metatileId] < DIORAMA_TILE_COUNT)
+        {
+            const struct DioramaCellSnapshot *baseCell = NULL;
+            unsigned baseIndex;
+
+            for (baseIndex = 0; baseIndex < cellCount; baseIndex++)
+            {
+                if (snapshot->cells[baseIndex].metatileId == cutoutBaseMetatileIds[cell->metatileId])
+                {
+                    baseCell = &snapshot->cells[baseIndex];
+                    break;
+                }
+            }
+            if (baseCell != NULL)
+            {
+                unsigned pixel;
+
+                DioramaMetatile_Compose(snapshot->tileGraphics, baseCell->tileEntries,
+                                        snapshot->fadedPalette, layerPixels);
+                BlitWithGutter(baseAtlasPixels, cell->metatileId, layerPixels);
+                for (pixel = 0; pixel < DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE; pixel++)
+                    if (metatilePixels[pixel] == layerPixels[pixel])
+                        metatilePixels[pixel] = 0;
+                BlitWithGutter(foregroundAtlasPixels, cell->metatileId, metatilePixels);
+            }
+            else
+            {
+                DioramaMetatile_ComposeLayer(snapshot->tileGraphics, cell->tileEntries,
+                                             snapshot->fadedPalette, 0, layerPixels);
+                BlitWithGutter(baseAtlasPixels, cell->metatileId, layerPixels);
+                DioramaMetatile_ComposeLayer(snapshot->tileGraphics, cell->tileEntries,
+                                             snapshot->fadedPalette, 1, layerPixels);
+                BlitWithGutter(foregroundAtlasPixels, cell->metatileId, layerPixels);
+            }
+        }
+        else
+        {
+            DioramaMetatile_ComposeLayer(snapshot->tileGraphics, cell->tileEntries,
+                                         snapshot->fadedPalette, 0, layerPixels);
+            BlitWithGutter(baseAtlasPixels, cell->metatileId, layerPixels);
+            DioramaMetatile_ComposeLayer(snapshot->tileGraphics, cell->tileEntries,
+                                         snapshot->fadedPalette, 1, layerPixels);
+            BlitWithGutter(foregroundAtlasPixels, cell->metatileId, layerPixels);
+        }
         presentMetatiles[cell->metatileId / 8] |= 1 << (cell->metatileId % 8);
         changed = true;
     }
