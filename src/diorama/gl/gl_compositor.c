@@ -85,8 +85,8 @@ static bool sCurrent3DReady;
 static bool sTerrainAvailable;
 static bool sObjectsAvailable;
 static bool sTerrainDebug;
-static float sCameraPitch = CAMERA_DEFAULT_PITCH;
-static float sCameraFocalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
+static float sCameraPitchOffset;
+static float sCameraFocalLengthOffset;
 static enum DioramaRenderMode sRenderMode = DIORAMA_RENDER_AUTO;
 static uint64_t sProcessedSequence;
 static uint64_t sFadeStartCounter;
@@ -184,9 +184,10 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
 {
     const struct DioramaTerrainMetrics *metrics = DioramaGLTerrain_GetMetrics();
     const struct DioramaObjectMetrics *objectMetrics = DioramaGLObjects_GetMetrics();
+    struct DioramaMapProfile profile;
 
     memset(sDebugPixels, 0, sizeof(sDebugPixels));
-    FillRect(2, 2, 74, 93, RGBA(10, 14, 18, 220));
+    FillRect(2, 2, 74, 102, RGBA(10, 14, 18, 220));
     DrawValue(5, 5, "GEN:", snapshot->mapGeneration);
     DrawValue(5, 14, "CH:", metrics->activeChunks);
     DrawValue(5, 23, "VIS:", metrics->visibleChunks);
@@ -197,6 +198,12 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
     DrawValue(5, 68, "OBJ:", objectMetrics->visibleObjects);
     DrawValue(5, 77, "CAC:", objectMetrics->cachedFrames);
     DrawValue(5, 86, "UPL:", objectMetrics->uploadedFrames);
+    if (DioramaRules_GetMapProfile(snapshot->mapGroup, snapshot->mapNum,
+                                   snapshot->mapLayoutId, &profile))
+        DrawText(5, 95, profile.cameraProfile == DIORAMA_CAMERA_INTERIOR
+                           ? "CAM:I" : "CAM:E", RGB(220, 230, 235));
+    else
+        DrawText(5, 95, "CAM:-", RGB(220, 230, 235));
 
     glBindTexture(GL_TEXTURE_2D, sDebugTexture.id);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -603,6 +610,33 @@ static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
     }
 }
 
+static void GetCameraBase(const struct DioramaSceneSnapshot *snapshot,
+                          float *pitch, float *focalLength)
+{
+    struct DioramaMapProfile profile;
+
+    *pitch = CAMERA_DEFAULT_PITCH;
+    *focalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
+    if (DioramaRules_GetMapProfile(snapshot->mapGroup, snapshot->mapNum,
+                                   snapshot->mapLayoutId, &profile))
+    {
+        *pitch = profile.cameraPitch;
+        *focalLength = profile.cameraFocalLength;
+    }
+}
+
+static void GetCameraSettings(const struct DioramaSceneSnapshot *snapshot,
+                              float *pitch, float *focalLength)
+{
+    GetCameraBase(snapshot, pitch, focalLength);
+    *pitch += sCameraPitchOffset;
+    *focalLength += sCameraFocalLengthOffset;
+    if (*pitch < CAMERA_MIN_PITCH) *pitch = CAMERA_MIN_PITCH;
+    if (*pitch > CAMERA_MAX_PITCH) *pitch = CAMERA_MAX_PITCH;
+    if (*focalLength < CAMERA_MIN_FOCAL_LENGTH) *focalLength = CAMERA_MIN_FOCAL_LENGTH;
+    if (*focalLength > CAMERA_MAX_FOCAL_LENGTH) *focalLength = CAMERA_MAX_FOCAL_LENGTH;
+}
+
 static void SnapOpacity(float opacity)
 {
     sTwoDOpacity = opacity;
@@ -745,8 +779,8 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sUiTransientHoldFrames = 0;
     SnapOpacity(1.0f);
     sTerrainDebug = false;
-    sCameraPitch = CAMERA_DEFAULT_PITCH;
-    sCameraFocalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
+    sCameraPitchOffset = 0.0f;
+    sCameraFocalLengthOffset = 0.0f;
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     return true;
 }
@@ -926,9 +960,13 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     gameY = (outputHeight - gameHeight) / 2;
     if (drawTerrain)
     {
+        float cameraPitch;
+        float cameraFocalLength;
+
         GetCameraPosition(&sRenderedSceneSnapshot, &sPreviousRenderedSceneSnapshot,
                           sHasPreviousRenderedSceneSnapshot,
                           current3D ? frameAlpha : 1.0f, &cameraX, &cameraZ);
+        GetCameraSettings(&sRenderedSceneSnapshot, &cameraPitch, &cameraFocalLength);
         glEnable(GL_SCISSOR_TEST);
         glScissor(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
         glClearColor(0.035f, 0.055f, 0.07f, 1.0f);
@@ -936,11 +974,11 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glViewport(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
-                              sForegroundAtlasTexture.id, cameraX, cameraZ,
-                              sCameraPitch, sCameraFocalLength, sTerrainDebug);
+                               sForegroundAtlasTexture.id, cameraX, cameraZ,
+                               cameraPitch, cameraFocalLength, sTerrainDebug);
         DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
-                              cameraX, cameraZ, sCameraPitch,
-                              sCameraFocalLength);
+                               cameraX, cameraZ, cameraPitch,
+                               cameraFocalLength);
         glDisable(GL_SCISSOR_TEST);
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
@@ -997,20 +1035,48 @@ void DioramaGL_ToggleTerrainDebug(void)
 
 void DioramaGL_AdjustCameraZoom(int steps)
 {
-    sCameraFocalLength += steps * CAMERA_ZOOM_STEP;
-    if (sCameraFocalLength < CAMERA_MIN_FOCAL_LENGTH)
-        sCameraFocalLength = CAMERA_MIN_FOCAL_LENGTH;
-    if (sCameraFocalLength > CAMERA_MAX_FOCAL_LENGTH)
-        sCameraFocalLength = CAMERA_MAX_FOCAL_LENGTH;
+    float pitch;
+    float base;
+    float current;
+    float adjusted;
+
+    if (sHasRenderedSceneSnapshot)
+    {
+        GetCameraSettings(&sRenderedSceneSnapshot, &pitch, &current);
+        GetCameraBase(&sRenderedSceneSnapshot, &pitch, &base);
+    }
+    else
+    {
+        current = CAMERA_DEFAULT_FOCAL_LENGTH + sCameraFocalLengthOffset;
+        base = CAMERA_DEFAULT_FOCAL_LENGTH;
+    }
+    adjusted = current + steps * CAMERA_ZOOM_STEP;
+    if (adjusted < CAMERA_MIN_FOCAL_LENGTH) adjusted = CAMERA_MIN_FOCAL_LENGTH;
+    if (adjusted > CAMERA_MAX_FOCAL_LENGTH) adjusted = CAMERA_MAX_FOCAL_LENGTH;
+    sCameraFocalLengthOffset = adjusted - base;
 }
 
 void DioramaGL_AdjustCameraPitch(int steps)
 {
-    sCameraPitch += steps * CAMERA_PITCH_STEP;
-    if (sCameraPitch < CAMERA_MIN_PITCH)
-        sCameraPitch = CAMERA_MIN_PITCH;
-    if (sCameraPitch > CAMERA_MAX_PITCH)
-        sCameraPitch = CAMERA_MAX_PITCH;
+    float current;
+    float base;
+    float focalLength;
+    float adjusted;
+
+    if (sHasRenderedSceneSnapshot)
+    {
+        GetCameraSettings(&sRenderedSceneSnapshot, &current, &focalLength);
+        GetCameraBase(&sRenderedSceneSnapshot, &base, &focalLength);
+    }
+    else
+    {
+        current = CAMERA_DEFAULT_PITCH + sCameraPitchOffset;
+        base = CAMERA_DEFAULT_PITCH;
+    }
+    adjusted = current + steps * CAMERA_PITCH_STEP;
+    if (adjusted < CAMERA_MIN_PITCH) adjusted = CAMERA_MIN_PITCH;
+    if (adjusted > CAMERA_MAX_PITCH) adjusted = CAMERA_MAX_PITCH;
+    sCameraPitchOffset = adjusted - base;
 }
 
 void DioramaGL_Shutdown(void)

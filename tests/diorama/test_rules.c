@@ -56,11 +56,17 @@ static void InitLittleroot(void)
 
 static void TestMapSupport(void)
 {
+    struct DioramaMapProfile profile;
+
     assert(DioramaRules_IsMapSupported(0, 9, 10));
     assert(DioramaRules_IsMapSupported(0, 16, 17));
     assert(!DioramaRules_IsMapSupported(0, 10, 11));
     assert(!DioramaRules_IsMapSupported(0, 9, 17));
     assert(DioramaRules_GetGeneration() != 0);
+    assert(DioramaRules_GetMapProfile(0, 9, 10, &profile));
+    assert(profile.cameraProfile == DIORAMA_CAMERA_EXTERIOR);
+    assert(profile.cameraFocalLength == 130.0f);
+    assert(!DioramaRules_GetMapProfile(0, 10, 11, &profile));
 }
 
 static void TestPriority(void)

@@ -36,6 +36,36 @@ coverage, while all other maps use the generic resolver and may look incomplete.
 Generated files are `include/diorama/rules.generated.h` and
 `src/data/diorama/diorama_rules.generated.c`. Do not edit them manually.
 
+## Visual editor contract
+
+Map rules may define an editor-friendly camera profile:
+
+```json
+"camera": { "profile": "interior", "pitch": 60, "focalLength": 145 }
+```
+
+`pitch` is expressed in degrees and both numeric fields are optional. The
+compiled profile is immutable and selected from the snapshot's map and layout;
+camera adjustments remain visual and never modify game state.
+With terrain debug enabled (`F3`), `CAM:I` identifies an active interior profile,
+`CAM:E` an exterior profile, and `CAM:-` a map without a curated profile. If the
+debug panel does not appear, the scene is using the safe software fallback.
+
+Export one map for the planned visual editor with:
+
+```bash
+python3 tools/diorama_rules/export_editor_map.py \
+  MAP_LITTLEROOT_TOWN_BRENDANS_HOUSE_1F \
+  --output /tmp/diorama-map.json
+```
+
+The export contains stable `x,y` cell IDs, original metatile, collision,
+elevation, behavior and layer values, object/warp/background events, current
+diorama rules, and paths to both tilesets' source graphics and binary tables.
+It is a derived interchange file and must not be committed. The editor should
+write only the corresponding file under `data/diorama/maps/`; the validator
+rejects unknown fields, invalid coordinates and stale generated C tables.
+
 ## Connected maps
 
 The scene snapshot can extend a cardinal connection beyond the gameplay map

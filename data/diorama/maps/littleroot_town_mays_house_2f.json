@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "map": "MAP_LITTLEROOT_TOWN_MAYS_HOUSE_2F",
+  "layout": "LAYOUT_LITTLEROOT_TOWN_MAYS_HOUSE_2F",
+  "supported": true,
+  "camera": { "profile": "interior" },
+  "overrides": []
+}

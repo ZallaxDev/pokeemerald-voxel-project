@@ -1,8 +1,8 @@
 DIORAMA_RULE_JSON := $(sort $(wildcard data/diorama/*.json data/diorama/*/*.json))
 DIORAMA_RULE_DIRS := data/diorama data/diorama/maps data/diorama/tilesets data/diorama/buildings
 DIORAMA_RULE_CATALOGS := $(sort $(wildcard data/maps/*/map.json)) \
- data/tilesets/primary/general/metatile_attributes.bin \
- data/tilesets/secondary/petalburg/metatile_attributes.bin
+ $(sort $(wildcard data/tilesets/*/*/metatile_attributes.bin \
+                       data/tilesets/*/*/metatiles.bin))
 DIORAMA_RULE_COMPILER := tools/diorama_rules/compile_rules.py
 DIORAMA_RULE_SOURCE := src/data/diorama/diorama_rules.generated.c
 DIORAMA_RULE_HEADER := include/diorama/rules.generated.h

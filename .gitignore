@@ -46,6 +46,7 @@ prefabs.json
 *.diff
 *.sym
 *.js
+!map_editor/*.js
 __pycache__/
 *.pyc
 /pokeemerald-*.png

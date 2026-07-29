@@ -75,6 +75,33 @@ Linux objects are kept separately under `build/linux`, so they do not interfere 
 
 The resulting executable is `pokeemerald` in the repository root.
 
+### CachyOS / Arch Linux Diorama Build
+
+The `feature/diorama` branch has been validated on CachyOS. Install the 32-bit
+runtime and development dependencies:
+
+```sh
+sudo pacman -S --needed base-devel pkgconf sdl2_image sdl2_mixer \
+  lib32-sdl2-compat lib32-sdl2_mixer lib32-libpng lib32-zlib-ng-compat \
+  lib32-libglvnd lib32-mesa
+sudo pacman -U https://archive.archlinux.org/packages/l/lib32-sdl2_image/lib32-sdl2_image-2.8.12-1-x86_64.pkg.tar.zst
+```
+
+`lib32-sdl2_image` is no longer in the current multilib repositories; the
+second command installs the matching archived official package. Build and run
+the diorama target with:
+
+```sh
+make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 \
+  PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig \
+  -j"$(nproc)"
+./pokeemerald
+```
+
+The `PKG_CONFIG_32_PATH` override is required because the diorama branch
+defaults to Ubuntu's i386 pkg-config directory. For the classic renderer, omit
+`DIORAMA=1` and use the same `PKG_CONFIG_32_PATH` override.
+
 ## Display Settings
 
 The in-game Options menu includes a `DISPLAY` page. Settings apply immediately and are written to `pokeemerald.cfg`; Android stores the same config in the app's private storage.

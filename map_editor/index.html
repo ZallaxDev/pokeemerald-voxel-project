@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diorama map editor</title>
+  <link rel="stylesheet" href="/editor.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span><strong>Diorama</strong><small>visual map editor</small></div>
+    <label class="map-picker"><span>Map</span><select id="map-select"></select></label>
+    <button id="open-map" class="primary">Open</button>
+    <span class="separator"></span>
+    <button id="undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+    <button id="redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
+    <button id="validate">Validate</button><button id="regenerate">Regenerate</button>
+    <button id="save" class="primary">Save rules</button>
+    <div class="view-switch" role="group" aria-label="Map view">
+      <button data-view="original" class="active">Original</button>
+      <button data-view="resolved">Resolved</button>
+      <button data-view="collision">Collision</button>
+    </div>
+  </header>
+  <main class="workspace">
+    <section class="map-panel panel">
+      <div class="panel-heading"><div><small>Source map</small><h1 id="map-title">Choose a map</h1></div><span id="map-size" class="pill">0 x 0</span></div>
+      <div class="tool-row" role="toolbar" aria-label="Selection tools">
+        <button data-tool="point" class="tool active">Point</button><button data-tool="rectangle" class="tool">Rectangle</button><button data-tool="fill" class="tool">Fill</button><button id="eyedropper" class="tool">Pick</button>
+      </div>
+      <div class="map-stage"><canvas id="map-canvas"></canvas></div>
+      <div class="layer-row"><label><input id="show-events" type="checkbox" checked> Events</label><label><input id="show-elevation" type="checkbox"> Elevation</label><label><input id="show-collision" type="checkbox"> Collision</label></div>
+      <div class="selection-summary"><strong id="selection-count">0 cells</strong><span id="selection-bounds">No selection</span></div>
+    </section>
+    <section class="preview-panel panel">
+      <div class="panel-heading"><div><small>Live approximation</small><h2>3D preview</h2></div><button id="reset-camera">Game camera</button></div>
+      <div class="preview-stage"><canvas id="preview-canvas"></canvas><div class="axis-key"><span class="north">N</span><span>drag to orbit</span><span>wheel to zoom</span></div><div id="webgl-error" class="empty-state" hidden>WebGL is unavailable. The 2D editor remains usable.</div></div>
+      <div class="preview-legend"><span><i class="source-map"></i>Override</span><span><i class="source-rule"></i>Inherited rule</span><span><i class="source-selected"></i>Selection</span></div>
+    </section>
+    <aside class="inspector panel">
+      <div class="panel-heading"><div><small>Selection inspector</small><h2 id="cell-heading">No cells selected</h2></div><span id="dirty-badge" class="pill quiet">Clean</span></div>
+      <div id="empty-inspector" class="empty-state">Select one or more cells in either view.</div>
+      <div id="inspector-content" hidden>
+        <section class="inspector-section effective"><div class="section-title"><h3>Effective rule</h3><span id="rule-source" class="source-tag">fallback</span></div><div id="cell-facts" class="facts"></div></section>
+        <section class="inspector-section">
+          <h3>Geometry</h3>
+          <div class="field-grid">
+            <label class="wide">Shape<select id="shape"><option>flat</option><option>extruded</option><option>ledge</option><option>water</option><option>cutout</option><option>roof</option><option>building-part</option><option>hidden</option></select></label>
+            <label>Ground height<input id="ground-height" type="number" min="-1" max="8" step="0.125"></label><label>Volume height<input id="height" type="number" min="0" max="8" step="0.125"></label>
+            <label>Plane axis<select id="axis"><option>x</option><option>z</option><option>cross</option></select></label><label>Roof profile<select id="profile"><option>none</option><option>flat</option><option>gable-x</option><option>gable-z</option></select></label>
+            <label class="wide">Cutout base<input id="base-metatile" type="number" min="0" max="1023" placeholder="Required for cutout"></label>
+          </div>
+          <button id="apply-geometry" class="primary wide-button">Apply override to selection</button><button id="remove-overrides" class="danger wide-button">Remove selected overrides</button>
+        </section>
+        <section class="inspector-section"><div class="section-title"><h3>Face materials</h3><button id="clear-faces" class="text-button">Use self</button></div><div id="face-list" class="face-list"></div></section>
+        <section class="inspector-section">
+          <h3>Reusable rules</h3><label class="wide">Building template<select id="building-template"></select></label><button id="place-building" class="wide-button">Place at selection origin</button><button id="remove-building" class="danger wide-button">Remove building under selection</button><hr><button id="apply-sign-preset" class="wide-button">Apply panel rule to all signs</button><small class="hint">Uses the compiler-supported reusable sign event rule: a cross-axis cutout with a depth-like appearance.</small>
+        </section>
+      </div>
+    </aside>
+  </main>
+  <footer><code id="rule-path">data/diorama/maps/...</code><span id="status" class="status">Ready</span><span id="rule-counts">0 overrides · 0 structures</span><span id="warning-count">No warnings</span></footer>
+  <dialog id="material-dialog"><form method="dialog" class="dialog-shell"><header><div><small>Original metatiles</small><h2 id="material-title">Choose material</h2></div><button value="cancel">Close</button></header><div class="catalog-tabs"><button type="button" data-role="primary" class="active">Primary</button><button type="button" data-role="secondary">Secondary</button></div><div class="catalog-controls"><input id="material-search" type="search" placeholder="Filter local or global ID"><select id="material-layer"><option>full</option><option>base</option><option>foreground</option><option>none</option></select></div><div id="material-grid" class="material-grid"></div></form></dialog>
+  <script src="/editor.js"></script>
+</body>
+</html>

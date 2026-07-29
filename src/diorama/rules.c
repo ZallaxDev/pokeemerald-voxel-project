@@ -205,6 +205,26 @@ bool DioramaRules_IsMapSupported(uint8_t mapGroup, uint8_t mapNum, uint16_t layo
     return false;
 }
 
+bool DioramaRules_GetMapProfile(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId,
+                                struct DioramaMapProfile *profile)
+{
+    size_t i;
+
+    if (profile == NULL)
+        return false;
+    for (i = 0; i < gDioramaMapRuleCount; i++)
+    {
+        if (gDioramaMapRules[i].mapGroup == mapGroup
+         && gDioramaMapRules[i].mapNum == mapNum
+         && gDioramaMapRules[i].layoutId == layoutId)
+        {
+            *profile = gDioramaMapRules[i].profile;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
                               const struct DioramaCellSnapshot *cell,
                               struct DioramaResolvedCell *resolved)

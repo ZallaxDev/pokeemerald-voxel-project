@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "map": "MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB",
+  "layout": "LAYOUT_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB",
+  "supported": true,
+  "camera": { "profile": "interior" },
+  "overrides": []
+}

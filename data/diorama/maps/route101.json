@@ -5,8 +5,159 @@
   "supported": true,
   "buildings": [],
   "eventRules": {
-    "sign": { "shape": "cutout", "axis": "x", "height": 0.85, "baseMetatile": 1,
-      "faces": { "top": { "metatile": "self", "layer": "base" } } }
+    "sign": {
+      "shape": "cutout",
+      "axis": "x",
+      "height": 0.85,
+      "baseMetatile": 1,
+      "faces": {
+        "top": {
+          "metatile": "self",
+          "layer": "base"
+        }
+      }
+    }
   },
-  "overrides": []
+  "overrides": [
+    {
+      "x": 8,
+      "y": 13,
+      "shape": "ledge",
+      "groundHeight": 0.375,
+      "height": 0,
+      "axis": "x",
+      "profile": "none",
+      "faces": {
+        "top": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "north": {
+          "metatile": 2,
+          "layer": "full"
+        },
+        "east": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "south": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "west": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "plane": {
+          "metatile": "self",
+          "layer": "foreground"
+        }
+      }
+    },
+    {
+      "x": 9,
+      "y": 13,
+      "shape": "ledge",
+      "groundHeight": 0.375,
+      "height": 0,
+      "axis": "x",
+      "profile": "none",
+      "faces": {
+        "top": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "north": {
+          "metatile": 2,
+          "layer": "full"
+        },
+        "east": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "south": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "west": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "plane": {
+          "metatile": "self",
+          "layer": "foreground"
+        }
+      }
+    },
+    {
+      "x": 10,
+      "y": 13,
+      "shape": "ledge",
+      "groundHeight": 0.375,
+      "height": 0,
+      "axis": "x",
+      "profile": "none",
+      "faces": {
+        "top": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "north": {
+          "metatile": 2,
+          "layer": "full"
+        },
+        "east": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "south": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "west": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "plane": {
+          "metatile": "self",
+          "layer": "foreground"
+        }
+      }
+    },
+    {
+      "x": 11,
+      "y": 13,
+      "shape": "ledge",
+      "groundHeight": 0.375,
+      "height": 0,
+      "axis": "x",
+      "profile": "none",
+      "faces": {
+        "top": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "north": {
+          "metatile": 2,
+          "layer": "full"
+        },
+        "east": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "south": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "west": {
+          "metatile": "self",
+          "layer": "full"
+        },
+        "plane": {
+          "metatile": "self",
+          "layer": "foreground"
+        }
+      }
+    }
+  ]
 }

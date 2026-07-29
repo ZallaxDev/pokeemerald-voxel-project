@@ -487,6 +487,26 @@ no ocultan al jugador, NPC ni puntos interactivos.
 
 Resultado del usuario: **PENDIENTE**
 
+Preparacion inicial en curso. El formato de reglas admite perfiles de camara por
+mapa con pitch y focal editables en unidades legibles, compilados a tablas
+inmutables. Se habilitaron como primera superficie de trabajo las dos plantas de
+las casas de Brendan y May y el laboratorio de Birch, junto con sus tilesets
+interiores. Todavia usan resolucion generica y requieren correccion visual.
+
+`tools/diorama_rules/export_editor_map.py` genera un documento derivado por mapa
+con IDs `x,y` estables, celdas, semantica original, eventos, reglas actuales y
+rutas de assets. Este sera el contrato del editor visual rapido: el editor solo
+escribira JSON versionado en `data/diorama/`, nunca mapas, colisiones, eventos ni
+estado del juego. La ocultacion de paredes, props y reglas interiores curadas
+siguen pendientes.
+
+La suite `test-diorama`, los builds i386 clasico y diorama, la revision de codigo
+y el smoke OpenGL software pasan con esta base. Los cinco interiores quedan
+habilitados para inspeccion, no aprobados visualmente.
+
+El overlay de terreno `F3` muestra `CAM:I`, `CAM:E` o `CAM:-` para hacer
+inequivoca la validacion del perfil antes de disponer del editor visual.
+
 ## Fase 11: sombras y posprocesado
 
 - [ ] Implementar shadow map direccional y PCF ligero.

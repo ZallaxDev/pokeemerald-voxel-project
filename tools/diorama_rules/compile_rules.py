@@ -52,6 +52,14 @@ PLANE_AXES = {
 TILESETS = {
     "gTileset_General": ("DIORAMA_TILESET_GENERAL", "primary/general"),
     "gTileset_Petalburg": ("DIORAMA_TILESET_PETALBURG", "secondary/petalburg"),
+    "gTileset_Building": ("DIORAMA_TILESET_BUILDING", "primary/building"),
+    "gTileset_BrendansMaysHouse": ("DIORAMA_TILESET_BRENDANS_MAYS_HOUSE", "secondary/brendans_mays_house"),
+    "gTileset_Lab": ("DIORAMA_TILESET_LAB", "secondary/lab"),
+}
+
+CAMERA_PROFILES = {
+    "exterior": ("DIORAMA_CAMERA_EXTERIOR", 40.542, 130.0),
+    "interior": ("DIORAMA_CAMERA_INTERIOR", 60.0, 145.0),
 }
 
 
@@ -143,6 +151,12 @@ def number(value: object, path: str, minimum: float = -1.0, maximum: float = 8.0
     return result
 
 
+def array(value: object, path: str) -> list:
+    if not isinstance(value, list):
+        raise RuleError(f"{path}: must be an array")
+    return value
+
+
 def default_materials() -> tuple[tuple[int, str], ...]:
     return tuple((0xFFFF, "DIORAMA_MATERIAL_FOREGROUND" if face == "plane"
                   else "DIORAMA_MATERIAL_FULL") for face in MATERIAL_FACES)
@@ -217,6 +231,23 @@ def parse_definition(value: object, path: str) -> tuple:
 
 def fmt_float(value: float) -> str:
     return f"{value:.6f}f"
+
+
+def parse_camera(value: object, path: str) -> tuple[str, float, float]:
+    if value is None:
+        value = {"profile": "exterior"}
+    if not isinstance(value, dict):
+        raise RuleError(f"{path}: camera must be an object")
+    unknown = set(value) - {"profile", "pitch", "focalLength"}
+    if unknown:
+        raise RuleError(f"{path}: unknown fields: {', '.join(sorted(unknown))}")
+    name = value.get("profile")
+    if name not in CAMERA_PROFILES:
+        raise RuleError(f"{path}: unknown camera profile {name!r}")
+    profile, default_pitch, default_focal = CAMERA_PROFILES[name]
+    pitch_degrees = number(value.get("pitch", default_pitch), path + ".pitch", 20.0, 70.0)
+    focal_length = number(value.get("focalLength", default_focal), path + ".focalLength", 80.0, 200.0)
+    return profile, math.radians(pitch_degrees), focal_length
 
 
 def fmt_rule(rule: tuple) -> str:
@@ -342,6 +373,10 @@ def compile_data(root: Path) -> dict:
     seen_maps = set()
     for path in sorted((rules_root / "maps").glob("*.json")):
         data = load_json(path)
+        unknown = set(data) - {"version", "map", "layout", "supported", "camera",
+                               "buildings", "eventRules", "overrides"}
+        if unknown:
+            raise RuleError(f"{path}: unknown fields: {', '.join(sorted(unknown))}")
         symbol = data.get("map")
         if symbol not in maps:
             raise RuleError(f"{path}: unknown map {symbol}")
@@ -353,10 +388,12 @@ def compile_data(root: Path) -> dict:
         seen_maps.add(symbol)
         if data.get("supported") is not True:
             raise RuleError(f"{path}: map rule files must explicitly set supported to true")
-        map_rules.append((info.group, info.number, info.layout_id))
+        camera = parse_camera(data.get("camera"), f"{path}:camera")
+        map_rules.append((info.group, info.number, info.layout_id, camera))
         used_layouts.add(info.layout_symbol)
+        overrides = array(data.get("overrides", []), f"{path}: overrides")
         coordinates = set()
-        for index, override in enumerate(data.get("overrides", [])):
+        for index, override in enumerate(overrides):
             if not isinstance(override, dict):
                 raise RuleError(f"{path}: override {index} must be an object")
             x, y = override.get("x"), override.get("y")
@@ -380,8 +417,9 @@ def compile_data(root: Path) -> dict:
                     raise RuleError(f"{path}: generated sign overlaps override ({x}, {y})")
                 coordinates.add((x, y))
                 map_overrides.append((info.group, info.number, x, y, sign_rule))
+        buildings = array(data.get("buildings", []), f"{path}: buildings")
         occupied = set()
-        for index, placement in enumerate(data.get("buildings", [])):
+        for index, placement in enumerate(buildings):
             if not isinstance(placement, dict) or set(placement) != {"template", "x", "y"}:
                 raise RuleError(f"{path}: building {index} must contain template, x and y")
             template_name = placement["template"]
@@ -478,7 +516,8 @@ def render_c(data: dict) -> str:
     table("struct DioramaGeneratedLayoutRule", "gDioramaLayoutRules",
           [f"{{ {layout}, {primary}, {secondary} }}" for layout, primary, secondary in data["layout_rules"]])
     table("struct DioramaGeneratedMapRule", "gDioramaMapRules",
-          [f"{{ {group}, {number}, {layout} }}" for group, number, layout in data["map_rules"]])
+          [f"{{ {group}, {number}, {layout}, {{ {profile}, {fmt_float(pitch)}, {fmt_float(focal)} }} }}"
+           for group, number, layout, (profile, pitch, focal) in data["map_rules"]])
     table("struct DioramaGeneratedBehaviorRule", "gDioramaBehaviorRules",
           [f"{{ {behavior}, {fmt_rule(rule)} }}" for behavior, rule in data["behavior_rules"]])
     table("struct DioramaGeneratedTilesetRule", "gDioramaTilesetRules",
@@ -529,6 +568,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-    axis = value.get("axis")
-    if axis not in PLANE_AXES:
-        raise RuleError(f"{path}: unknown plane axis {axis!r}")

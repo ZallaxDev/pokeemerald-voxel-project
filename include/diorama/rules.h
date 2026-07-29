@@ -79,7 +79,23 @@ enum DioramaTilesetId
 {
     DIORAMA_TILESET_UNKNOWN,
     DIORAMA_TILESET_GENERAL,
-    DIORAMA_TILESET_PETALBURG
+    DIORAMA_TILESET_PETALBURG,
+    DIORAMA_TILESET_BUILDING,
+    DIORAMA_TILESET_BRENDANS_MAYS_HOUSE,
+    DIORAMA_TILESET_LAB
+};
+
+enum DioramaCameraProfile
+{
+    DIORAMA_CAMERA_EXTERIOR,
+    DIORAMA_CAMERA_INTERIOR
+};
+
+struct DioramaMapProfile
+{
+    uint8_t cameraProfile;
+    float cameraPitch;
+    float cameraFocalLength;
 };
 
 struct DioramaRuleDefinition
@@ -128,6 +144,7 @@ struct DioramaGeneratedMapRule
     uint8_t mapGroup;
     uint8_t mapNum;
     uint16_t layoutId;
+    struct DioramaMapProfile profile;
 };
 
 struct DioramaGeneratedBehaviorRule
@@ -175,6 +192,8 @@ struct DioramaGeneratedBuildingPlacement
 
 uint32_t DioramaRules_GetGeneration(void);
 bool DioramaRules_IsMapSupported(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId);
+bool DioramaRules_GetMapProfile(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId,
+                                struct DioramaMapProfile *profile);
 bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
                               const struct DioramaCellSnapshot *cell,
                               struct DioramaResolvedCell *resolved);
