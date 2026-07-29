@@ -111,6 +111,22 @@ static bool IsPresent(const uint8_t *presentMetatiles, uint16_t metatileId)
     return (presentMetatiles[metatileId / 8] & (1 << (metatileId % 8))) != 0;
 }
 
+static bool EntriesUseDirtyTile(const uint16_t *tileEntries, const uint8_t *dirtyTiles)
+{
+    int i;
+
+    if (dirtyTiles == NULL)
+        return false;
+    for (i = 0; i < DIORAMA_METATILE_ENTRY_COUNT; i++)
+    {
+        uint16_t tileId = tileEntries[i] & TILE_ID_MASK;
+
+        if (dirtyTiles[tileId / 8] & (1 << (tileId % 8)))
+            return true;
+    }
+    return false;
+}
+
 static void BlitWithGutter(uint32_t *atlasPixels, uint16_t metatileId, const uint32_t *pixels)
 {
     int atlasX = (metatileId % DIORAMA_ATLAS_COLUMNS) * DIORAMA_ATLAS_STRIDE + DIORAMA_ATLAS_GUTTER;
@@ -132,10 +148,13 @@ static void BlitWithGutter(uint32_t *atlasPixels, uint16_t metatileId, const uin
     }
 }
 
-bool DioramaAtlas_Update(const struct DioramaSceneSnapshot *snapshot,
-                         const uint16_t *cutoutBaseMetatileIds,
-                         uint32_t *atlasPixels, uint32_t *baseAtlasPixels,
-                         uint32_t *foregroundAtlasPixels, uint8_t *presentMetatiles)
+bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
+                              const uint16_t *cutoutBaseMetatileIds,
+                              const uint8_t *dirtyTiles,
+                              const uint8_t *forcedMetatiles,
+                              uint32_t *atlasPixels, uint32_t *baseAtlasPixels,
+                              uint32_t *foregroundAtlasPixels, uint8_t *presentMetatiles,
+                              uint8_t *updatedMetatiles)
 {
     uint32_t metatilePixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
     uint32_t layerPixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
@@ -150,7 +169,31 @@ bool DioramaAtlas_Update(const struct DioramaSceneSnapshot *snapshot,
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
 
-        if (cell->metatileId >= DIORAMA_TILE_COUNT || IsPresent(presentMetatiles, cell->metatileId))
+        bool present;
+        bool dirty;
+
+        if (cell->metatileId >= DIORAMA_TILE_COUNT)
+            continue;
+        present = IsPresent(presentMetatiles, cell->metatileId);
+        dirty = EntriesUseDirtyTile(cell->tileEntries, dirtyTiles)
+             || (forcedMetatiles != NULL
+              && (forcedMetatiles[cell->metatileId / 8]
+                & (1 << (cell->metatileId % 8))));
+        if (cutoutBaseMetatileIds != NULL
+         && cutoutBaseMetatileIds[cell->metatileId] < DIORAMA_TILE_COUNT)
+        {
+            unsigned baseIndex;
+
+            for (baseIndex = 0; baseIndex < cellCount; baseIndex++)
+                if (snapshot->cells[baseIndex].metatileId
+                 == cutoutBaseMetatileIds[cell->metatileId])
+                {
+                    dirty |= EntriesUseDirtyTile(snapshot->cells[baseIndex].tileEntries,
+                                                 dirtyTiles);
+                    break;
+                }
+        }
+        if (present && !dirty)
             continue;
         DioramaMetatile_Compose(snapshot->tileGraphics, cell->tileEntries,
                                 snapshot->fadedPalette, metatilePixels);
@@ -201,9 +244,21 @@ bool DioramaAtlas_Update(const struct DioramaSceneSnapshot *snapshot,
             BlitWithGutter(foregroundAtlasPixels, cell->metatileId, layerPixels);
         }
         presentMetatiles[cell->metatileId / 8] |= 1 << (cell->metatileId % 8);
+        if (updatedMetatiles != NULL)
+            updatedMetatiles[cell->metatileId / 8] |= 1 << (cell->metatileId % 8);
         changed = true;
     }
     return changed;
+}
+
+bool DioramaAtlas_Update(const struct DioramaSceneSnapshot *snapshot,
+                         const uint16_t *cutoutBaseMetatileIds,
+                         uint32_t *atlasPixels, uint32_t *baseAtlasPixels,
+                         uint32_t *foregroundAtlasPixels, uint8_t *presentMetatiles)
+{
+    return DioramaAtlas_UpdateDirty(snapshot, cutoutBaseMetatileIds, NULL, NULL,
+                                    atlasPixels, baseAtlasPixels,
+                                    foregroundAtlasPixels, presentMetatiles, NULL);
 }
 
 struct DioramaAtlasUv DioramaAtlas_GetUv(uint16_t metatileId)

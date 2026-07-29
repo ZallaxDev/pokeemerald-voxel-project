@@ -29,8 +29,9 @@ are rejected. Map `eventRules.sign` entries are expanded from the authoritative
 `bg_events` coordinates, rather than duplicating sign positions by hand.
 
 The resolver priority is map override/event rule, tileset metatile, building placement,
-behavior, collision/elevation, visual heuristic, and flat fallback. A map must
-have a rule file with `supported: true` to render in 3D in `AUTO` mode.
+behavior, collision/elevation, visual heuristic, and flat fallback. `AUTO` mode
+renders any safe overworld snapshot; maps marked `supported: true` have curated
+coverage, while all other maps use the generic resolver and may look incomplete.
 
 Generated files are `include/diorama/rules.generated.h` and
 `src/data/diorama/diorama_rules.generated.c`. Do not edit them manually.
@@ -38,8 +39,23 @@ Generated files are `include/diorama/rules.generated.h` and
 ## Connected maps
 
 The scene snapshot can extend a cardinal connection beyond the gameplay map
-buffer when both maps are covered by diorama rules and use the exact same primary
-and secondary tilesets. Each copied cell keeps its source map, layout, and local
+buffer when both maps use the exact same primary and secondary tilesets. Each
+copied cell keeps its source map, layout, and local
 coordinates so map overrides and building templates resolve before the player
 crosses the boundary. Connected object events are intentionally not synthesized;
 the original game remains authoritative for active objects and gameplay state.
+
+## Animated visuals
+
+The snapshot publishes complete faded palettes, BG tile graphics, active weather,
+reflection state, and the visible Surf attachment. The renderer compares complete
+tile images so skipped snapshots cannot lose animation changes, then recomposes and
+uploads only affected atlas slots. Palette changes intentionally refresh the full
+atlas but do not rebuild terrain chunks.
+
+Basic rain, horizontal fog, and volcanic ash render in 3D. Clear and sunny weather
+need no overlay; all other weather types retain the software 2D fallback.
+Reflections use the game's faded reflection palettes and bridge offsets, and a
+per-pixel stencil excludes non-reflective terrain and foreground tile layers. The
+Surf blob remains a visual attachment to the player and never changes movement,
+collision, or elevation state.

@@ -46,6 +46,7 @@ struct DioramaTerrainCell
     uint8_t layerType;
     uint8_t collision;
     uint8_t rawElevation;
+    uint8_t reflective;
     uint8_t shape;
     uint8_t profile;
     uint8_t planeAxis;
@@ -91,6 +92,7 @@ struct DioramaTerrainVertex
     float v;
     float shade;
     float textureLayer;
+    float reflectionMask;
 };
 
 struct DioramaTerrainBounds

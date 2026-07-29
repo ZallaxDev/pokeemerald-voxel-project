@@ -241,6 +241,16 @@ struct DioramaSpritePose DioramaSprite_InterpolatePose(struct DioramaSpritePose 
     return result;
 }
 
+struct DioramaSpritePose DioramaSprite_ApplyScreenOffset(struct DioramaSpritePose pose,
+                                                          float offsetX, float offsetY,
+                                                          float cameraPitch)
+{
+    pose.x += offsetX / 16.0f;
+    pose.y -= offsetY * cosf(cameraPitch) / 16.0f;
+    pose.z -= offsetY * sinf(cameraPitch) / 16.0f;
+    return pose;
+}
+
 int DioramaSprite_CompareDepth(const struct DioramaSpritePose *left, uint8_t leftPriority,
                                uint8_t leftSubpriority, uint8_t leftOamOrder,
                                const struct DioramaSpritePose *right, uint8_t rightPriority,

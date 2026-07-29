@@ -4,16 +4,20 @@
 
 #include "global.h"
 #include "diorama/map_connection.h"
-#include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/sprite_frame.h"
+#include "diorama/weather.h"
 #include "event_object_movement.h"
 #include "field_camera.h"
+#include "field_effect_helpers.h"
 #include "field_message_box.h"
+#include "field_player_avatar.h"
 #include "fieldmap.h"
+#include "field_weather.h"
 #include "gba/defines.h"
 #include "main.h"
 #include "menu.h"
+#include "metatile_behavior.h"
 #include "overworld.h"
 #include "palette.h"
 #include "script.h"
@@ -131,8 +135,6 @@ static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
     if (connectedLayout->map == NULL
      || connectedLayout->primaryTileset != gMapHeader.mapLayout->primaryTileset
      || connectedLayout->secondaryTileset != gMapHeader.mapLayout->secondaryTileset
-     || !DioramaRules_IsMapSupported(connection->mapGroup, connection->mapNum,
-                                     connectedHeader->mapLayoutId)
      || !DioramaConnection_MapCoordinates(connection->direction, connection->offset,
                                           mapX - MAP_OFFSET, mapY - MAP_OFFSET,
                                           snapshot->mapWidth, snapshot->mapHeight,
@@ -307,6 +309,71 @@ static u8 FindOamOrder(const struct Sprite *sprite, u8 priority)
     return 0xFF;
 }
 
+static void CopySurfBlob(struct DioramaSceneSnapshot *snapshot)
+{
+    const struct ObjectEvent *player;
+    const struct Sprite *playerSprite;
+    const struct Sprite *sprite;
+    struct DioramaObjectSnapshot *copy = &snapshot->surfBlob;
+    u8 spriteId;
+
+    snapshot->playerAvatarFlags = gPlayerAvatar.flags;
+    if (gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT)
+        return;
+    player = &gObjectEvents[gPlayerAvatar.objectEventId];
+    if (!player->active || player->spriteId >= MAX_SPRITES)
+        return;
+    spriteId = player->fieldEffectSpriteId;
+    if (spriteId >= MAX_SPRITES)
+        return;
+    sprite = &gSprites[spriteId];
+    if (!sprite->inUse || sprite->callback != UpdateSurfBlobFieldEffect)
+        return;
+    playerSprite = &gSprites[player->spriteId];
+    memset(copy, 0, sizeof(*copy));
+    copy->active = TRUE;
+    copy->spriteId = spriteId;
+    copy->flags = sprite->invisible ? DIORAMA_OBJECT_INVISIBLE : 0;
+    copy->screenX = sprite->x + sprite->x2;
+    copy->screenY = sprite->y + sprite->y2;
+    copy->affineMode = sprite->oam.affineMode;
+    copy->objMode = sprite->oam.objMode;
+    copy->bpp = sprite->oam.bpp;
+    copy->tileNum = sprite->oam.tileNum;
+    copy->paletteNum = sprite->oam.paletteNum;
+    copy->oamShape = sprite->oam.shape;
+    copy->oamSize = sprite->oam.size;
+    copy->hFlip = sprite->oam.affineMode == ST_OAM_AFFINE_OFF
+               && (sprite->oam.matrixNum & ST_OAM_HFLIP) != 0;
+    copy->vFlip = sprite->oam.affineMode == ST_OAM_AFFINE_OFF
+               && (sprite->oam.matrixNum & ST_OAM_VFLIP) != 0;
+    copy->priority = sprite->oam.priority;
+    copy->subpriority = sprite->subpriority;
+    copy->oamOrder = FindOamOrder(sprite, sprite->oam.priority);
+    copy->animNum = sprite->animNum;
+    copy->animCmdIndex = sprite->animCmdIndex;
+    if (!CopyObjectFrame(copy, sprite))
+    {
+        copy->flags |= DIORAMA_OBJECT_FRAME_INVALID;
+        return;
+    }
+    snapshot->surfBlobOffsetX = copy->screenX - (playerSprite->x + playerSprite->x2);
+    snapshot->surfBlobOffsetY = copy->screenY - (playerSprite->y + playerSprite->y2);
+    snapshot->surfBlobValid = TRUE;
+}
+
+static s16 GetReflectionOffsetY(const struct ObjectEvent *object)
+{
+    static const s16 bridgeOffsets[] = {12, 28, 44};
+    u8 bridgeType = MetatileBehavior_GetBridgeType(object->previousMetatileBehavior);
+
+    if (bridgeType == 0)
+        bridgeType = MetatileBehavior_GetBridgeType(object->currentMetatileBehavior);
+    if (bridgeType > 0 && bridgeType <= ARRAY_COUNT(bridgeOffsets))
+        return bridgeOffsets[bridgeType - 1] - 2;
+    return -2;
+}
+
 static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
 {
     int i;
@@ -361,6 +428,9 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         copy->centerToCornerX = sprite->centerToCornerVecX;
         copy->centerToCornerY = sprite->centerToCornerVecY;
         copy->shadowSize = graphicsInfo != NULL ? graphicsInfo->shadowSize : 0;
+        copy->reflectionHidden = object->hideReflection;
+        copy->reflectionPaletteNum = gReflectionEffectPaletteMap[sprite->oam.paletteNum];
+        copy->reflectionOffsetY = GetReflectionOffsetY(object);
         copy->affineMode = sprite->oam.affineMode;
         copy->objMode = sprite->oam.objMode;
         copy->bpp = sprite->oam.bpp;
@@ -388,6 +458,7 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         if (!CopyObjectFrame(copy, sprite))
             copy->flags |= DIORAMA_OBJECT_FRAME_INVALID;
     }
+    CopySurfBlob(snapshot);
 }
 
 void DioramaScene_Init(void)
@@ -459,7 +530,15 @@ void DioramaScene_PublishOverworld(void)
     sDraft.mapLayoutId = gMapHeader.mapLayoutId;
     sDraft.mapCoordinateOffset = MAP_OFFSET;
     sDraft.mapType = gMapHeader.mapType;
-    sDraft.weather = gMapHeader.weather;
+    sDraft.weather = GetCurrentWeather();
+    sDraft.nextWeather = gWeatherPtr->nextWeather;
+    sDraft.weatherTransitionComplete = gWeatherPtr->weatherChangeComplete;
+    sDraft.rainVisibleCount = gWeatherPtr->curRainSpriteIndex;
+    sDraft.fogScrollOffset = gWeatherPtr->fogHScrollOffset;
+    sDraft.weatherBlendEVA = gWeatherPtr->currBlendEVA;
+    sDraft.weatherBlendEVB = gWeatherPtr->currBlendEVB;
+    if (!DioramaWeather_CanRender(sDraft.weather, sDraft.nextWeather))
+        sDraft.fallbackReasons |= DIORAMA_FALLBACK_UNSUPPORTED_WEATHER;
     if (sDraft.valid)
     {
         sDraft.mapWidth = gMapHeader.mapLayout->width;

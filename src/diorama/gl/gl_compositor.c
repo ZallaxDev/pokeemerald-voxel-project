@@ -14,6 +14,7 @@
 #include "diorama/metatile_atlas.h"
 #include "diorama/presentation_transition.h"
 #include "diorama/scene_snapshot.h"
+#include "diorama/weather.h"
 #include "gba/defines.h"
 
 #define MAX_BORDER_BACKGROUNDS 15
@@ -43,6 +44,7 @@ static GLuint sVertexBuffer;
 static GLint sOpacityUniform;
 static struct DioramaTexture sFrameTexture;
 static struct DioramaTexture sDebugTexture;
+static struct DioramaTexture sWeatherTexture;
 static struct DioramaTexture sAtlasTexture;
 static struct DioramaTexture sBaseAtlasTexture;
 static struct DioramaTexture sForegroundAtlasTexture;
@@ -55,15 +57,23 @@ static struct DioramaSceneSnapshot sIncomingSceneSnapshot;
 static struct DioramaSceneSnapshot sRenderedSceneSnapshot;
 static struct DioramaSceneSnapshot sPreviousRenderedSceneSnapshot;
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static u32 sWeatherPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sBaseAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sForegroundAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static struct DioramaResolvedCell sAtlasResolvedCells[DIORAMA_MAX_VISIBLE_CELLS];
 static u16 sCutoutBaseMetatiles[DIORAMA_TILE_COUNT];
+static u16 sPreviousCutoutBaseMetatiles[DIORAMA_TILE_COUNT];
 static u8 sPresentMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
+static u8 sDirtyAtlasTiles[DIORAMA_ATLAS_DIRTY_TILE_BYTES];
+static u8 sForcedMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
+static u8 sVisibleMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
+static u8 sUpdatedMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
+static u8 sAtlasTileGraphics[DIORAMA_TILE_GRAPHICS_SIZE];
 static u32 sAtlasMapGeneration;
 static u32 sAtlasPaletteGeneration;
 static u32 sAtlasAnimationGeneration;
+static bool sHasAtlasTileGraphics;
 static bool sHasSceneSnapshot;
 static bool sHasPreviousSceneSnapshot;
 static bool sHasRenderedSceneSnapshot;
@@ -188,6 +198,84 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                     GL_BGRA, GL_UNSIGNED_BYTE, sDebugPixels);
+}
+
+static bool BuildWeatherImage(const struct DioramaSceneSnapshot *snapshot)
+{
+    enum DioramaWeatherEffect effect = DioramaWeather_Classify(snapshot->weather);
+    uint32_t phase = (uint32_t)(SDL_GetPerformanceCounter() * 60
+                             / SDL_GetPerformanceFrequency());
+    int i;
+
+    memset(sWeatherPixels, 0, sizeof(sWeatherPixels));
+    if (effect == DIORAMA_WEATHER_RAIN)
+    {
+        int dropCount = DioramaWeather_RainDropCount(snapshot->rainVisibleCount);
+        for (i = 0; i < dropCount; i++)
+        {
+            int cycle = DISPLAY_WIDTH + 16;
+            int x = (i * 73 - (int)(phase * 3 % cycle)) % cycle;
+            int y = (i * 47 + phase * 7) % (DISPLAY_HEIGHT + 24) - 12;
+            int length;
+
+            if (x < 0)
+                x += cycle;
+            x -= 8;
+            for (length = 0; length < 7; length++)
+            {
+                int px = x - length / 2;
+                int py = y + length;
+
+                if (px >= 0 && px < DISPLAY_WIDTH && py >= 0 && py < DISPLAY_HEIGHT)
+                    sWeatherPixels[py * DISPLAY_WIDTH + px] = RGBA(185, 215, 235, 150);
+            }
+        }
+    }
+    else if (effect == DIORAMA_WEATHER_ASH)
+    {
+        for (i = 0; i < 24; i++)
+        {
+            int cycleX = DISPLAY_WIDTH + 12;
+            int x = (i * 67 + phase * 2) % cycleX - 6;
+            int y = (i * 41 + phase * 2) % (DISPLAY_HEIGHT + 12) - 6;
+            int size = (i % 3 == 0) ? 2 : 1;
+            int px;
+            int py;
+
+            for (py = y; py < y + size; py++)
+                for (px = x; px < x + size; px++)
+                    if (px >= 0 && px < DISPLAY_WIDTH
+                     && py >= 0 && py < DISPLAY_HEIGHT)
+                        sWeatherPixels[py * DISPLAY_WIDTH + px]
+                            = RGBA(205, 198, 190, 190);
+        }
+    }
+    else if (effect == DIORAMA_WEATHER_FOG)
+    {
+        int baseAlpha = DioramaWeather_FogAlpha(snapshot->weatherBlendEVA);
+        int y;
+        int x;
+
+        for (y = 0; y < DISPLAY_HEIGHT; y++)
+        {
+            int band = (y + snapshot->fogScrollOffset / 8) % 48;
+            int modulation = band < 24 ? band : 48 - band;
+            int alpha = baseAlpha + modulation * baseAlpha / 96;
+
+            for (x = 0; x < DISPLAY_WIDTH; x++)
+                sWeatherPixels[y * DISPLAY_WIDTH + x] = RGBA(210, 220, 222, alpha);
+        }
+    }
+    else
+    {
+        return false;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, sWeatherTexture.id);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                    GL_BGRA, GL_UNSIGNED_BYTE, sWeatherPixels);
+    return true;
 }
 
 static const char sVertexShaderSource[] =
@@ -340,11 +428,54 @@ static void DrawTexture(const struct DioramaTexture *texture,
     glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
+static void UploadAtlasSlots(const struct DioramaTexture *texture, const u32 *pixels,
+                             const u8 *updatedMetatiles)
+{
+    int row;
+
+    glBindTexture(GL_TEXTURE_2D, texture->id);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, DIORAMA_ATLAS_WIDTH);
+    for (row = 0; row < DIORAMA_ATLAS_ROWS; row++)
+    {
+        int column = 0;
+
+        while (column < DIORAMA_ATLAS_COLUMNS)
+        {
+            int first;
+            int count;
+            int x;
+            int y;
+
+            while (column < DIORAMA_ATLAS_COLUMNS
+                && !(updatedMetatiles[(row * DIORAMA_ATLAS_COLUMNS + column) / 8]
+                   & (1 << ((row * DIORAMA_ATLAS_COLUMNS + column) % 8))))
+                column++;
+            first = column;
+            while (column < DIORAMA_ATLAS_COLUMNS
+                && (updatedMetatiles[(row * DIORAMA_ATLAS_COLUMNS + column) / 8]
+                  & (1 << ((row * DIORAMA_ATLAS_COLUMNS + column) % 8))))
+                column++;
+            count = column - first;
+            if (count == 0)
+                continue;
+            x = first * DIORAMA_ATLAS_STRIDE;
+            y = row * DIORAMA_ATLAS_STRIDE;
+            glTexSubImage2D(GL_TEXTURE_2D, 0, x, y,
+                            count * DIORAMA_ATLAS_STRIDE, DIORAMA_ATLAS_STRIDE,
+                            GL_BGRA, GL_UNSIGNED_BYTE,
+                            pixels + y * DIORAMA_ATLAS_WIDTH + x);
+        }
+    }
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+}
+
 static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
 {
     bool reset = snapshot->mapGeneration != sAtlasMapGeneration
               || snapshot->paletteGeneration != sAtlasPaletteGeneration
-              || snapshot->tilesetAnimationGeneration != sAtlasAnimationGeneration;
+              || !sHasAtlasTileGraphics;
+    bool animationChanged = snapshot->tilesetAnimationGeneration != sAtlasAnimationGeneration;
     bool changed;
     unsigned cellCount = snapshot->visibleCellCount;
     unsigned i;
@@ -358,27 +489,53 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
         sAtlasPaletteGeneration = snapshot->paletteGeneration;
         sAtlasAnimationGeneration = snapshot->tilesetAnimationGeneration;
     }
+    memset(sDirtyAtlasTiles, 0, sizeof(sDirtyAtlasTiles));
+    memset(sForcedMetatiles, 0, sizeof(sForcedMetatiles));
+    memset(sVisibleMetatiles, 0, sizeof(sVisibleMetatiles));
+    memset(sUpdatedMetatiles, 0, sizeof(sUpdatedMetatiles));
+    if (!reset && animationChanged)
+    {
+        for (i = 0; i < DIORAMA_TILE_COUNT; i++)
+            if (memcmp(snapshot->tileGraphics + i * DIORAMA_TILE_BYTES,
+                       sAtlasTileGraphics + i * DIORAMA_TILE_BYTES,
+                       DIORAMA_TILE_BYTES) != 0)
+                sDirtyAtlasTiles[i / 8] |= 1 << (i % 8);
+    }
     if (cellCount > DIORAMA_MAX_VISIBLE_CELLS)
         cellCount = DIORAMA_MAX_VISIBLE_CELLS;
     DioramaRules_ResolveGrid(snapshot, sAtlasResolvedCells);
     for (i = 0; i < DIORAMA_TILE_COUNT; i++)
+    {
         sCutoutBaseMetatiles[i] = 0xFFFF;
+        if (reset)
+            sPreviousCutoutBaseMetatiles[i] = 0xFFFF;
+    }
     for (i = 0; i < cellCount; i++)
     {
         uint16_t metatileId = snapshot->cells[i].metatileId;
         uint16_t baseMetatileId = sAtlasResolvedCells[i].baseMetatileId;
 
-        if (metatileId >= DIORAMA_TILE_COUNT || baseMetatileId >= DIORAMA_TILE_COUNT)
+        if (metatileId >= DIORAMA_TILE_COUNT)
+            continue;
+        sVisibleMetatiles[metatileId / 8] |= 1 << (metatileId % 8);
+        if (baseMetatileId >= DIORAMA_TILE_COUNT)
             continue;
         if (sCutoutBaseMetatiles[metatileId] == 0xFFFF)
             sCutoutBaseMetatiles[metatileId] = baseMetatileId;
         else if (sCutoutBaseMetatiles[metatileId] != baseMetatileId)
             sCutoutBaseMetatiles[metatileId] = 0xFFFE;
     }
-    changed = DioramaAtlas_Update(snapshot, sCutoutBaseMetatiles,
-                                  sAtlasPixels, sBaseAtlasPixels,
-                                  sForegroundAtlasPixels, sPresentMetatiles);
-    if (reset || changed)
+    for (i = 0; i < DIORAMA_TILE_COUNT; i++)
+        if ((sVisibleMetatiles[i / 8] & (1 << (i % 8)))
+         && sCutoutBaseMetatiles[i] != sPreviousCutoutBaseMetatiles[i])
+            sForcedMetatiles[i / 8] |= 1 << (i % 8);
+    changed = DioramaAtlas_UpdateDirty(snapshot, sCutoutBaseMetatiles,
+                                       reset ? NULL : sDirtyAtlasTiles,
+                                       reset ? NULL : sForcedMetatiles,
+                                       sAtlasPixels, sBaseAtlasPixels,
+                                       sForegroundAtlasPixels, sPresentMetatiles,
+                                       sUpdatedMetatiles);
+    if (reset)
     {
         glBindTexture(GL_TEXTURE_2D, sAtlasTexture.id);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -391,6 +548,19 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DIORAMA_ATLAS_WIDTH, DIORAMA_ATLAS_HEIGHT,
                         GL_BGRA, GL_UNSIGNED_BYTE, sForegroundAtlasPixels);
     }
+    else if (changed)
+    {
+        UploadAtlasSlots(&sAtlasTexture, sAtlasPixels, sUpdatedMetatiles);
+        UploadAtlasSlots(&sBaseAtlasTexture, sBaseAtlasPixels, sUpdatedMetatiles);
+        UploadAtlasSlots(&sForegroundAtlasTexture, sForegroundAtlasPixels,
+                         sUpdatedMetatiles);
+    }
+    memcpy(sAtlasTileGraphics, snapshot->tileGraphics, sizeof(sAtlasTileGraphics));
+    for (i = 0; i < DIORAMA_TILE_COUNT; i++)
+        if (sVisibleMetatiles[i / 8] & (1 << (i % 8)))
+            sPreviousCutoutBaseMetatiles[i] = sCutoutBaseMetatiles[i];
+    sHasAtlasTileGraphics = true;
+    sAtlasAnimationGeneration = snapshot->tilesetAnimationGeneration;
 }
 
 static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
@@ -525,6 +695,12 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     ConfigureTexture(sDebugTexture.id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
                   GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+    glGenTextures(1, &sWeatherTexture.id);
+    sWeatherTexture.width = DISPLAY_WIDTH;
+    sWeatherTexture.height = DISPLAY_HEIGHT;
+    ConfigureTexture(sWeatherTexture.id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
+                 GL_BGRA, GL_UNSIGNED_BYTE, NULL);
     glGenTextures(1, &sAtlasTexture.id);
     sAtlasTexture.width = DIORAMA_ATLAS_WIDTH;
     sAtlasTexture.height = DIORAMA_ATLAS_HEIGHT;
@@ -549,6 +725,7 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sAtlasMapGeneration = 0;
     sAtlasPaletteGeneration = 0;
     sAtlasAnimationGeneration = 0;
+    sHasAtlasTileGraphics = false;
     sHasSceneSnapshot = false;
     sHasPreviousSceneSnapshot = false;
     sHasRenderedSceneSnapshot = false;
@@ -612,9 +789,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
      && sTerrainAvailable
      && sObjectsAvailable
      && sHasSceneSnapshot
-     && DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot)
-     && DioramaRules_IsMapSupported(sSceneSnapshot.mapGroup, sSceneSnapshot.mapNum,
-                                    sSceneSnapshot.mapLayoutId))
+     && DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot))
     {
         if (!sCurrent3DReady)
         {
@@ -678,6 +853,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     if (outputWidth <= 0 || outputHeight <= 0)
         return;
     glViewport(0, 0, outputWidth, outputHeight);
+    glStencilMask(0xFF);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     dglUseProgram(sProgram);
     dglBindVertexArray(sVertexArray);
@@ -726,6 +902,10 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
         dglBindVertexArray(sVertexArray);
+        if (BuildWeatherImage(&sRenderedSceneSnapshot))
+            DrawTexture(&sWeatherTexture, outputWidth, outputHeight,
+                        gameX, gameY, gameWidth, gameHeight,
+                        0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
         if (sTerrainDebug)
         {
             BuildDebugImage(&sRenderedSceneSnapshot);
@@ -799,6 +979,8 @@ void DioramaGL_Shutdown(void)
         glDeleteTextures(1, &sFrameTexture.id);
     if (sDebugTexture.id != 0)
         glDeleteTextures(1, &sDebugTexture.id);
+    if (sWeatherTexture.id != 0)
+        glDeleteTextures(1, &sWeatherTexture.id);
     if (sAtlasTexture.id != 0)
         glDeleteTextures(1, &sAtlasTexture.id);
     if (sBaseAtlasTexture.id != 0)

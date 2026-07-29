@@ -46,8 +46,9 @@ static float ResolveHeight(const struct DioramaTerrainChunkInput *input, int x, 
 }
 
 static bool AppendVertex(struct DioramaTerrainVertex *vertices, uint32_t capacity,
-                         uint32_t *count, float x, float y, float z,
-                         float u, float v, float shade, float textureLayer)
+                          uint32_t *count, float x, float y, float z,
+                          float u, float v, float shade, float textureLayer,
+                          float reflectionMask)
 {
     struct DioramaTerrainVertex *vertex;
 
@@ -61,12 +62,14 @@ static bool AppendVertex(struct DioramaTerrainVertex *vertices, uint32_t capacit
     vertex->v = v;
     vertex->shade = shade;
     vertex->textureLayer = textureLayer;
+    vertex->reflectionMask = reflectionMask;
     return true;
 }
 
 static bool AppendQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
                         uint32_t *count, const float positions[4][3],
-                        const struct DioramaTerrainMaterial *material, float shade)
+                        const struct DioramaTerrainMaterial *material, float shade,
+                        float reflectionMask)
 {
     static const uint8_t order[6] = {0, 1, 2, 0, 2, 3};
     static const uint8_t uvX[4] = {0, 1, 1, 0};
@@ -81,7 +84,7 @@ static bool AppendQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
 
         if (!AppendVertex(vertices, capacity, count,
                           positions[corner][0], positions[corner][1], positions[corner][2],
-                          u, v, shade, material->layer))
+                          u, v, shade, material->layer, reflectionMask))
             return false;
     }
     return true;
@@ -214,6 +217,7 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         hash = HashU16(hash, cell->metatileId);
         hash = HashByte(hash, cell->behavior);
         hash = HashByte(hash, cell->layerType);
+        hash = HashByte(hash, cell->reflective);
         hash = HashByte(hash, cell->shape);
         hash = HashByte(hash, cell->profile);
         hash = HashByte(hash, cell->planeAxis);
@@ -285,7 +289,8 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
             if (cell->materials[DIORAMA_MATERIAL_FACE_TOP].layer != DIORAMA_MATERIAL_NONE)
             {
                 if (!AppendQuad(vertices, vertexCapacity, &vertexCount, topPositions,
-                                &cell->materials[DIORAMA_MATERIAL_FACE_TOP], 1.0f))
+                                &cell->materials[DIORAMA_MATERIAL_FACE_TOP], 1.0f,
+                                cell->reflective ? 1.0f : 0.0f))
                     return false;
                 mesh->topFaceCount++;
             }
@@ -324,7 +329,7 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                     if ((cell->planeAxis == DIORAMA_PLANE_AXIS_X
                       || cell->planeAxis == DIORAMA_PLANE_AXIS_CROSS)
                      && !AppendQuad(vertices, vertexCapacity, &vertexCount, cutoutX,
-                                    planeMaterial, 1.0f))
+                                     planeMaterial, 1.0f, 0.0f))
                         return false;
                     if (cell->planeAxis == DIORAMA_PLANE_AXIS_X
                      || cell->planeAxis == DIORAMA_PLANE_AXIS_CROSS)
@@ -332,7 +337,7 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                     if ((cell->planeAxis == DIORAMA_PLANE_AXIS_Z
                       || cell->planeAxis == DIORAMA_PLANE_AXIS_CROSS)
                      && !AppendQuad(vertices, vertexCapacity, &vertexCount, cutoutZ,
-                                    planeMaterial, 0.86f))
+                                     planeMaterial, 0.86f, 0.0f))
                         return false;
                     if (cell->planeAxis == DIORAMA_PLANE_AXIS_Z
                      || cell->planeAxis == DIORAMA_PLANE_AXIS_CROSS)
@@ -380,8 +385,9 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                     }
                 }
                 if (!AppendQuad(vertices, vertexCapacity, &vertexCount, sidePositions,
-                                 sideMaterial,
-                                 face == DIORAMA_TERRAIN_FACE_NORTH ? 0.82f : 0.68f))
+                                  sideMaterial,
+                                  face == DIORAMA_TERRAIN_FACE_NORTH ? 0.82f : 0.68f,
+                                  0.0f))
                     return false;
                 mesh->sideFaceCount++;
                 if (bottom < mesh->bounds.minY) mesh->bounds.minY = bottom;
@@ -401,6 +407,7 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].v);
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].shade);
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].textureLayer);
+        mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].reflectionMask);
     }
     return true;
 }

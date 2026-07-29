@@ -10,6 +10,7 @@
 #include "diorama/sprite_frame.h"
 
 #define SPRITE_TEXTURE_CACHE_SIZE 48
+#define OBJECT_RENDER_ITEM_CAPACITY (DIORAMA_MAX_OBJECTS + 1)
 
 struct ObjectVertex
 {
@@ -36,13 +37,19 @@ struct ObjectRenderItem
     struct DioramaSpritePose previousPose;
     struct DioramaSpritePose currentPose;
     GLuint texture;
+    GLuint reflectionTexture;
     uint8_t width;
     uint8_t height;
     bool interpolate;
+    bool attachedToPlayer;
+    int16_t previousAttachedOffsetX;
+    int16_t previousAttachedOffsetY;
+    int16_t attachedOffsetX;
+    int16_t attachedOffsetY;
 };
 
 static struct SpriteTextureCacheEntry sTextureCache[SPRITE_TEXTURE_CACHE_SIZE];
-static struct ObjectRenderItem sItems[DIORAMA_MAX_OBJECTS];
+static struct ObjectRenderItem sItems[OBJECT_RENDER_ITEM_CAPACITY];
 static struct DioramaSceneSnapshot sPreviousSnapshot;
 static uint32_t sDecodePixels[DIORAMA_SPRITE_MAX_PIXELS];
 static struct DioramaObjectMetrics sMetrics;
@@ -59,6 +66,7 @@ static GLint sCameraPitchLocation;
 static GLint sFocalLengthLocation;
 static GLint sImageLocation;
 static GLint sDrawModeLocation;
+static GLint sAnimationTimeLocation;
 
 static const char sObjectVertexShader[] =
     "#version 330 core\n"
@@ -94,6 +102,7 @@ static const char sObjectFragmentShader[] =
     "out vec4 color;\n"
     "uniform sampler2D image;\n"
     "uniform int drawMode;\n"
+    "uniform float animationTime;\n"
     "void main() {\n"
     "  if (drawMode == 1) {\n"
     "    vec2 point = uv * 2.0 - 1.0;\n"
@@ -101,7 +110,9 @@ static const char sObjectFragmentShader[] =
     "    if (distanceSquared >= 1.0) discard;\n"
     "    color = vec4(0.02, 0.025, 0.03, 0.32 * (1.0 - distanceSquared));\n"
     "  } else {\n"
-    "    vec4 texel = texture(image, uv);\n"
+    "    vec2 sampleUv = uv;\n"
+    "    if (drawMode == 2) sampleUv.x += sin(animationTime * 5.0 + uv.y * 14.0) * 0.012;\n"
+    "    vec4 texel = texture(image, sampleUv);\n"
     "    if (texel.a < 0.5) discard;\n"
     "    color = texel;\n"
     "  }\n"
@@ -157,9 +168,10 @@ static bool CreateProgram(void)
     sFocalLengthLocation = dglGetUniformLocation(sProgram, "focalLength");
     sImageLocation = dglGetUniformLocation(sProgram, "image");
     sDrawModeLocation = dglGetUniformLocation(sProgram, "drawMode");
+    sAnimationTimeLocation = dglGetUniformLocation(sProgram, "animationTime");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sImageLocation >= 0
-        && sDrawModeLocation >= 0;
+        && sDrawModeLocation >= 0 && sAnimationTimeLocation >= 0;
 }
 
 static void ClearTextureCache(void)
@@ -297,9 +309,10 @@ void DioramaGLObjects_Reset(void)
 
 bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot)
 {
-    struct ObjectRenderItem nextItems[DIORAMA_MAX_OBJECTS];
+    struct ObjectRenderItem nextItems[OBJECT_RENDER_ITEM_CAPACITY];
     uint8_t nextItemCount = 0;
     bool playerFound = false;
+    int playerItem = -1;
     int i;
 
     if (snapshot->sequence == sSequence)
@@ -329,6 +342,17 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot)
         item->texture = texture->texture;
         item->width = texture->width;
         item->height = texture->height;
+        if ((object->flags & DIORAMA_OBJECT_REFLECTION) && !object->reflectionHidden)
+        {
+            struct DioramaObjectSnapshot reflection = *object;
+
+            reflection.paletteNum = object->reflectionPaletteNum;
+            reflection.vFlip = !object->vFlip;
+            texture = GetTexture(snapshot, &reflection);
+            if (texture == NULL)
+                return false;
+            item->reflectionTexture = texture->texture;
+        }
         if (!DioramaSprite_BuildPose(snapshot, object, &item->currentPose))
             return false;
         item->previousPose = item->currentPose;
@@ -340,10 +364,46 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot)
             item->interpolate = true;
         }
         if (object->flags & DIORAMA_OBJECT_PLAYER)
+        {
             playerFound = true;
+            playerItem = nextItemCount - 1;
+        }
     }
     if (!playerFound)
         return false;
+    if (snapshot->surfBlobValid
+     && !(snapshot->surfBlob.flags & DIORAMA_OBJECT_INVISIBLE)
+     && nextItemCount < OBJECT_RENDER_ITEM_CAPACITY)
+    {
+        const struct DioramaObjectSnapshot *blob = &snapshot->surfBlob;
+        struct SpriteTextureCacheEntry *texture;
+        struct ObjectRenderItem *item;
+
+        if (!DioramaSprite_IsSupported(blob))
+            return false;
+        texture = GetTexture(snapshot, blob);
+        if (texture == NULL)
+            return false;
+        item = &nextItems[nextItemCount++];
+        memset(item, 0, sizeof(*item));
+        item->object = *blob;
+        item->texture = texture->texture;
+        item->width = texture->width;
+        item->height = texture->height;
+        item->previousPose = nextItems[playerItem].previousPose;
+        item->currentPose = nextItems[playerItem].currentPose;
+        item->interpolate = nextItems[playerItem].interpolate;
+        item->attachedToPlayer = true;
+        item->previousAttachedOffsetX = snapshot->surfBlobOffsetX;
+        item->previousAttachedOffsetY = snapshot->surfBlobOffsetY;
+        item->attachedOffsetX = snapshot->surfBlobOffsetX;
+        item->attachedOffsetY = snapshot->surfBlobOffsetY;
+        if (item->interpolate && sPreviousSnapshot.surfBlobValid)
+        {
+            item->previousAttachedOffsetX = sPreviousSnapshot.surfBlobOffsetX;
+            item->previousAttachedOffsetY = sPreviousSnapshot.surfBlobOffsetY;
+        }
+    }
 
     memcpy(sItems, nextItems, nextItemCount * sizeof(*sItems));
     sItemCount = nextItemCount;
@@ -404,11 +464,32 @@ static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpr
     UploadAndDraw(vertices);
 }
 
+static void DrawReflection(const struct ObjectRenderItem *item,
+                           struct DioramaSpritePose pose,
+                           float pitchSin, float pitchCos)
+{
+    float halfWidth = item->width / 32.0f;
+    float height = item->height / 16.0f;
+    float bottomY = pose.y - height * pitchCos;
+    float bottomZ = pose.z - height * pitchSin;
+    const struct ObjectVertex vertices[6] = {
+        {pose.x - halfWidth, pose.y, pose.z, 0, 0},
+        {pose.x + halfWidth, pose.y, pose.z, 1, 0},
+        {pose.x + halfWidth, bottomY, bottomZ, 1, 1},
+        {pose.x - halfWidth, pose.y, pose.z, 0, 0},
+        {pose.x + halfWidth, bottomY, bottomZ, 1, 1},
+        {pose.x - halfWidth, bottomY, bottomZ, 0, 1},
+    };
+
+    glBindTexture(GL_TEXTURE_2D, item->reflectionTexture);
+    UploadAndDraw(vertices);
+}
+
 void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
                            float cameraPitch, float focalLength)
 {
-    struct DioramaSpritePose poses[DIORAMA_MAX_OBJECTS];
-    uint8_t order[DIORAMA_MAX_OBJECTS];
+    struct DioramaSpritePose poses[OBJECT_RENDER_ITEM_CAPACITY];
+    uint8_t order[OBJECT_RENDER_ITEM_CAPACITY];
     float pitchSin = sinf(cameraPitch);
     float pitchCos = cosf(cameraPitch);
     int i;
@@ -422,6 +503,18 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
         poses[i] = sItems[i].interpolate
             ? DioramaSprite_InterpolatePose(sItems[i].previousPose, sItems[i].currentPose, frameAlpha)
             : sItems[i].currentPose;
+        if (sItems[i].attachedToPlayer)
+        {
+            float offsetX = sItems[i].previousAttachedOffsetX
+                          + (sItems[i].attachedOffsetX - sItems[i].previousAttachedOffsetX)
+                          * frameAlpha;
+            float offsetY = sItems[i].previousAttachedOffsetY
+                          + (sItems[i].attachedOffsetY - sItems[i].previousAttachedOffsetY)
+                          * frameAlpha;
+
+            poses[i] = DioramaSprite_ApplyScreenOffset(poses[i], offsetX, offsetY,
+                                                       cameraPitch);
+        }
         order[i] = i;
     }
     for (i = 1; i < sItemCount; i++)
@@ -451,17 +544,38 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1f(sCameraPitchLocation, cameraPitch);
     dglUniform1f(sFocalLengthLocation, focalLength);
     dglUniform1i(sImageLocation, 0);
+    dglUniform1f(sAnimationTimeLocation, (float)fmod(
+        (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), 120.0));
     dglActiveTexture(GL_TEXTURE0);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    dglUniform1i(sDrawModeLocation, 2);
+    glEnable(GL_STENCIL_TEST);
+    glStencilMask(0x00);
+    glStencilFunc(GL_EQUAL, 1, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    for (i = 0; i < sItemCount; i++)
+    {
+        int index = order[i];
+
+        if (sItems[index].reflectionTexture != 0)
+        {
+            struct DioramaSpritePose reflectionPose = DioramaSprite_ApplyScreenOffset(
+                poses[index], 0, sItems[index].object.reflectionOffsetY, cameraPitch);
+
+            DrawReflection(&sItems[index], reflectionPose, pitchSin, pitchCos);
+        }
+    }
+    glDisable(GL_STENCIL_TEST);
     dglUniform1i(sDrawModeLocation, 1);
     for (i = 0; i < sItemCount; i++)
     {
         int index = order[i];
-        if (sItems[index].object.flags & DIORAMA_OBJECT_SHADOW)
+        if ((sItems[index].object.flags & DIORAMA_OBJECT_SHADOW)
+         && !sItems[index].attachedToPlayer)
             DrawShadow(&sItems[index], poses[index]);
     }
 

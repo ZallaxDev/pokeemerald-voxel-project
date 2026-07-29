@@ -4,11 +4,13 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
+#include "global.h"
 #include "diorama/gl_loader.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/rules.h"
 #include "diorama/terrain_mesh.h"
+#include "metatile_behavior.h"
 
 #define TERRAIN_CHUNK_CACHE_SIZE 36
 #define TERRAIN_DEBUG_MAX_VERTICES (TERRAIN_CHUNK_CACHE_SIZE * 8)
@@ -43,6 +45,7 @@ static GLint sImageLocation;
 static GLint sBaseImageLocation;
 static GLint sForegroundImageLocation;
 static GLint sDebugColorLocation;
+static GLint sRenderPassLocation;
 static uint32_t sMapGeneration;
 static uint32_t sMapEditGeneration;
 static uint32_t sRulesGeneration;
@@ -54,12 +57,14 @@ static const char sTerrainVertexShader[] =
     "layout(location = 1) in vec2 texCoord;\n"
     "layout(location = 2) in float vertexShade;\n"
     "layout(location = 3) in float vertexTextureLayer;\n"
+    "layout(location = 4) in float vertexReflectionMask;\n"
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
     "out vec2 uv;\n"
     "out float shade;\n"
     "flat out int textureLayer;\n"
+    "out float reflectionMask;\n"
     "void main() {\n"
     "  const float cameraHeight = 16.0;\n"
     "  const float cameraTargetVertical = -0.458944;\n"
@@ -80,6 +85,7 @@ static const char sTerrainVertexShader[] =
     "  uv = texCoord;\n"
     "  shade = vertexShade;\n"
     "  textureLayer = int(vertexTextureLayer);\n"
+    "  reflectionMask = vertexReflectionMask;\n"
     "}\n";
 
 static const char sTerrainFragmentShader[] =
@@ -87,12 +93,18 @@ static const char sTerrainFragmentShader[] =
     "in vec2 uv;\n"
     "in float shade;\n"
     "flat in int textureLayer;\n"
+    "in float reflectionMask;\n"
     "out vec4 color;\n"
     "uniform sampler2D image;\n"
     "uniform sampler2D baseImage;\n"
     "uniform sampler2D foregroundImage;\n"
     "uniform vec4 debugColor;\n"
+    "uniform int renderPass;\n"
     "void main() {\n"
+    "  if (renderPass == 1) {\n"
+    "    if (reflectionMask < 0.5 || texture(foregroundImage, uv).a >= 0.5) discard;\n"
+    "    color = vec4(1.0); return;\n"
+    "  }\n"
     "  if (debugColor.a >= 0.0) { color = debugColor; return; }\n"
     "  vec4 texel = textureLayer == 1 ? texture(baseImage, uv)\n"
     "             : (textureLayer == 2 ? texture(foregroundImage, uv) : texture(image, uv));\n"
@@ -152,10 +164,11 @@ static bool CreateProgram(void)
     sBaseImageLocation = dglGetUniformLocation(sProgram, "baseImage");
     sForegroundImageLocation = dglGetUniformLocation(sProgram, "foregroundImage");
     sDebugColorLocation = dglGetUniformLocation(sProgram, "debugColor");
+    sRenderPassLocation = dglGetUniformLocation(sProgram, "renderPass");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sImageLocation >= 0
         && sBaseImageLocation >= 0 && sForegroundImageLocation >= 0
-        && sDebugColorLocation >= 0;
+        && sDebugColorLocation >= 0 && sRenderPassLocation >= 0;
 }
 
 static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
@@ -177,6 +190,10 @@ static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
     dglVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE,
                            sizeof(struct DioramaTerrainVertex),
                            (void *)offsetof(struct DioramaTerrainVertex, textureLayer));
+    dglEnableVertexAttribArray(4);
+    dglVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE,
+                           sizeof(struct DioramaTerrainVertex),
+                           (void *)offsetof(struct DioramaTerrainVertex, reflectionMask));
 }
 
 static struct GLTerrainChunk *FindChunk(int chunkX, int chunkY)
@@ -253,6 +270,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->layerType = source->layerType;
             cell->collision = source->collision;
             cell->rawElevation = source->elevation;
+            cell->reflective = MetatileBehavior_IsReflective(source->behavior);
             cell->shape = resolvedCells[gridIndex].shape;
             cell->profile = resolvedCells[gridIndex].profile;
             cell->planeAxis = resolvedCells[gridIndex].planeAxis;
@@ -452,6 +470,7 @@ static uint32_t AppendBoundsVertices(uint32_t count, const struct DioramaTerrain
         sDebugVertices[count].v = 0.0f;
         sDebugVertices[count].shade = 1.0f;
         sDebugVertices[count].textureLayer = DIORAMA_TERRAIN_TEXTURE_FULL;
+        sDebugVertices[count].reflectionMask = 0.0f;
     }
     return count;
 }
@@ -476,6 +495,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglUniform1i(sBaseImageLocation, 1);
     dglUniform1i(sForegroundImageLocation, 2);
     dglUniform4f(sDebugColorLocation, 0.0f, 0.0f, 0.0f, -1.0f);
+    dglUniform1i(sRenderPassLocation, 0);
     dglActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, atlasTexture);
     dglActiveTexture(GL_TEXTURE1);
@@ -510,6 +530,32 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
         if (debug)
             debugVertexCount = AppendBoundsVertices(debugVertexCount, &chunk->mesh.bounds);
     }
+    if (debug)
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    glEnable(GL_STENCIL_TEST);
+    glStencilMask(0xFF);
+    glStencilFunc(GL_ALWAYS, 1, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glDepthMask(GL_FALSE);
+    dglUniform1i(sRenderPassLocation, 1);
+    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    {
+        struct GLTerrainChunk *chunk = &sChunks[i];
+
+        if (!chunk->active
+         || !DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, cameraX, cameraZ,
+                                             cameraPitch, focalLength))
+            continue;
+        dglBindVertexArray(chunk->vertexArray);
+        glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.vertexCount);
+        sMetrics.drawCalls++;
+    }
+    dglUniform1i(sRenderPassLocation, 0);
+    glDepthMask(GL_TRUE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glStencilMask(0x00);
+    glDisable(GL_STENCIL_TEST);
     if (debug)
     {
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);

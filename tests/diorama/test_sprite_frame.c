@@ -299,6 +299,18 @@ static void TestDepthOrder(void)
                                      &nearPose, 1, 10, 2, 0, 1.22173048f) > 0);
 }
 
+static void TestAttachedScreenOffset(void)
+{
+    struct DioramaSpritePose pose = {2.0f, 3.0f, 4.0f, 1.0f};
+    const float pitch = 0.70758444f;
+
+    pose = DioramaSprite_ApplyScreenOffset(pose, 8, 16, pitch);
+    CHECK_CLOSE(pose.x, 2.5f);
+    CHECK_CLOSE(pose.y, 3.0f - cosf(pitch));
+    CHECK_CLOSE(pose.z, 4.0f - sinf(pitch));
+    CHECK_CLOSE(pose.groundY, 1.0f);
+}
+
 int main(void)
 {
     InitSnapshot();
@@ -310,6 +322,7 @@ int main(void)
     TestCardinalMovementAnchors();
     TestInterpolationDiscontinuities();
     TestDepthOrder();
+    TestAttachedScreenOffset();
     puts("sprite frame tests passed");
     return EXIT_SUCCESS;
 }

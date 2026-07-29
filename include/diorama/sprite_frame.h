@@ -48,8 +48,11 @@ bool DioramaSprite_CanInterpolate(const struct DioramaSceneSnapshot *previousSna
                                   const struct DioramaSceneSnapshot *currentSnapshot,
                                   const struct DioramaObjectSnapshot *currentObject);
 struct DioramaSpritePose DioramaSprite_InterpolatePose(struct DioramaSpritePose previous,
-                                                        struct DioramaSpritePose current,
-                                                        float alpha);
+                                                         struct DioramaSpritePose current,
+                                                         float alpha);
+struct DioramaSpritePose DioramaSprite_ApplyScreenOffset(struct DioramaSpritePose pose,
+                                                          float offsetX, float offsetY,
+                                                          float cameraPitch);
 int DioramaSprite_CompareDepth(const struct DioramaSpritePose *left, uint8_t leftPriority,
                                uint8_t leftSubpriority, uint8_t leftOamOrder,
                                 const struct DioramaSpritePose *right, uint8_t rightPriority,

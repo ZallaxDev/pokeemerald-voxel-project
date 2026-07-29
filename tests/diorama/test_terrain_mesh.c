@@ -105,6 +105,21 @@ static void TestGameplayPlanesStayFlat(void)
     assert(mesh.bounds.minY == 0.0f && mesh.bounds.maxY == 0.0f);
 }
 
+static void TestReflectionMask(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    int i;
+
+    InitInput(&input, 3, MB_NORMAL);
+    input.cells[DIORAMA_TERRAIN_INPUT_SIZE + 1].reflective = 1;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    for (i = 0; i < 6; i++)
+        assert(sVertices[i].reflectionMask == 1.0f);
+    assert(sVertices[6].reflectionMask == 0.0f);
+}
+
 static void TestDirectionalLedgeHeightField(void)
 {
     struct DioramaTerrainHeightCell cells[25];
@@ -352,6 +367,7 @@ int main(void)
     TestElevationNormalization();
     TestFlatChunk();
     TestGameplayPlanesStayFlat();
+    TestReflectionMask();
     TestDirectionalLedgeHeightField();
     TestRaisedCellAndCapacity();
     TestPartialChunk();

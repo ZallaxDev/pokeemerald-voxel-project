@@ -68,7 +68,8 @@ enum DioramaFallbackReason
     DIORAMA_FALLBACK_PALETTE_FADE = 1u << 8,
     DIORAMA_FALLBACK_MODAL_UI = 1u << 9,
     DIORAMA_FALLBACK_NON_OVERWORLD = 1u << 10,
-    DIORAMA_FALLBACK_TILESET_UNAVAILABLE = 1u << 11
+    DIORAMA_FALLBACK_TILESET_UNAVAILABLE = 1u << 11,
+    DIORAMA_FALLBACK_UNSUPPORTED_WEATHER = 1u << 12
 };
 
 struct DioramaCellSnapshot
@@ -121,6 +122,9 @@ struct DioramaObjectSnapshot
     uint8_t width;
     uint8_t height;
     uint8_t shadowSize;
+    uint8_t reflectionHidden;
+    uint8_t reflectionPaletteNum;
+    int16_t reflectionOffsetY;
     uint8_t affineMode;
     uint8_t objMode;
     uint8_t bpp;
@@ -163,6 +167,12 @@ struct DioramaSceneSnapshot
     uint8_t mapCoordinateOffset;
     uint8_t mapType;
     uint8_t weather;
+    uint8_t nextWeather;
+    uint8_t weatherTransitionComplete;
+    uint8_t rainVisibleCount;
+    uint16_t fogScrollOffset;
+    uint16_t weatherBlendEVA;
+    uint16_t weatherBlendEVB;
     int16_t cameraMapX;
     int16_t cameraMapY;
     int16_t cameraPixelX;
@@ -180,6 +190,11 @@ struct DioramaSceneSnapshot
     struct DioramaDirtyCell dirtyCells[DIORAMA_MAX_DIRTY_CELLS];
     uint8_t objectCount;
     struct DioramaObjectSnapshot objects[DIORAMA_MAX_OBJECTS];
+    uint8_t playerAvatarFlags;
+    uint8_t surfBlobValid;
+    int16_t surfBlobOffsetX;
+    int16_t surfBlobOffsetY;
+    struct DioramaObjectSnapshot surfBlob;
     uint16_t fadedPalette[DIORAMA_FADED_PALETTE_ENTRIES];
     uint8_t tileGraphics[DIORAMA_TILE_GRAPHICS_SIZE];
 };

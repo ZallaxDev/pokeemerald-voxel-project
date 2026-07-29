@@ -161,12 +161,72 @@ static void TestCutoutDifference(void)
     CHECK(foregroundAtlas[originY * DIORAMA_ATLAS_WIDTH + originX + 1] == 0);
 }
 
+static void TestDirtyTileUpdates(void)
+{
+    static struct DioramaSceneSnapshot snapshot;
+    static uint32_t atlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t baseAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    static uint32_t foregroundAtlas[DIORAMA_ATLAS_PIXEL_COUNT];
+    uint16_t cutoutBases[DIORAMA_TILE_COUNT];
+    uint8_t present[DIORAMA_ATLAS_PRESENT_BYTES];
+    uint8_t dirty[DIORAMA_ATLAS_DIRTY_TILE_BYTES];
+    uint8_t forced[DIORAMA_ATLAS_PRESENT_BYTES];
+    uint8_t updated[DIORAMA_ATLAS_PRESENT_BYTES];
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    memset(cutoutBases, 0xFF, sizeof(cutoutBases));
+    memset(dirty, 0, sizeof(dirty));
+    memset(forced, 0, sizeof(forced));
+    memset(updated, 0, sizeof(updated));
+    snapshot.visibleCellCount = 3;
+    snapshot.cells[0].metatileId = 33;
+    snapshot.cells[0].tileEntries[0] = 1 | (1 << 10) | (2 << 12);
+    snapshot.cells[1].metatileId = 34;
+    snapshot.cells[1].tileEntries[0] = 2;
+    snapshot.cells[2].metatileId = 35;
+    snapshot.cells[2].tileEntries[0] = 3;
+    cutoutBases[35] = 34;
+    snapshot.fadedPalette[1] = 0x001F;
+    snapshot.fadedPalette[2 * 16 + 1] = 0x03E0;
+    memset(snapshot.tileGraphics + DIORAMA_TILE_BYTES, 0x11, DIORAMA_TILE_BYTES);
+    memset(snapshot.tileGraphics + 2 * DIORAMA_TILE_BYTES, 0x11, DIORAMA_TILE_BYTES);
+    memset(snapshot.tileGraphics + 3 * DIORAMA_TILE_BYTES, 0x11, DIORAMA_TILE_BYTES);
+    DioramaAtlas_Clear(atlas, present);
+    memset(baseAtlas, 0, sizeof(baseAtlas));
+    memset(foregroundAtlas, 0, sizeof(foregroundAtlas));
+    CHECK(DioramaAtlas_Update(&snapshot, cutoutBases, atlas, baseAtlas,
+                               foregroundAtlas, present));
+
+    dirty[1 / 8] |= 1 << (1 % 8);
+    CHECK(DioramaAtlas_UpdateDirty(&snapshot, cutoutBases, dirty, NULL,
+                                   atlas, baseAtlas, foregroundAtlas, present, updated));
+    CHECK((updated[33 / 8] & (1 << (33 % 8))) != 0);
+    CHECK((updated[34 / 8] & (1 << (34 % 8))) == 0);
+    CHECK((updated[35 / 8] & (1 << (35 % 8))) == 0);
+
+    memset(dirty, 0, sizeof(dirty));
+    memset(updated, 0, sizeof(updated));
+    dirty[2 / 8] |= 1 << (2 % 8);
+    CHECK(DioramaAtlas_UpdateDirty(&snapshot, cutoutBases, dirty, NULL,
+                                   atlas, baseAtlas, foregroundAtlas, present, updated));
+    CHECK((updated[34 / 8] & (1 << (34 % 8))) != 0);
+    CHECK((updated[35 / 8] & (1 << (35 % 8))) != 0);
+
+    memset(dirty, 0, sizeof(dirty));
+    memset(updated, 0, sizeof(updated));
+    forced[33 / 8] |= 1 << (33 % 8);
+    CHECK(DioramaAtlas_UpdateDirty(&snapshot, cutoutBases, dirty, forced,
+                                   atlas, baseAtlas, foregroundAtlas, present, updated));
+    CHECK((updated[33 / 8] & (1 << (33 % 8))) != 0);
+}
+
 int main(void)
 {
     TestDecodeAndFlips();
     TestColorAndComposition();
     TestAtlasGuttersAndUv();
     TestCutoutDifference();
+    TestDirtyTileUpdates();
     puts("metatile atlas tests passed");
     return EXIT_SUCCESS;
 }

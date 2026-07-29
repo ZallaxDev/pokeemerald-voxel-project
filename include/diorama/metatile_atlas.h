@@ -16,6 +16,7 @@
 #define DIORAMA_ATLAS_HEIGHT (DIORAMA_ATLAS_ROWS * DIORAMA_ATLAS_STRIDE)
 #define DIORAMA_ATLAS_PIXEL_COUNT (DIORAMA_ATLAS_WIDTH * DIORAMA_ATLAS_HEIGHT)
 #define DIORAMA_ATLAS_PRESENT_BYTES (DIORAMA_TILE_COUNT / 8)
+#define DIORAMA_ATLAS_DIRTY_TILE_BYTES (DIORAMA_TILE_COUNT / 8)
 
 struct DioramaAtlasUv
 {
@@ -38,6 +39,13 @@ bool DioramaAtlas_Update(const struct DioramaSceneSnapshot *snapshot,
                          const uint16_t *cutoutBaseMetatileIds,
                          uint32_t *atlasPixels, uint32_t *baseAtlasPixels,
                          uint32_t *foregroundAtlasPixels, uint8_t *presentMetatiles);
+bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
+                              const uint16_t *cutoutBaseMetatileIds,
+                              const uint8_t *dirtyTiles,
+                              const uint8_t *forcedMetatiles,
+                              uint32_t *atlasPixels, uint32_t *baseAtlasPixels,
+                              uint32_t *foregroundAtlasPixels, uint8_t *presentMetatiles,
+                              uint8_t *updatedMetatiles);
 struct DioramaAtlasUv DioramaAtlas_GetUv(uint16_t metatileId);
 
 #endif

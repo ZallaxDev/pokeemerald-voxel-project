@@ -391,16 +391,50 @@ Fase 8.
 
 ## Fase 8: agua, animaciones y clima basico
 
-- [ ] Actualizar regiones parciales del atlas para tiles animados.
-- [ ] Implementar agua animada sin regenerar toda la escena.
-- [ ] Consumir paletas faded publicadas en snapshots.
-- [ ] Añadir lluvia y niebla basicas con fallback para climas no soportados.
-- [ ] Añadir reflejos simples, Surf y orden correcto sobre agua.
+- [x] Actualizar regiones parciales del atlas para tiles animados.
+- [x] Implementar agua animada sin regenerar toda la escena.
+- [x] Consumir paletas faded publicadas en snapshots.
+- [x] Añadir lluvia y niebla basicas con fallback para climas no soportados.
+- [x] Añadir reflejos simples, Surf y orden correcto sobre agua.
+
+Implementacion tecnica completada. Los cambios de graficos BG se comparan contra
+la ultima imagen completa consumida, por lo que los snapshots saltados no pierden
+animaciones. Solo se recomponen y suben los slots de atlas afectados, incluidos sus
+gutters y dependencias de cutout; cambios de mapa o paleta conservan el reset total
+seguro. La malla y los chunks no se regeneran por animaciones de agua.
+
+El snapshot publica el clima activo y de destino del motor, densidad de lluvia,
+scroll y blend de niebla, y las paletas faded completas. Soleado, lluvia, niebla
+horizontal y ceniza volcanica se representan en 3D; tormenta, aguacero, arena,
+sequia y el resto de climas no implementados fuerzan fallback 2D durante toda la
+transicion. La lluvia conserva la direccion diagonal hacia la izquierda del juego.
+
+Los objetos conservan visibilidad, paleta faded y offset de puente de su reflejo.
+Una mascara stencil por pixel limita el reflejo a caras reflectantes visibles y
+descarta la capa foreground de orillas y exteriores. El reflejo aplica ademas una
+deformacion animada suave. El blob de Surf se identifica por el callback real del
+field effect, se copia como datos inmutables y se ordena como billboard adjunto al
+jugador, con offset y bob interpolados. Reflejos, terreno y objetos mantienen depth
+test y orden estable.
+
+Pruebas CPU cubren tiles animados y dependencias de cutout, clasificacion y ramps
+de clima, offsets de sprites adjuntos, copia inmutable del snapshot y las suites
+anteriores. Para validar visualmente esta fase, `AUTO` acepta todos los mapas
+seguros mediante el resolver generico; Villa Raiz y Ruta 101 conservan su cobertura
+curada. Los mapas sin reglas especificas pueden mostrar geometria incompleta, pero
+permiten probar agua, lluvia, niebla, reflejos y Surf.
+
+`test-diorama`, los builds i386 clasico y diorama, `diff --check` y un smoke
+OpenGL software de 10 segundos se completaron correctamente.
 
 Prueba manual realizable por el usuario: visitar agua y mapas con lluvia/niebla,
 usar Surf y provocar fades; validar animacion, colores, reflejos, profundidad y FPS.
 
-Resultado del usuario: **PENDIENTE**
+Resultado del usuario: **APROBADO** (2026-07-29)
+
+El usuario confirmo la animacion de agua, el recorte y la deformacion de reflejos,
+Surf, la direccion de lluvia y la caida de ceniza con el diorama activo. La Fase 8
+queda cerrada y se desbloquea la Fase 9.
 
 ## Fase 9: interfaz 2D sobre mundo 3D
 
@@ -414,7 +448,7 @@ Prueba manual realizable por el usuario: abrir dialogos, menu de inicio y popup 
 mapa sobre 3D; comprobar ausencia de fondo 2D residual y comparar texto, fades,
 voz y timings con el modo clasico.
 
-Resultado del usuario: **BLOQUEADO POR FASE 8**
+Resultado del usuario: **PENDIENTE**
 
 ## Fase 10: interiores y edificios avanzados
 
