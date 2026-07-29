@@ -1,4 +1,5 @@
 NATIVE_LINUX ?= 0
+DIORAMA ?= 0
 
 ifeq ($(NATIVE_LINUX),1)
 PREFIX :=
@@ -36,7 +37,11 @@ MAKER_CODE  := 01
 REVISION    := 0
 MODERN      := 1
 TARGET_PLATFORM := PLATFORM_SDL2
+ifeq ($(NATIVE_LINUX),1)
+TILE_RENDERER := RENDERER_FAST_DRAW
+else
 TILE_RENDERER := RENDERER_EASY_DRAW
+endif
 
 SHELL := /bin/bash -o pipefail
 
@@ -64,18 +69,32 @@ MID_BUILDDIR = $(OBJ_DIR)/$(MID_SUBDIR)
 
 ASFLAGS := --32 --defsym MODERN=$(MODERN) --defsym PORTABLE=1 --defsym UBFIX=1
 
-GCC_VER := $(shell $(CC) -dumpversion)
-
-CC1 	:= $(shell $(PREFIX)gcc --print-prog-name=cc1) -quiet
 override CFLAGS += -Wno-trigraphs -Wimplicit -Wparentheses -Wunused -m32 -std=gnu99 -fno-dce -fno-builtin -Wno-unused-function -DPORTABLE -DNONMATCHING -D UBFIX -DMODERN=$(MODERN)
 ifeq ($(NATIVE_LINUX),1)
 override CFLAGS += -fno-pie
-ROM := pokeemerald
+OUTPUT_ROM := pokeemerald
+ifeq ($(DIORAMA),1)
+ROM := pokeemerald-diorama
+OBJ_DIR := build/linux-diorama
+else
+ROM := pokeemerald-classic
 OBJ_DIR := build/linux
+endif
+PKG_CONFIG_32_PATH := /usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig
+PKG_CONFIG_32 := PKG_CONFIG_LIBDIR="$(PKG_CONFIG_32_PATH)" pkg-config
+SDL_MIXER_BUILD_ROOT := build/deps/src
+SDL_MIXER_PREFIX := build/deps/sdl2_mixer_i386
+SDL_MIXER_LIB := $(SDL_MIXER_PREFIX)/lib/libSDL2_mixer.a
 else
 override CFLAGS += -fleading-underscore
-ROM := pokeemerald.exe
+OUTPUT_ROM := pokeemerald.exe
+ifeq ($(DIORAMA),1)
+ROM := pokeemerald-diorama.exe
+OBJ_DIR := build/pc-diorama
+else
+ROM := pokeemerald-classic.exe
 OBJ_DIR := build/pc
+endif
 endif
 
 CPPFLAGS := -std=gnu99 -iquote include -iquote $(GFLIB_SUBDIR) -Wno-trigraphs -D NONMATCHING -D PORTABLE -D $(TARGET_PLATFORM) -D $(TILE_RENDERER) -D MODERN=$(MODERN) -D UBFIX
@@ -84,9 +103,12 @@ CPPFLAGS := -std=gnu99 -iquote include -iquote $(GFLIB_SUBDIR) -Wno-trigraphs -D
 # the normal SDL API, never the SIMD intrinsics).
 CPPFLAGS += -DSDL_DISABLE_IMMINTRIN_H -DSDL_DISABLE_MMINTRIN_H -DSDL_DISABLE_XMMINTRIN_H -DSDL_DISABLE_EMMINTRIN_H -DSDL_DISABLE_PMMINTRIN_H
 ifeq ($(NATIVE_LINUX),1)
-CPPFLAGS += -m32 -D NATIVE_LINUX $(shell pkg-config --cflags sdl2 SDL2_image)
+CPPFLAGS += -m32 -D NATIVE_LINUX $(shell $(PKG_CONFIG_32) --cflags sdl2 SDL2_image) -I$(SDL_MIXER_PREFIX)/include
 else
 CPPFLAGS += -I$(SDL_DIR)/include -L$(SDL_DIR)/lib
+endif
+ifeq ($(DIORAMA),1)
+CPPFLAGS += -D ENABLE_DIORAMA
 endif
 
 LDFLAGS = -Map ../../$(MAP)
@@ -94,7 +116,10 @@ LDFLAGS = -Map ../../$(MAP)
 PLATFORM_INCLUDES := 
 
 ifeq ($(NATIVE_LINUX),1)
-PLATFORM_INCLUDES += $(shell pkg-config --libs sdl2 SDL2_image) -lm
+PLATFORM_INCLUDES += $(SDL_MIXER_LIB) $(shell $(PKG_CONFIG_32) --libs sdl2 SDL2_image) -lm
+ifeq ($(DIORAMA),1)
+PLATFORM_INCLUDES += $(shell $(PKG_CONFIG_32) --libs gl)
+endif
 else
 # Windows only
 ifneq ($(NO_STD_LIB),1)
@@ -103,6 +128,9 @@ endif
 
 ifeq ($(TARGET_PLATFORM), PLATFORM_SDL2)
 	PLATFORM_INCLUDES += -lSDL2main -lSDL2.dll -lSDL2_mixer
+ifeq ($(DIORAMA),1)
+	PLATFORM_INCLUDES += -lopengl32
+endif
 endif
 	
 ifeq ($(TARGET_PLATFORM), PLATFORM_WIN32)
@@ -142,10 +170,30 @@ MAKEFLAGS += --no-print-directory
 # Secondary expansion is required for dependency variables in object rules.
 .SECONDEXPANSION:
 
-.PHONY: all rom linux clean compare tidy mostlyclean libagbsyscall modern tidymodern tidynonmodern
+.PHONY: all rom linux clean compare tidy mostlyclean libagbsyscall modern tidymodern tidynonmodern test-diorama-snapshot test-diorama-metatile
 
 linux:
 	$(MAKE) -f Makefile_pc NATIVE_LINUX=1 rom
+
+DIORAMA_SNAPSHOT_TEST := build/tests/diorama/test_snapshot
+DIORAMA_METATILE_TEST := build/tests/diorama/test_metatile_atlas
+DIORAMA_TEST_CC ?= gcc
+DIORAMA_TEST_PKG_CONFIG := PKG_CONFIG_LIBDIR="/usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig" pkg-config
+
+test-diorama-snapshot: tests/diorama/test_snapshot.c src/diorama/scene/snapshot_exchange.c include/diorama/scene_snapshot.h
+	mkdir -p $(dir $(DIORAMA_SNAPSHOT_TEST))
+	$(DIORAMA_TEST_CC) -m32 -std=gnu99 -Wall -Wextra -Werror -D ENABLE_DIORAMA -D DIORAMA_TEST -iquote include \
+		$(shell $(DIORAMA_TEST_PKG_CONFIG) --cflags sdl2) tests/diorama/test_snapshot.c \
+		src/diorama/scene/snapshot_exchange.c $(shell $(DIORAMA_TEST_PKG_CONFIG) --libs sdl2) \
+		-o $(DIORAMA_SNAPSHOT_TEST)
+	$(DIORAMA_SNAPSHOT_TEST)
+
+test-diorama-metatile: tests/diorama/test_metatile_atlas.c src/diorama/scene/metatile_atlas.c include/diorama/metatile_atlas.h include/diorama/scene_snapshot.h
+	mkdir -p $(dir $(DIORAMA_METATILE_TEST))
+	$(DIORAMA_TEST_CC) -m32 -std=gnu99 -Wall -Wextra -Werror -D ENABLE_DIORAMA -iquote include \
+		tests/diorama/test_metatile_atlas.c src/diorama/scene/metatile_atlas.c \
+		-o $(DIORAMA_METATILE_TEST)
+	$(DIORAMA_METATILE_TEST)
 
 infoshell = $(foreach line, $(shell $1 | sed "s/ /__SPACE__/g"), $(info $(subst __SPACE__, ,$(line))))
 
@@ -171,6 +219,14 @@ endif
 C_SRCS_IN := $(wildcard $(C_SUBDIR)/*.c $(C_SUBDIR)/*/*.c $(C_SUBDIR)/*/*/*.c)
 C_SRCS := $(foreach src,$(C_SRCS_IN),$(if $(findstring .inc.c,$(src)),,$(src)))
 C_OBJS := $(patsubst $(C_SUBDIR)/%.c,$(C_BUILDDIR)/%.o,$(C_SRCS))
+
+ifeq ($(NATIVE_LINUX),1)
+$(SDL_MIXER_LIB): tools/build_sdl2_mixer_i386.sh
+	JOBS=$(or $(filter -j%,$(MAKEFLAGS)),-j4); JOBS=$${JOBS#-j}; \
+		tools/build_sdl2_mixer_i386.sh $(abspath $(SDL_MIXER_PREFIX)) $(abspath $(SDL_MIXER_BUILD_ROOT))
+
+$(C_BUILDDIR)/platform/sfx.o: $(SDL_MIXER_LIB)
+endif
 
 GFLIB_SRCS := $(wildcard $(GFLIB_SUBDIR)/*.c)
 GFLIB_OBJS := $(patsubst $(GFLIB_SUBDIR)/%.c,$(GFLIB_BUILDDIR)/%.o,$(GFLIB_SRCS))
@@ -208,6 +264,7 @@ SUBDIRS  := $(sort $(dir $(OBJS)))
 $(shell mkdir -p $(SUBDIRS))
 
 rom: $(ROM)
+	cp -f $(ROM) $(OUTPUT_ROM)
 ifeq ($(COMPARE),1)
 	@$(SHA1) rom.sha1
 endif
@@ -228,7 +285,7 @@ mostlyclean: tidy
 	rm -f $(AUTO_GEN_TARGETS)
 
 tidy:
-	rm -f $(ROM)$(EXE) $(ELF) $(MAP)
+	rm -f $(ROM) $(OUTPUT_ROM) $(ELF) $(MAP)
 	rm -r $(OBJ_DIR)
 ifeq ($(MODERN),0)
 	@$(MAKE) tidy MODERN=1

@@ -67,3 +67,34 @@ jobs:
           cwd: "./symbols"
           add: "*.sym"
           message: ${{ env.SYMBOLS_COMMIT_MSG }}
+
+  desktop:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        diorama: [0, 1]
+    name: Desktop i386 (DIORAMA=${{ matrix.diorama }})
+    steps:
+      - name: Checkout
+        uses: actions/checkout@master
+
+      - name: Install 32-bit desktop dependencies
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib libc6-dev-i386 libpng-dev pkg-config \
+            libsdl2-dev:i386 libsdl2-image-dev:i386 libgl-dev:i386 \
+            libgl1-mesa-dri:i386 xvfb
+
+      - name: Build SDL desktop executable
+        run: make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=${{ matrix.diorama }} -j$(nproc)
+
+      - name: Verify 32-bit executable
+        run: file pokeemerald | tee /dev/stderr | grep -q "ELF 32-bit"
+
+      - name: Test snapshot publication
+        if: matrix.diorama == 1
+        run: make -f Makefile_pc test-diorama-snapshot test-diorama-metatile
+
+      - name: Smoke test desktop presentation
+        run: timeout 5s xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX" ./pokeemerald || test $? -eq 124

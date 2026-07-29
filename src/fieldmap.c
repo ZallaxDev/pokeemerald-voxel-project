@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/scene_snapshot.h"
+#endif
 #include "battle_pyramid.h"
 #include "bg.h"
 #include "fieldmap.h"
@@ -73,6 +76,9 @@ void InitMap(void)
     InitMapLayoutData(&gMapHeader);
     SetOccupiedSecretBaseEntranceMetatiles(gMapHeader.events);
     RunOnLoadMapScript();
+#ifdef ENABLE_DIORAMA
+    DioramaScene_MarkMapChanged();
+#endif
 }
 
 void InitMapFromSavedGame(void)
@@ -83,18 +89,27 @@ void InitMapFromSavedGame(void)
     LoadSavedMapView();
     RunOnLoadMapScript();
     UpdateTVScreensOnMap(gBackupMapLayout.width, gBackupMapLayout.height);
+#ifdef ENABLE_DIORAMA
+    DioramaScene_MarkMapChanged();
+#endif
 }
 
 void InitBattlePyramidMap(bool8 setPlayerPosition)
 {
     CpuFastFill16(MAPGRID_UNDEFINED, sBackupMapData, sizeof(sBackupMapData));
     GenerateBattlePyramidFloorLayout(sBackupMapData, setPlayerPosition);
+#ifdef ENABLE_DIORAMA
+    DioramaScene_MarkMapChanged();
+#endif
 }
 
 void InitTrainerHillMap(void)
 {
     CpuFastFill16(MAPGRID_UNDEFINED, sBackupMapData, sizeof(sBackupMapData));
     GenerateTrainerHillFloorLayout(sBackupMapData);
+#ifdef ENABLE_DIORAMA
+    DioramaScene_MarkMapChanged();
+#endif
 }
 
 static void InitMapLayoutData(struct MapHeader *mapHeader)

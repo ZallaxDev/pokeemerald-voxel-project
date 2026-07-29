@@ -1,0 +1,33 @@
+#ifndef GUARD_DIORAMA_GL_LOADER_H
+#define GUARD_DIORAMA_GL_LOADER_H
+
+#include <stdbool.h>
+#include <SDL2/SDL_opengl.h>
+
+extern PFNGLACTIVETEXTUREPROC dglActiveTexture;
+extern PFNGLATTACHSHADERPROC dglAttachShader;
+extern PFNGLBINDBUFFERPROC dglBindBuffer;
+extern PFNGLBINDVERTEXARRAYPROC dglBindVertexArray;
+extern PFNGLBUFFERDATAPROC dglBufferData;
+extern PFNGLCOMPILESHADERPROC dglCompileShader;
+extern PFNGLCREATEPROGRAMPROC dglCreateProgram;
+extern PFNGLCREATESHADERPROC dglCreateShader;
+extern PFNGLDELETEBUFFERSPROC dglDeleteBuffers;
+extern PFNGLDELETEPROGRAMPROC dglDeleteProgram;
+extern PFNGLDELETESHADERPROC dglDeleteShader;
+extern PFNGLDELETEVERTEXARRAYSPROC dglDeleteVertexArrays;
+extern PFNGLENABLEVERTEXATTRIBARRAYPROC dglEnableVertexAttribArray;
+extern PFNGLGENBUFFERSPROC dglGenBuffers;
+extern PFNGLGENVERTEXARRAYSPROC dglGenVertexArrays;
+extern PFNGLGETPROGRAMINFOLOGPROC dglGetProgramInfoLog;
+extern PFNGLGETPROGRAMIVPROC dglGetProgramiv;
+extern PFNGLGETSHADERINFOLOGPROC dglGetShaderInfoLog;
+extern PFNGLGETSHADERIVPROC dglGetShaderiv;
+extern PFNGLLINKPROGRAMPROC dglLinkProgram;
+extern PFNGLSHADERSOURCEPROC dglShaderSource;
+extern PFNGLUSEPROGRAMPROC dglUseProgram;
+extern PFNGLVERTEXATTRIBPOINTERPROC dglVertexAttribPointer;
+
+bool DioramaGL_LoadFunctions(void);
+
+#endif

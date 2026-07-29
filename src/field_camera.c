@@ -91,6 +91,12 @@ void GetCameraOffsetWithPan(s16 *x, s16 *y)
     *y = sFieldCameraOffset.yPixelOffset + sVerticalCameraPan + 8;
 }
 
+void GetCameraPan(s16 *x, s16 *y)
+{
+    *x = sHorizontalCameraPan;
+    *y = sVerticalCameraPan - 32;
+}
+
 void DrawWholeMapView(void)
 {
     DrawWholeMapViewInternal(gSaveBlock1Ptr->pos.x, gSaveBlock1Ptr->pos.y, gMapHeader.mapLayout);

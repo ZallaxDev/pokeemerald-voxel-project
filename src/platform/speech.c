@@ -9,6 +9,8 @@
 // stable TTS backend. Game-side text decoding lives elsewhere and calls
 // Speech_Say() with a finished UTF-8/ASCII string.
 
+#ifdef _WIN32
+
 #include <windows.h>
 
 typedef unsigned long nvda_status_t;
@@ -73,3 +75,21 @@ void Speech_Silence(void)
     if (sCancel && NvdaReady())
         sCancel();
 }
+
+#else
+
+void Speech_Init(void)
+{
+}
+
+void Speech_Say(const char *text, int interrupt)
+{
+    (void)text;
+    (void)interrupt;
+}
+
+void Speech_Silence(void)
+{
+}
+
+#endif

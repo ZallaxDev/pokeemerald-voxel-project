@@ -31,6 +31,8 @@ build/
 android/.gradle/
 android/local.properties
 /pokeemerald
+/pokeemerald-classic
+/pokeemerald-diorama
 /pokeemerald.sav
 .DS_Store
 *.ddump

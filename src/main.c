@@ -1,5 +1,8 @@
 #include "global.h"
 #include "accessibility.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/scene_snapshot.h"
+#endif
 #include "crt0.h"
 #include "malloc.h"
 #include "link.h"
@@ -183,8 +186,14 @@ void AgbMain(void)
 
 static void UpdateLinkAndCallCallbacks(void)
 {
+#ifdef ENABLE_DIORAMA
+    DioramaScene_BeginFrame();
+#endif
     if (!HandleLinkConnection())
         CallCallbacks();
+#ifdef ENABLE_DIORAMA
+    DioramaScene_EndFrame(gMain.inBattle);
+#endif
 }
 
 static void InitMainCallbacks(void)

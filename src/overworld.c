@@ -1,5 +1,8 @@
 #include "global.h"
 #include "accessibility.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/scene_snapshot.h"
+#endif
 #include "overworld.h"
 #include "battle_pyramid.h"
 #include "battle_setup.h"
@@ -1484,6 +1487,9 @@ static void OverworldBasic(void)
     UpdateTilesetAnimations();
     DoScheduledBgTilemapCopiesToVram();
     AX_OverworldScan(); // spatial door/NPC cues
+#ifdef ENABLE_DIORAMA
+    DioramaScene_PublishOverworld();
+#endif
 }
 
 // This CB2 is used when starting

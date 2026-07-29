@@ -29,6 +29,10 @@
 #include "gba/flash_internal.h"
 #include "platform/dma.h"
 #include "platform/framedraw.h"
+#ifdef ENABLE_DIORAMA
+#include "diorama/gl_compositor.h"
+#include "diorama/scene_snapshot.h"
+#endif
 
 extern void (*const gIntrTable[])(void);
 
@@ -36,7 +40,7 @@ SDL_Thread *mainLoopThread;
 SDL_Window *sdlWindow;
 SDL_Renderer *sdlRenderer;
 SDL_Texture *sdlTexture;
-#if defined(NATIVE_LINUX) || defined(_WIN32)
+#if (defined(NATIVE_LINUX) || defined(_WIN32)) && !defined(ENABLE_DIORAMA)
 #define MAX_BORDER_BACKGROUNDS 15
 SDL_Texture *sdlBackgroundTextures[MAX_BORDER_BACKGROUNDS];
 SDL_Texture *sdlBorderTexture;
@@ -86,6 +90,11 @@ static void StoreSaveFile(void);
 static void CloseSaveFile(void);
 
 static void UpdateInternalClock(void);
+
+#ifdef ENABLE_DIORAMA
+#define DIORAMA_VIDEO_SETTING_EVENT 1
+static void ApplyDioramaVideoSetting(enum PlatformSetting setting, u8 value);
+#endif
 
 #ifdef __ANDROID__
 static void HandleTouchEvent(const SDL_TouchFingerEvent *event);
@@ -140,8 +149,20 @@ int main(int argc, char **argv)
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
+#ifdef ENABLE_DIORAMA
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+#endif
 #if defined(NATIVE_LINUX) || defined(_WIN32)
-    sdlWindow = SDL_CreateWindow("Pokemon Emerald", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    sdlWindow = SDL_CreateWindow("Pokemon Emerald", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+#ifdef ENABLE_DIORAMA
+                                 | SDL_WINDOW_OPENGL
+#endif
+                                 );
 #else
     sdlWindow = SDL_CreateWindow("pokeemerald", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, DISPLAY_WIDTH * videoScale, DISPLAY_HEIGHT * videoScale, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 #endif
@@ -151,8 +172,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
+#ifndef ENABLE_DIORAMA
 #ifdef __ANDROID__
     sdlRenderer = SDL_CreateRenderer(sdlWindow, -1, SDL_RENDERER_ACCELERATED);
+#elif defined(NATIVE_LINUX)
+    // The accelerated SDL backends on Linux retain pixels briefly while
+    // presenting the 240x160 texture. Keep the classic development path crisp.
+    sdlRenderer = SDL_CreateRenderer(sdlWindow, -1, SDL_RENDERER_SOFTWARE | SDL_RENDERER_PRESENTVSYNC);
 #else
     sdlRenderer = SDL_CreateRenderer(sdlWindow, -1, SDL_RENDERER_PRESENTVSYNC);
 #endif
@@ -165,6 +191,7 @@ int main(int argc, char **argv)
     SDL_SetRenderDrawColor(sdlRenderer, 0, 0, 0, 255);
     SDL_RenderClear(sdlRenderer);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+#endif
 
     for (int i = 1; i < 15; i++)
     {
@@ -192,14 +219,30 @@ int main(int argc, char **argv)
         sBackgroundOrderVersion = 2;
         StoreConfigFile();
     }
+#ifdef ENABLE_DIORAMA
+    if (!DioramaGL_Init(sdlWindow, sBorderBackgroundCount))
+    {
+        DioramaGL_Shutdown();
+        SDL_DestroyWindow(sdlWindow);
+        SDL_Quit();
+        return 1;
+    }
+    DioramaSnapshotExchange_Init();
+    DioramaScene_Init();
+#endif
 #ifdef NATIVE_LINUX
+#ifndef ENABLE_DIORAMA
     SDL_RenderSetLogicalSize(sdlRenderer, 0, 0);
+#endif
     if ((IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG) == 0)
     {
         SDL_Log("SDL_image could not initialize: %s", IMG_GetError());
     }
     else
     {
+#ifdef ENABLE_DIORAMA
+        DioramaGL_LoadArtwork();
+#else
         for (int i = 0; i < sBorderBackgroundCount; i++)
         {
             char filename[16];
@@ -211,8 +254,12 @@ int main(int argc, char **argv)
             SDL_Log("Background image could not be loaded: %s", IMG_GetError());
         if (sdlBorderTexture == NULL)
             SDL_Log("Border image could not be loaded: %s", IMG_GetError());
+#endif
     }
 #elif defined(_WIN32)
+#ifdef ENABLE_DIORAMA
+    DioramaGL_LoadArtwork();
+#else
     SDL_RenderSetLogicalSize(sdlRenderer, 0, 0);
     SDL_Surface *borderSurface = SDL_LoadBMP("Border.bmp");
     for (int i = 0; i < sBorderBackgroundCount; i++)
@@ -236,12 +283,14 @@ int main(int argc, char **argv)
         sdlBorderTexture = SDL_CreateTextureFromSurface(sdlRenderer, borderSurface);
         SDL_FreeSurface(borderSurface);
     }
+#endif
 #else
     SDL_RenderSetLogicalSize(sdlRenderer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     SDL_RenderSetIntegerScale(sdlRenderer, SDL_TRUE);
 #endif
     ApplyPlatformSettings();
 
+#ifndef ENABLE_DIORAMA
     sdlTexture = SDL_CreateTexture(sdlRenderer,
                                    SDL_PIXELFORMAT_ARGB8888,
                                    SDL_TEXTUREACCESS_STREAMING,
@@ -252,6 +301,7 @@ int main(int argc, char **argv)
         return 1;
     }
     SDL_SetTextureBlendMode(sdlTexture, SDL_BLENDMODE_NONE);
+#endif
 
     simTime = curGameTime = lastGameTime = SDL_GetPerformanceCounter();
 
@@ -309,6 +359,7 @@ int main(int argc, char **argv)
                 if (SDL_AtomicGet(&isFrameAvailable))
                 {
                     VDraw(sdlTexture);
+#ifndef ENABLE_DIORAMA
                     SDL_RenderClear(sdlRenderer);
 #if defined(NATIVE_LINUX) || defined(_WIN32)
                     u8 backgroundOption = Platform_GetBorderBackground();
@@ -358,6 +409,7 @@ int main(int argc, char **argv)
 #ifdef __ANDROID__
                     SDL_RenderPresent(sdlRenderer);
 #endif
+#endif
                     SDL_AtomicSet(&isFrameAvailable, 0);
 
                     REG_DISPSTAT |= INTR_FLAG_VBLANK;
@@ -380,14 +432,22 @@ int main(int argc, char **argv)
         }
 
 #ifndef __ANDROID__
+#ifdef ENABLE_DIORAMA
+        DioramaGL_Present(Platform_GetBorderBackground(),
+                          sPlatformSettings[PLATFORM_SETTING_BORDER],
+                          sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE]);
+#else
         SDL_RenderPresent(sdlRenderer);
+#endif
 #endif
     }
 
     //StoreSaveFile();
     CloseSaveFile();
 
-#if defined(NATIVE_LINUX) || defined(_WIN32)
+#ifdef ENABLE_DIORAMA
+    DioramaGL_Shutdown();
+#elif defined(NATIVE_LINUX) || defined(_WIN32)
     for (int i = 0; i < sBorderBackgroundCount; i++)
         SDL_DestroyTexture(sdlBackgroundTextures[i]);
     SDL_DestroyTexture(sdlBorderTexture);
@@ -488,7 +548,11 @@ static void StoreConfigFile(void)
 
 static void ApplyPlatformSettings(void)
 {
+#ifdef ENABLE_DIORAMA
+    DioramaGL_SetVSync(sPlatformSettings[PLATFORM_SETTING_VSYNC]);
+#else
     SDL_RenderSetVSync(sdlRenderer, sPlatformSettings[PLATFORM_SETTING_VSYNC]);
+#endif
 #if defined(NATIVE_LINUX) || defined(_WIN32)
     SDL_SetWindowFullscreen(sdlWindow, sPlatformSettings[PLATFORM_SETTING_FULLSCREEN]
                                       ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
@@ -500,6 +564,31 @@ static void ApplyPlatformSettings(void)
     }
 #endif
 }
+
+#ifdef ENABLE_DIORAMA
+static void ApplyDioramaVideoSetting(enum PlatformSetting setting, u8 value)
+{
+    if (setting == PLATFORM_SETTING_VSYNC)
+    {
+        DioramaGL_SetVSync(value);
+    }
+    else if (setting == PLATFORM_SETTING_FULLSCREEN)
+    {
+        SDL_SetWindowFullscreen(sdlWindow, value ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+        if (!value)
+        {
+            int scale = sPlatformSettings[PLATFORM_SETTING_WINDOW_SCALE];
+            SDL_SetWindowSize(sdlWindow, 320 * scale, 180 * scale);
+            SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        }
+    }
+    else if (setting == PLATFORM_SETTING_WINDOW_SCALE && !sPlatformSettings[PLATFORM_SETTING_FULLSCREEN])
+    {
+        SDL_SetWindowSize(sdlWindow, 320 * value, 180 * value);
+        SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+}
+#endif
 
 static void StoreSaveFile()
 {
@@ -611,6 +700,19 @@ void Platform_SetSetting(enum PlatformSetting setting, u8 value)
     sPlatformSettings[setting] = value;
     if (setting == PLATFORM_SETTING_VOLUME || setting == PLATFORM_SETTING_CRY_VOLUME)
         ApplySfxVolumes();
+#ifdef ENABLE_DIORAMA
+    if (setting == PLATFORM_SETTING_VSYNC
+     || setting == PLATFORM_SETTING_FULLSCREEN
+     || setting == PLATFORM_SETTING_WINDOW_SCALE)
+    {
+        SDL_Event event = {0};
+        event.type = SDL_USEREVENT;
+        event.user.code = DIORAMA_VIDEO_SETTING_EVENT;
+        event.user.data1 = (void *)(uintptr_t)setting;
+        event.user.data2 = (void *)(uintptr_t)value;
+        SDL_PushEvent(&event);
+    }
+#else
     if (setting == PLATFORM_SETTING_VSYNC)
         SDL_RenderSetVSync(sdlRenderer, value);
 #if defined(NATIVE_LINUX) || defined(_WIN32)
@@ -629,6 +731,7 @@ void Platform_SetSetting(enum PlatformSetting setting, u8 value)
         SDL_SetWindowSize(sdlWindow, 320 * value, 180 * value);
         SDL_SetWindowPosition(sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     }
+#endif
 #endif
     StoreConfigFile();
 }
@@ -935,6 +1038,13 @@ void ProcessEvents(void)
         case SDL_QUIT:
             isRunning = false;
             break;
+#ifdef ENABLE_DIORAMA
+        case SDL_USEREVENT:
+            if (event.user.code == DIORAMA_VIDEO_SETTING_EVENT)
+                ApplyDioramaVideoSetting((enum PlatformSetting)(uintptr_t)event.user.data1,
+                                         (u8)(uintptr_t)event.user.data2);
+            break;
+#endif
 #ifdef __ANDROID__
         case SDL_CONTROLLERDEVICEADDED:
             if (androidController == NULL && SDL_IsGameController(event.cdevice.which))
@@ -1135,7 +1245,11 @@ void VDraw(SDL_Texture *texture)
         uint32_t b = ((color >> 10) & 0x1F) * 255 / 31;
         image[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
     }
+#ifdef ENABLE_DIORAMA
+    DioramaGL_UploadFrame(image);
+#else
     SDL_UpdateTexture(texture, NULL, image, DISPLAY_WIDTH * sizeof(Uint32));
+#endif
     REG_VCOUNT = 161; // prep for being in VBlank period
 }
 
