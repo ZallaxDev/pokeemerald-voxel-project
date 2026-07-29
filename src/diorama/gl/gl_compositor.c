@@ -12,6 +12,7 @@
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/rules.h"
 #include "diorama/metatile_atlas.h"
+#include "diorama/presentation_transition.h"
 #include "diorama/scene_snapshot.h"
 #include "gba/defines.h"
 
@@ -24,6 +25,8 @@
 #define CAMERA_MIN_FOCAL_LENGTH 80.0f
 #define CAMERA_MAX_FOCAL_LENGTH 200.0f
 #define CAMERA_ZOOM_STEP 10.0f
+#define SOURCE_FADE_SECONDS 0.12
+#define CAMERA_TELEPORT_LIMIT 2.0f
 
 struct DioramaTexture
 {
@@ -37,6 +40,7 @@ static SDL_GLContext sContext;
 static GLuint sProgram;
 static GLuint sVertexArray;
 static GLuint sVertexBuffer;
+static GLint sOpacityUniform;
 static struct DioramaTexture sFrameTexture;
 static struct DioramaTexture sDebugTexture;
 static struct DioramaTexture sAtlasTexture;
@@ -48,6 +52,8 @@ static u8 sBackgroundCount;
 static struct DioramaSceneSnapshot sSceneSnapshot;
 static struct DioramaSceneSnapshot sPreviousSceneSnapshot;
 static struct DioramaSceneSnapshot sIncomingSceneSnapshot;
+static struct DioramaSceneSnapshot sRenderedSceneSnapshot;
+static struct DioramaSceneSnapshot sPreviousRenderedSceneSnapshot;
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sBaseAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
@@ -60,12 +66,20 @@ static u32 sAtlasPaletteGeneration;
 static u32 sAtlasAnimationGeneration;
 static bool sHasSceneSnapshot;
 static bool sHasPreviousSceneSnapshot;
+static bool sHasRenderedSceneSnapshot;
+static bool sHasPreviousRenderedSceneSnapshot;
+static bool sCurrent3DReady;
 static bool sTerrainAvailable;
 static bool sObjectsAvailable;
 static bool sTerrainDebug;
 static float sCameraPitch = CAMERA_DEFAULT_PITCH;
 static float sCameraFocalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
 static enum DioramaRenderMode sRenderMode = DIORAMA_RENDER_AUTO;
+static uint64_t sProcessedSequence;
+static uint64_t sFadeStartCounter;
+static float sTwoDOpacity = 1.0f;
+static float sFadeStartOpacity = 1.0f;
+static float sFadeTargetOpacity = 1.0f;
 
 #define RGB(r, g, b) (0xFF000000u | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
 #define RGBA(r, g, b, a) (((u32)(a) << 24) | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
@@ -188,7 +202,8 @@ static const char sFragmentShaderSource[] =
     "in vec2 uv;\n"
     "out vec4 color;\n"
     "uniform sampler2D image;\n"
-    "void main() { color = texture(image, uv); }\n";
+    "uniform float opacity;\n"
+    "void main() { vec4 sampleColor = texture(image, uv); color = vec4(sampleColor.rgb, sampleColor.a * opacity); }\n";
 
 static GLuint CompileShader(GLenum type, const char *source)
 {
@@ -288,7 +303,7 @@ static void DrawTexture(const struct DioramaTexture *texture,
                         int outputWidth, int outputHeight,
                         float x, float y, float width, float height,
                         float sourceX, float sourceY, float sourceWidth, float sourceHeight,
-                        bool blend)
+                         bool blend, float opacity)
 {
     float left = x * 2.0f / outputWidth - 1.0f;
     float right = (x + width) * 2.0f / outputWidth - 1.0f;
@@ -319,6 +334,7 @@ static void DrawTexture(const struct DioramaTexture *texture,
         glDisable(GL_BLEND);
     }
     glBindTexture(GL_TEXTURE_2D, texture->id);
+    dglUniform1f(sOpacityUniform, opacity);
     dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
     dglBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -377,30 +393,90 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     }
 }
 
-static void GetCameraPosition(float frameAlpha, float *cameraX, float *cameraZ)
+static void GetCameraPosition(const struct DioramaSceneSnapshot *snapshot,
+                              const struct DioramaSceneSnapshot *previousSnapshot,
+                              bool hasPreviousSnapshot, float frameAlpha,
+                              float *cameraX, float *cameraZ)
 {
-    float currentX = sSceneSnapshot.cameraMapX
-                   + (sSceneSnapshot.cameraSubpixelX + sSceneSnapshot.cameraPanX) / 16.0f;
-    float currentZ = -(sSceneSnapshot.cameraMapY
-                     + (sSceneSnapshot.cameraSubpixelY + sSceneSnapshot.cameraPanY) / 16.0f);
+    float currentX = snapshot->cameraMapX
+                   + (snapshot->cameraSubpixelX + snapshot->cameraPanX) / 16.0f;
+    float currentZ = -(snapshot->cameraMapY
+                     + (snapshot->cameraSubpixelY + snapshot->cameraPanY) / 16.0f);
 
     *cameraX = currentX;
     *cameraZ = currentZ;
-    if (sHasPreviousSceneSnapshot
-     && sSceneSnapshot.sequence == sPreviousSceneSnapshot.sequence + 1
-     && sSceneSnapshot.mapGeneration == sPreviousSceneSnapshot.mapGeneration
-     && sSceneSnapshot.sceneKind == DIORAMA_SCENE_OVERWORLD_FREE
-     && sPreviousSceneSnapshot.sceneKind == DIORAMA_SCENE_OVERWORLD_FREE)
+    if (hasPreviousSnapshot
+     && snapshot->sequence == previousSnapshot->sequence + 1
+     && snapshot->mapGeneration == previousSnapshot->mapGeneration
+     && snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE
+     && previousSnapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE)
     {
-        float previousX = sPreviousSceneSnapshot.cameraMapX
-                        + (sPreviousSceneSnapshot.cameraSubpixelX
-                        + sPreviousSceneSnapshot.cameraPanX) / 16.0f;
-        float previousZ = -(sPreviousSceneSnapshot.cameraMapY
-                          + (sPreviousSceneSnapshot.cameraSubpixelY
-                          + sPreviousSceneSnapshot.cameraPanY) / 16.0f);
+        float previousX = previousSnapshot->cameraMapX
+                        + (previousSnapshot->cameraSubpixelX
+                        + previousSnapshot->cameraPanX) / 16.0f;
+        float previousZ = -(previousSnapshot->cameraMapY
+                          + (previousSnapshot->cameraSubpixelY
+                          + previousSnapshot->cameraPanY) / 16.0f);
+        float deltaX = currentX - previousX;
+        float deltaZ = currentZ - previousZ;
 
-        *cameraX = previousX + (currentX - previousX) * frameAlpha;
-        *cameraZ = previousZ + (currentZ - previousZ) * frameAlpha;
+        if (deltaX * deltaX + deltaZ * deltaZ
+         <= CAMERA_TELEPORT_LIMIT * CAMERA_TELEPORT_LIMIT)
+        {
+            *cameraX = previousX + deltaX * frameAlpha;
+            *cameraZ = previousZ + deltaZ * frameAlpha;
+        }
+    }
+}
+
+static void SnapOpacity(float opacity)
+{
+    sTwoDOpacity = opacity;
+    sFadeStartOpacity = opacity;
+    sFadeTargetOpacity = opacity;
+    sFadeStartCounter = SDL_GetPerformanceCounter();
+}
+
+static void SetOpacityTarget(float opacity)
+{
+    if (opacity == sFadeTargetOpacity)
+        return;
+    sFadeStartOpacity = sTwoDOpacity;
+    sFadeTargetOpacity = opacity;
+    sFadeStartCounter = SDL_GetPerformanceCounter();
+}
+
+static void UpdateOpacity(void)
+{
+    double elapsed;
+    float progress;
+
+    if (sTwoDOpacity == sFadeTargetOpacity)
+        return;
+    elapsed = (double)(SDL_GetPerformanceCounter() - sFadeStartCounter)
+            / SDL_GetPerformanceFrequency();
+    progress = elapsed >= SOURCE_FADE_SECONDS ? 1.0f : elapsed / SOURCE_FADE_SECONDS;
+    sTwoDOpacity = sFadeStartOpacity
+                 + (sFadeTargetOpacity - sFadeStartOpacity) * progress;
+}
+
+static void AdoptLatestSnapshot(void)
+{
+    if (!DioramaSnapshotExchange_CopyLatest(&sIncomingSceneSnapshot))
+        return;
+    if (!sHasSceneSnapshot)
+    {
+        sSceneSnapshot = sIncomingSceneSnapshot;
+        sPreviousSceneSnapshot = sIncomingSceneSnapshot;
+        sHasSceneSnapshot = true;
+        sCurrent3DReady = false;
+    }
+    else if (sIncomingSceneSnapshot.sequence != sSceneSnapshot.sequence)
+    {
+        sPreviousSceneSnapshot = sSceneSnapshot;
+        sSceneSnapshot = sIncomingSceneSnapshot;
+        sHasPreviousSceneSnapshot = true;
+        sCurrent3DReady = false;
     }
 }
 
@@ -433,6 +509,9 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     dglVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
     dglUseProgram(sProgram);
     dglActiveTexture(GL_TEXTURE0);
+    sOpacityUniform = dglGetUniformLocation(sProgram, "opacity");
+    if (sOpacityUniform < 0)
+        return false;
 
     glGenTextures(1, &sFrameTexture.id);
     sFrameTexture.width = DISPLAY_WIDTH;
@@ -472,6 +551,11 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sAtlasAnimationGeneration = 0;
     sHasSceneSnapshot = false;
     sHasPreviousSceneSnapshot = false;
+    sHasRenderedSceneSnapshot = false;
+    sHasPreviousRenderedSceneSnapshot = false;
+    sCurrent3DReady = false;
+    sProcessedSequence = 0;
+    SnapOpacity(1.0f);
     sTerrainDebug = false;
     sCameraPitch = CAMERA_DEFAULT_PITCH;
     sCameraFocalLength = CAMERA_DEFAULT_FOCAL_LENGTH;
@@ -504,6 +588,7 @@ void DioramaGL_UploadFrame(const u32 *argb8888)
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                     GL_BGRA, GL_UNSIGNED_BYTE, argb8888);
+    AdoptLatestSnapshot();
 }
 
 void DioramaGL_Present(u8 background, bool border, bool integerScale, float frameAlpha)
@@ -516,24 +601,13 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     int gameY;
     const struct DioramaTexture *gameTexture = &sFrameTexture;
     bool drawTerrain = false;
+    bool current3D = false;
+    bool softFallback = false;
+    bool newSequence = sHasSceneSnapshot && sSceneSnapshot.sequence != sProcessedSequence;
+    enum DioramaPresentationDecision presentationDecision;
     float cameraX;
     float cameraZ;
 
-    if (DioramaSnapshotExchange_CopyLatest(&sIncomingSceneSnapshot))
-    {
-        if (!sHasSceneSnapshot)
-        {
-            sSceneSnapshot = sIncomingSceneSnapshot;
-            sPreviousSceneSnapshot = sIncomingSceneSnapshot;
-            sHasSceneSnapshot = true;
-        }
-        else if (sIncomingSceneSnapshot.sequence != sSceneSnapshot.sequence)
-        {
-            sPreviousSceneSnapshot = sSceneSnapshot;
-            sSceneSnapshot = sIncomingSceneSnapshot;
-            sHasPreviousSceneSnapshot = true;
-        }
-    }
     if (sRenderMode == DIORAMA_RENDER_AUTO
      && sTerrainAvailable
      && sObjectsAvailable
@@ -542,14 +616,63 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
      && DioramaRules_IsMapSupported(sSceneSnapshot.mapGroup, sSceneSnapshot.mapNum,
                                     sSceneSnapshot.mapLayoutId))
     {
-        EnsureAtlas(&sSceneSnapshot);
-        drawTerrain = DioramaGLTerrain_Sync(&sSceneSnapshot)
-                   && DioramaGLObjects_Sync(&sSceneSnapshot);
+        if (!sCurrent3DReady)
+        {
+            EnsureAtlas(&sSceneSnapshot);
+            sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot)
+                           && DioramaGLObjects_Sync(&sSceneSnapshot);
+        }
+        current3D = sCurrent3DReady;
     }
     else if (sRenderMode == DIORAMA_RENDER_DEBUG
           && sHasSceneSnapshot
           && DioramaSnapshot_CanRenderGrid(&sSceneSnapshot))
         gameTexture = &sDebugTexture;
+
+    presentationDecision = DioramaTransition_Classify(
+        sHasSceneSnapshot ? &sSceneSnapshot : NULL, current3D,
+        &sRenderedSceneSnapshot, sHasRenderedSceneSnapshot);
+    if (presentationDecision == DIORAMA_PRESENT_3D)
+    {
+        bool mapDiscontinuity = !sHasRenderedSceneSnapshot
+                             || !DioramaTransition_IsSameMap(&sSceneSnapshot,
+                                                             &sRenderedSceneSnapshot);
+
+        if (!sHasRenderedSceneSnapshot
+         || sRenderedSceneSnapshot.sequence != sSceneSnapshot.sequence)
+        {
+            if (sHasRenderedSceneSnapshot)
+            {
+                sPreviousRenderedSceneSnapshot = sRenderedSceneSnapshot;
+                sHasPreviousRenderedSceneSnapshot = true;
+            }
+            sRenderedSceneSnapshot = sSceneSnapshot;
+            sHasRenderedSceneSnapshot = true;
+        }
+        if (newSequence)
+        {
+            if (mapDiscontinuity)
+                SnapOpacity(1.0f);
+            SetOpacityTarget(0.0f);
+        }
+        drawTerrain = true;
+    }
+    else if (presentationDecision == DIORAMA_PRESENT_SOFT_2D)
+    {
+        softFallback = true;
+        if (newSequence)
+            SetOpacityTarget(1.0f);
+        drawTerrain = sTwoDOpacity < 1.0f;
+    }
+    else if (newSequence || !sHasSceneSnapshot)
+    {
+        SnapOpacity(1.0f);
+    }
+    if (newSequence)
+        sProcessedSequence = sSceneSnapshot.sequence;
+    UpdateOpacity();
+    if (softFallback && sTwoDOpacity < 1.0f)
+        drawTerrain = true;
 
     SDL_GL_GetDrawableSize(sWindow, &outputWidth, &outputHeight);
     if (outputWidth <= 0 || outputHeight <= 0)
@@ -562,8 +685,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     if (background < sBackgroundCount && sBackgroundTextures[background].id != 0)
         DrawTexture(&sBackgroundTextures[background], outputWidth, outputHeight,
                     0, 0, outputWidth, outputHeight,
-                    0, 0, sBackgroundTextures[background].width,
-                    sBackgroundTextures[background].height, true);
+                     0, 0, sBackgroundTextures[background].width,
+                     sBackgroundTextures[background].height, true, 1.0f);
 
     if (integerScale)
     {
@@ -584,7 +707,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     gameY = (outputHeight - gameHeight) / 2;
     if (drawTerrain)
     {
-        GetCameraPosition(frameAlpha, &cameraX, &cameraZ);
+        GetCameraPosition(&sRenderedSceneSnapshot, &sPreviousRenderedSceneSnapshot,
+                          sHasPreviousRenderedSceneSnapshot,
+                          current3D ? frameAlpha : 1.0f, &cameraX, &cameraZ);
         glEnable(GL_SCISSOR_TEST);
         glScissor(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
         glClearColor(0.035f, 0.055f, 0.07f, 1.0f);
@@ -594,7 +719,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
                               sForegroundAtlasTexture.id, cameraX, cameraZ,
                               sCameraPitch, sCameraFocalLength, sTerrainDebug);
-        DioramaGLObjects_Draw(frameAlpha, cameraX, cameraZ, sCameraPitch,
+        DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
+                              cameraX, cameraZ, sCameraPitch,
                               sCameraFocalLength);
         glDisable(GL_SCISSOR_TEST);
         glViewport(0, 0, outputWidth, outputHeight);
@@ -602,16 +728,20 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         dglBindVertexArray(sVertexArray);
         if (sTerrainDebug)
         {
-            BuildDebugImage(&sSceneSnapshot);
+            BuildDebugImage(&sRenderedSceneSnapshot);
             DrawTexture(&sDebugTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
-                        0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true);
+                        0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
         }
+        if (sTwoDOpacity > 0.0f)
+            DrawTexture(&sFrameTexture, outputWidth, outputHeight,
+                        gameX, gameY, gameWidth, gameHeight,
+                        0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, sTwoDOpacity);
     }
     else
         DrawTexture(gameTexture, outputWidth, outputHeight,
                     gameX, gameY, gameWidth, gameHeight,
-                    0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, false);
+                    0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, false, 1.0f);
 
     if (border && sBorderTexture.id != 0)
     {
@@ -620,9 +750,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         DrawTexture(&sBorderTexture, outputWidth, outputHeight,
                     gameX + 1 - innerWidth * 19 / 961,
                     gameY + 1 - innerHeight * 20 / 643,
-                    innerWidth * 1000 / 961,
-                    innerHeight * 683 / 643,
-                    141, 18, 1000, 683, true);
+                     innerWidth * 1000 / 961,
+                     innerHeight * 683 / 643,
+                     141, 18, 1000, 683, true, 1.0f);
     }
     SDL_GL_SwapWindow(sWindow);
 }

@@ -44,7 +44,9 @@ static GLint sBaseImageLocation;
 static GLint sForegroundImageLocation;
 static GLint sDebugColorLocation;
 static uint32_t sMapGeneration;
+static uint32_t sMapEditGeneration;
 static uint32_t sRulesGeneration;
+static uint64_t sLastSyncSequence;
 
 static const char sTerrainVertexShader[] =
     "#version 330 core\n"
@@ -324,7 +326,9 @@ bool DioramaGLTerrain_Init(void)
     memset(sChunks, 0, sizeof(sChunks));
     memset(&sMetrics, 0, sizeof(sMetrics));
     sMapGeneration = 0;
+    sMapEditGeneration = 0;
     sRulesGeneration = 0;
+    sLastSyncSequence = 0;
     if (!CreateProgram())
         return false;
     dglGenVertexArrays(1, &sDebugVertexArray);
@@ -357,6 +361,10 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
     int chunkY;
     int i;
     uint32_t rulesGeneration = DioramaRules_GetGeneration();
+    bool forceAllDirty = DioramaTerrain_ShouldInvalidateAll(
+        sLastSyncSequence, snapshot->sequence,
+        sMapEditGeneration, snapshot->mapEditGeneration,
+        snapshot->dirtyCellCount, snapshot->dirtyOverflow);
 
     sMetrics.rebuiltChunks = 0;
     if (snapshot->mapGeneration != sMapGeneration || rulesGeneration != sRulesGeneration)
@@ -382,10 +390,17 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
             struct GLTerrainChunk *chunk;
             uint64_t signature;
             bool newIdentity = false;
+            bool forceDirty = forceAllDirty;
+            uint8_t dirtyIndex;
 
             if (!BuildInput(snapshot, sResolvedCells, chunkX, chunkY, &input))
                 continue;
             signature = DioramaTerrain_ChunkSignature(&input);
+            for (dirtyIndex = 0; !forceDirty && dirtyIndex < snapshot->dirtyCellCount; dirtyIndex++)
+                forceDirty = DioramaTerrain_DirtyCellAffectsChunk(
+                    snapshot->dirtyCells[dirtyIndex].mapX,
+                    snapshot->dirtyCells[dirtyIndex].mapY,
+                    chunkX, chunkY);
             chunk = FindChunk(chunkX, chunkY);
             if (chunk == NULL)
             {
@@ -396,7 +411,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
                 return false;
             if (newIdentity || !chunk->occupied || chunk->mapGeneration != snapshot->mapGeneration
              || chunk->rulesGeneration != rulesGeneration
-             || chunk->signature != signature)
+             || chunk->signature != signature || forceDirty)
             {
                 if (!UploadChunk(chunk, &input, signature))
                     return false;
@@ -414,6 +429,8 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
         if (sChunks[i].occupied) sMetrics.residentChunks++;
         if (sChunks[i].active) sMetrics.activeChunks++;
     }
+    sMapEditGeneration = snapshot->mapEditGeneration;
+    sLastSyncSequence = snapshot->sequence;
     return sMetrics.activeChunks != 0;
 }
 

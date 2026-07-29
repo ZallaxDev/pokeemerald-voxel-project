@@ -453,6 +453,7 @@ int main(int argc, char **argv)
 
 #ifdef ENABLE_DIORAMA
     DioramaGL_Shutdown();
+    DioramaSnapshotExchange_Shutdown();
 #elif defined(NATIVE_LINUX) || defined(_WIN32)
     for (int i = 0; i < sBorderBackgroundCount; i++)
         SDL_DestroyTexture(sdlBackgroundTextures[i]);

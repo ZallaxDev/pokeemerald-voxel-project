@@ -155,6 +155,34 @@ float DioramaTerrain_NormalizeElevation(uint8_t rawElevation, uint8_t behavior)
     return DioramaRules_DefaultGroundHeight(behavior);
 }
 
+bool DioramaTerrain_DirtyCellAffectsChunk(int16_t mapX, int16_t mapY,
+                                         int16_t chunkX, int16_t chunkY)
+{
+    int32_t originX = chunkX * DIORAMA_TERRAIN_CHUNK_SIZE;
+    int32_t originY = chunkY * DIORAMA_TERRAIN_CHUNK_SIZE;
+
+    return mapX >= originX - DIORAMA_TERRAIN_HALO
+        && mapX < originX + DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_HALO
+        && mapY >= originY - DIORAMA_TERRAIN_HALO
+        && mapY < originY + DIORAMA_TERRAIN_CHUNK_SIZE + DIORAMA_TERRAIN_HALO;
+}
+
+bool DioramaTerrain_ShouldInvalidateAll(uint64_t previousSequence,
+                                       uint64_t currentSequence,
+                                       uint32_t previousEditGeneration,
+                                       uint32_t currentEditGeneration,
+                                       uint8_t dirtyCellCount,
+                                       bool dirtyOverflow)
+{
+    if (dirtyOverflow)
+        return true;
+    if (previousEditGeneration == currentEditGeneration)
+        return false;
+    return previousSequence == 0
+        || currentSequence != previousSequence + 1
+        || dirtyCellCount == 0;
+}
+
 void DioramaTerrain_BuildHeightField(const struct DioramaTerrainHeightCell *cells,
                                      uint16_t width, uint16_t height,
                                      float *visualHeights)

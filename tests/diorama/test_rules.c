@@ -32,6 +32,12 @@ static struct DioramaCellSnapshot MakeCell(int x, int y, uint16_t metatileId,
     memset(&cell, 0, sizeof(cell));
     cell.mapX = x + sSnapshot.mapCoordinateOffset;
     cell.mapY = y + sSnapshot.mapCoordinateOffset;
+    cell.sourceMapX = x;
+    cell.sourceMapY = y;
+    cell.sourceMapGroup = sSnapshot.mapGroup;
+    cell.sourceMapNum = sSnapshot.mapNum;
+    cell.sourceLayoutId = sSnapshot.mapLayoutId;
+    cell.flags = DIORAMA_CELL_SOURCE_VALID;
     cell.metatileId = metatileId;
     cell.behavior = behavior;
     return cell;
@@ -136,10 +142,18 @@ static void TestGridAndConnectedCoordinates(void)
 
     sSnapshot.visibleCellCount = 2;
     sSnapshot.cells[0] = MakeCell(7, 8, 3, MB_NORMAL);
-    sSnapshot.cells[1] = MakeCell(-1, 8, 0x1CE, MB_NORMAL);
+    sSnapshot.cells[1] = MakeCell(5, -1, 1, MB_NORMAL);
+    sSnapshot.cells[1].sourceMapX = 5;
+    sSnapshot.cells[1].sourceMapY = 8;
+    sSnapshot.cells[1].sourceMapGroup = 0;
+    sSnapshot.cells[1].sourceMapNum = 9;
+    sSnapshot.cells[1].sourceLayoutId = 10;
+    sSnapshot.cells[1].flags = DIORAMA_CELL_SOURCE_VALID | DIORAMA_CELL_CONNECTED;
     DioramaRules_ResolveGrid(&sSnapshot, resolved);
     assert(resolved[0].source == DIORAMA_RULE_SOURCE_MAP);
-    assert(resolved[1].source == DIORAMA_RULE_SOURCE_TILESET);
+    assert(resolved[1].source == DIORAMA_RULE_SOURCE_BUILDING);
+    assert(resolved[1].structureX == 2 + sSnapshot.mapCoordinateOffset);
+    assert(resolved[1].structureY == -5 + sSnapshot.mapCoordinateOffset);
 }
 
 static uint64_t ResolveMapGolden(const char *mapPath, uint8_t mapNum, uint16_t layoutId)
@@ -177,6 +191,12 @@ static uint64_t ResolveMapGolden(const char *mapPath, uint8_t mapNum, uint16_t l
 
         snapshot.cells[i].mapX = i % 20 + snapshot.mapCoordinateOffset;
         snapshot.cells[i].mapY = i / 20 + snapshot.mapCoordinateOffset;
+        snapshot.cells[i].sourceMapX = i % 20;
+        snapshot.cells[i].sourceMapY = i / 20;
+        snapshot.cells[i].sourceMapGroup = 0;
+        snapshot.cells[i].sourceMapNum = mapNum;
+        snapshot.cells[i].sourceLayoutId = layoutId;
+        snapshot.cells[i].flags = DIORAMA_CELL_SOURCE_VALID;
         snapshot.cells[i].metatileId = metatileId;
         snapshot.cells[i].behavior = attributes & 0xFF;
         snapshot.cells[i].layerType = attributes >> 12;

@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include "global.h"
+#include "diorama/map_connection.h"
+#include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/sprite_frame.h"
 #include "event_object_movement.h"
@@ -24,6 +26,7 @@ static struct DioramaSceneSnapshot sDraft;
 static u16 sPreviousPalette[DIORAMA_FADED_PALETTE_ENTRIES];
 static u8 sPreviousTileGraphics[DIORAMA_TILE_GRAPHICS_SIZE];
 static u32 sMapGeneration;
+static u32 sMapEditGeneration;
 static u32 sPaletteGeneration;
 static u32 sObjPaletteGeneration;
 static u32 sTilesetAnimationGeneration;
@@ -34,6 +37,9 @@ static bool sMapChanged;
 static s8 sPreviousMapGroup;
 static s8 sPreviousMapNum;
 static u16 sPreviousMapLayoutId;
+static struct DioramaDirtyCell sDirtyCells[DIORAMA_MAX_DIRTY_CELLS];
+static u8 sDirtyCellCount;
+static bool sDirtyOverflow;
 
 static enum DioramaSceneKind GetOverworldSceneKind(u32 *fallbackReasons)
 {
@@ -62,6 +68,94 @@ static enum DioramaSceneKind GetOverworldSceneKind(u32 *fallbackReasons)
     return DIORAMA_SCENE_OVERWORLD_FREE;
 }
 
+static bool CopyCellVisual(const struct MapLayout *layout, u16 metatileId,
+                           u8 collision, u8 elevation,
+                           struct DioramaCellSnapshot *cell)
+{
+    const u16 *attributes;
+
+    cell->metatileId = metatileId;
+    cell->collision = collision;
+    cell->elevation = elevation;
+    if (metatileId < NUM_METATILES_IN_PRIMARY
+     && layout->primaryTileset != NULL
+     && layout->primaryTileset->metatiles != NULL
+     && layout->primaryTileset->metatileAttributes != NULL)
+    {
+        attributes = &layout->primaryTileset->metatileAttributes[metatileId];
+        memcpy(cell->tileEntries,
+               layout->primaryTileset->metatiles
+                   + metatileId * DIORAMA_METATILE_ENTRY_COUNT,
+               sizeof(cell->tileEntries));
+    }
+    else if (metatileId < NUM_METATILES_TOTAL
+          && layout->secondaryTileset != NULL
+          && layout->secondaryTileset->metatiles != NULL
+          && layout->secondaryTileset->metatileAttributes != NULL)
+    {
+        u16 secondaryId = metatileId - NUM_METATILES_IN_PRIMARY;
+
+        attributes = &layout->secondaryTileset->metatileAttributes[secondaryId];
+        memcpy(cell->tileEntries,
+               layout->secondaryTileset->metatiles
+                   + secondaryId * DIORAMA_METATILE_ENTRY_COUNT,
+               sizeof(cell->tileEntries));
+    }
+    else
+    {
+        memset(cell->tileEntries, 0, sizeof(cell->tileEntries));
+        return false;
+    }
+    cell->behavior = UNPACK_BEHAVIOR(*attributes);
+    cell->layerType = UNPACK_LAYER_TYPE(*attributes);
+    return true;
+}
+
+static bool TryCopyConnectedCell(struct DioramaSceneSnapshot *snapshot,
+                                 int mapX, int mapY,
+                                 struct DioramaCellSnapshot *cell)
+{
+    const struct MapConnection *connection = GetMapConnectionAtPos(mapX, mapY);
+    const struct MapHeader *connectedHeader;
+    const struct MapLayout *connectedLayout;
+    int16_t connectedX;
+    int16_t connectedY;
+    u16 entry;
+
+    if (connection == NULL)
+        return false;
+    connectedHeader = GetMapHeaderFromConnection(connection);
+    if (connectedHeader == NULL || connectedHeader->mapLayout == NULL)
+        return false;
+    connectedLayout = connectedHeader->mapLayout;
+    if (connectedLayout->map == NULL
+     || connectedLayout->primaryTileset != gMapHeader.mapLayout->primaryTileset
+     || connectedLayout->secondaryTileset != gMapHeader.mapLayout->secondaryTileset
+     || !DioramaRules_IsMapSupported(connection->mapGroup, connection->mapNum,
+                                     connectedHeader->mapLayoutId)
+     || !DioramaConnection_MapCoordinates(connection->direction, connection->offset,
+                                          mapX - MAP_OFFSET, mapY - MAP_OFFSET,
+                                          snapshot->mapWidth, snapshot->mapHeight,
+                                          connectedLayout->width, connectedLayout->height,
+                                          &connectedX, &connectedY))
+        return false;
+
+    if (mapX >= 0 && mapY >= 0
+     && mapX < gBackupMapLayout.width && mapY < gBackupMapLayout.height
+     && gBackupMapLayout.map[mapY * gBackupMapLayout.width + mapX] != MAPGRID_UNDEFINED)
+        entry = gBackupMapLayout.map[mapY * gBackupMapLayout.width + mapX];
+    else
+        entry = connectedLayout->map[connectedY * connectedLayout->width + connectedX];
+    cell->sourceMapX = connectedX;
+    cell->sourceMapY = connectedY;
+    cell->sourceMapGroup = connection->mapGroup;
+    cell->sourceMapNum = connection->mapNum;
+    cell->sourceLayoutId = connectedHeader->mapLayoutId;
+    cell->flags = DIORAMA_CELL_SOURCE_VALID | DIORAMA_CELL_CONNECTED;
+    return CopyCellVisual(connectedLayout, UNPACK_METATILE(entry),
+                          UNPACK_COLLISION(entry), UNPACK_ELEVATION(entry), cell);
+}
+
 static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
 {
     int x;
@@ -80,36 +174,24 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
 
             cell->mapX = mapX;
             cell->mapY = mapY;
-            cell->metatileId = MapGridGetMetatileIdAt(mapX, mapY);
-            cell->behavior = MapGridGetMetatileBehaviorAt(mapX, mapY);
-            cell->layerType = MapGridGetMetatileLayerTypeAt(mapX, mapY);
-            cell->collision = MapGridGetCollisionAt(mapX, mapY);
-            cell->elevation = MapGridGetElevationAt(mapX, mapY);
             cell->flags = 0;
-            if (cell->metatileId < NUM_METATILES_IN_PRIMARY
-             && gMapHeader.mapLayout->primaryTileset != NULL
-             && gMapHeader.mapLayout->primaryTileset->metatiles != NULL)
+            if (mapX >= MAP_OFFSET && mapY >= MAP_OFFSET
+             && mapX < MAP_OFFSET + snapshot->mapWidth
+             && mapY < MAP_OFFSET + snapshot->mapHeight)
             {
-                memcpy(cell->tileEntries,
-                       gMapHeader.mapLayout->primaryTileset->metatiles
-                           + cell->metatileId * DIORAMA_METATILE_ENTRY_COUNT,
-                       sizeof(cell->tileEntries));
+                cell->sourceMapX = mapX - MAP_OFFSET;
+                cell->sourceMapY = mapY - MAP_OFFSET;
+                cell->sourceMapGroup = snapshot->mapGroup;
+                cell->sourceMapNum = snapshot->mapNum;
+                cell->sourceLayoutId = snapshot->mapLayoutId;
+                cell->flags = DIORAMA_CELL_SOURCE_VALID;
             }
-            else if (cell->metatileId < NUM_METATILES_TOTAL
-                  && gMapHeader.mapLayout->secondaryTileset != NULL
-                  && gMapHeader.mapLayout->secondaryTileset->metatiles != NULL)
-            {
-                memcpy(cell->tileEntries,
-                       gMapHeader.mapLayout->secondaryTileset->metatiles
-                           + (cell->metatileId - NUM_METATILES_IN_PRIMARY)
-                           * DIORAMA_METATILE_ENTRY_COUNT,
-                       sizeof(cell->tileEntries));
-            }
-            else
-            {
-                memset(cell->tileEntries, 0, sizeof(cell->tileEntries));
+            else if (TryCopyConnectedCell(snapshot, mapX, mapY, cell))
+                continue;
+            if (!CopyCellVisual(gMapHeader.mapLayout, MapGridGetMetatileIdAt(mapX, mapY),
+                                MapGridGetCollisionAt(mapX, mapY),
+                                MapGridGetElevationAt(mapX, mapY), cell))
                 return false;
-            }
         }
     }
     snapshot->visibleCellCount = DIORAMA_MAX_VISIBLE_CELLS;
@@ -314,6 +396,7 @@ void DioramaScene_Init(void)
     memset(sPreviousPalette, 0, sizeof(sPreviousPalette));
     memset(sPreviousTileGraphics, 0, sizeof(sPreviousTileGraphics));
     sMapGeneration = 0;
+    sMapEditGeneration = 0;
     sPaletteGeneration = 0;
     sObjPaletteGeneration = 0;
     sTilesetAnimationGeneration = 0;
@@ -324,6 +407,8 @@ void DioramaScene_Init(void)
     sPreviousMapGroup = -1;
     sPreviousMapNum = -1;
     sPreviousMapLayoutId = 0;
+    sDirtyCellCount = 0;
+    sDirtyOverflow = false;
 }
 
 void DioramaScene_BeginFrame(void)
@@ -334,6 +419,26 @@ void DioramaScene_BeginFrame(void)
 void DioramaScene_MarkMapChanged(void)
 {
     sMapChanged = true;
+    sDirtyCellCount = 0;
+    sDirtyOverflow = false;
+}
+
+void DioramaScene_MarkCellDirty(int16_t mapX, int16_t mapY)
+{
+    u8 i;
+
+    sMapEditGeneration++;
+    for (i = 0; i < sDirtyCellCount; i++)
+        if (sDirtyCells[i].mapX == mapX && sDirtyCells[i].mapY == mapY)
+            return;
+    if (sDirtyCellCount >= DIORAMA_MAX_DIRTY_CELLS)
+    {
+        sDirtyOverflow = true;
+        return;
+    }
+    sDirtyCells[sDirtyCellCount].mapX = mapX;
+    sDirtyCells[sDirtyCellCount].mapY = mapY;
+    sDirtyCellCount++;
 }
 
 void DioramaScene_PublishOverworld(void)
@@ -371,6 +476,11 @@ void DioramaScene_PublishOverworld(void)
         sPreviousMapLayoutId = sDraft.mapLayoutId;
     }
     sDraft.mapGeneration = sMapGeneration;
+    sDraft.mapEditGeneration = sMapEditGeneration;
+    sDraft.dirtyCellCount = sDirtyCellCount;
+    sDraft.dirtyOverflow = sDirtyOverflow;
+    memcpy(sDraft.dirtyCells, sDirtyCells,
+           sDirtyCellCount * sizeof(*sDirtyCells));
     if (!sHasPreviousPalette
      || memcmp(sPreviousPalette, gPlttBufferFaded, 256 * sizeof(*sPreviousPalette)) != 0)
         sPaletteGeneration++;
@@ -409,6 +519,8 @@ void DioramaScene_PublishOverworld(void)
     }
     DioramaSnapshotExchange_Publish(&sDraft);
     sPublishedThisFrame = true;
+    sDirtyCellCount = 0;
+    sDirtyOverflow = false;
 }
 
 void DioramaScene_EndFrame(bool inBattle)

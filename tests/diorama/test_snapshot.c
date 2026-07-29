@@ -23,6 +23,7 @@ static void FillSnapshot(struct DioramaSceneSnapshot *snapshot, uint8_t seed)
     memset(snapshot, seed, sizeof(*snapshot));
     snapshot->sequence = UINT64_C(0xfeedface);
     snapshot->mapGeneration = 1000 + seed;
+    snapshot->mapEditGeneration = 1500 + seed;
     snapshot->paletteGeneration = 2000 + seed;
     snapshot->tilesetAnimationGeneration = 3000 + seed;
     snapshot->valid = 1;
@@ -49,10 +50,21 @@ static void FillSnapshot(struct DioramaSceneSnapshot *snapshot, uint8_t seed)
     {
         snapshot->cells[i].mapX = snapshot->gridOriginX + i % DIORAMA_GRID_WIDTH;
         snapshot->cells[i].mapY = snapshot->gridOriginY + i / DIORAMA_GRID_WIDTH;
+        snapshot->cells[i].sourceMapX = i % DIORAMA_GRID_WIDTH;
+        snapshot->cells[i].sourceMapY = i / DIORAMA_GRID_WIDTH;
+        snapshot->cells[i].sourceMapGroup = seed;
+        snapshot->cells[i].sourceMapNum = seed + 1;
+        snapshot->cells[i].sourceLayoutId = 4000 + seed;
+        snapshot->cells[i].flags = DIORAMA_CELL_SOURCE_VALID;
         snapshot->cells[i].metatileId = i + seed;
         snapshot->cells[i].behavior = i ^ seed;
         snapshot->cells[i].elevation = (i + seed) & 15;
     }
+    snapshot->dirtyCellCount = 2;
+    snapshot->dirtyCells[0].mapX = -8;
+    snapshot->dirtyCells[0].mapY = 7;
+    snapshot->dirtyCells[1].mapX = 8;
+    snapshot->dirtyCells[1].mapY = 15;
 
     for (i = 0; i < DIORAMA_MAX_OBJECTS; i++)
     {

@@ -15,6 +15,13 @@
 #define DIORAMA_TILE_GRAPHICS_SIZE (DIORAMA_TILE_COUNT * DIORAMA_TILE_BYTES)
 #define DIORAMA_OBJ_FRAME_MAX_BYTES 2048
 #define DIORAMA_METATILE_ENTRY_COUNT 8
+#define DIORAMA_MAX_DIRTY_CELLS 64
+
+enum DioramaCellFlags
+{
+    DIORAMA_CELL_SOURCE_VALID = 1 << 0,
+    DIORAMA_CELL_CONNECTED = 1 << 1,
+};
 
 enum DioramaObjectFlags
 {
@@ -68,13 +75,24 @@ struct DioramaCellSnapshot
 {
     int16_t mapX;
     int16_t mapY;
+    int16_t sourceMapX;
+    int16_t sourceMapY;
     uint16_t metatileId;
+    uint16_t sourceLayoutId;
     uint8_t behavior;
     uint8_t layerType;
     uint8_t collision;
     uint8_t elevation;
+    uint8_t sourceMapGroup;
+    uint8_t sourceMapNum;
     uint16_t flags;
     uint16_t tileEntries[DIORAMA_METATILE_ENTRY_COUNT];
+};
+
+struct DioramaDirtyCell
+{
+    int16_t mapX;
+    int16_t mapY;
 };
 
 struct DioramaObjectSnapshot
@@ -129,6 +147,7 @@ struct DioramaSceneSnapshot
 {
     uint64_t sequence;
     uint32_t mapGeneration;
+    uint32_t mapEditGeneration;
     uint32_t paletteGeneration;
     uint32_t objPaletteGeneration;
     uint32_t tilesetAnimationGeneration;
@@ -156,6 +175,9 @@ struct DioramaSceneSnapshot
     int16_t gridOriginY;
     uint16_t visibleCellCount;
     struct DioramaCellSnapshot cells[DIORAMA_MAX_VISIBLE_CELLS];
+    uint8_t dirtyCellCount;
+    uint8_t dirtyOverflow;
+    struct DioramaDirtyCell dirtyCells[DIORAMA_MAX_DIRTY_CELLS];
     uint8_t objectCount;
     struct DioramaObjectSnapshot objects[DIORAMA_MAX_OBJECTS];
     uint16_t fadedPalette[DIORAMA_FADED_PALETTE_ENTRIES];
@@ -174,6 +196,7 @@ void DioramaScene_BeginFrame(void);
 void DioramaScene_PublishOverworld(void);
 void DioramaScene_EndFrame(bool inBattle);
 void DioramaScene_MarkMapChanged(void);
+void DioramaScene_MarkCellDirty(int16_t mapX, int16_t mapY);
 
 #ifdef DIORAMA_TEST
 typedef void (*DioramaSnapshotTestPinnedHook)(void *userdata);

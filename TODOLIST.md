@@ -338,18 +338,56 @@ Fase 6 queda cerrada y se desbloquea la Fase 7.
 
 ## Fase 7: cambios dinamicos, conexiones y transiciones
 
-- [ ] Notificar cambios desde las funciones `MapGridSet*` sin decidir gameplay.
-- [ ] Invalidar celda, chunk y vecinos afectados.
-- [ ] Precargar conexiones exteriores compatibles.
-- [ ] Robustecer generaciones de mapa, warps y descarte de frames antiguos.
-- [ ] Añadir fades entre 3D y fallback 2D.
-- [ ] Probar puertas, Cut, Rock Smash, puentes y puzles.
+- [x] Notificar cambios desde las funciones `MapGridSet*` sin decidir gameplay.
+- [x] Invalidar celda, chunk y vecinos afectados.
+- [x] Precargar conexiones exteriores compatibles.
+- [x] Robustecer generaciones de mapa, warps y descarte de frames antiguos.
+- [x] Añadir fades entre 3D y fallback 2D.
+- [x] Cubrir los hooks comunes de puertas, Cut, Rock Smash, puentes y puzles.
+
+Implementacion completada el 2026-07-29. Los tres setters centrales de
+`MapGrid` emiten notificaciones pasivas solo cuando cambia realmente la entrada.
+El snapshot publica una generacion de edicion separada de la generacion de mapa,
+agrupa hasta 64 celdas y senala overflow. El renderer invalida los chunks cuyo
+interior o halo contiene una celda modificada; las firmas completas siguen siendo
+la garantia de correccion si el hilo grafico salta snapshots intermedios. Las
+llamadas existentes de scripts, puertas, Cut, Rock Smash, puentes, decoraciones y
+puzles quedan cubiertas sin modificar sus decisiones de gameplay.
+
+Cada celda del snapshot conserva ahora la procedencia de mapa, layout y coordenada
+local. El hilo del juego extiende la conexion Villa Raiz <-> Ruta 101 hasta las 16
+celdas requeridas por la camara cuando ambos mapas comparten exactamente tilesets
+y reglas diorama. La resolucion de overrides y edificios usa esa procedencia, por
+lo que las estructuras del mapa vecino pueden aparecer antes de cruzar. Conexiones
+sin reglas o con tilesets incompatibles conservan el fallback seguro existente y
+no instancian NPC ajenos al mapa activo.
+
+La textura 2D y el snapshot se adoptan juntos durante `VDraw()`, mientras el hilo
+del juego espera el VBlank, eliminando el riesgo de elegir fallback con pixels del
+frame anterior. Cambios de mapa, warps, fades de paleta, combates y errores cortan
+inmediatamente a 2D; dialogos y menu del mismo mapa usan un fundido de 120 ms, y
+la vuelta a 3D solo empieza tras sincronizar atlas, terreno y objetos del snapshot
+nuevo. La interpolacion de camara tambien rechaza saltos grandes en el mismo mapa.
+
+Pruebas CPU anadidas para conversion de las cuatro conexiones, offsets y limites,
+procedencia de reglas y edificios conectados, copia inmutable de los campos nuevos,
+y cobertura de chunks vecinos en bordes, esquinas y coordenadas negativas. Tambien
+se cubren snapshots saltados y la clasificacion de transiciones 3D, fundido modal
+y corte 2D seguro.
+`test-diorama`, los builds i386 clasico y diorama y un smoke OpenGL software de
+10 segundos se completaron correctamente. `xvfb-run` no esta instalado, por lo que
+el smoke uso la sesion grafica disponible.
 
 Prueba manual realizable por el usuario: ejecutar cada caso dinamico disponible,
 cruzar conexiones y encadenar warps con speedup; comprobar que no aparece vacio,
 un frame antiguo ni una recarga completa innecesaria.
 
-Resultado del usuario: **PENDIENTE**
+Resultado del usuario: **APROBADO** (2026-07-29)
+
+El usuario confirmo la precarga y el cruce Villa Raiz <-> Ruta 101, los cambios
+dinamicos, los fundidos modales, los cortes seguros a 2D y la ausencia de frames
+antiguos durante warps y transiciones. La Fase 7 queda cerrada y se desbloquea la
+Fase 8.
 
 ## Fase 8: agua, animaciones y clima basico
 
@@ -362,7 +400,7 @@ Resultado del usuario: **PENDIENTE**
 Prueba manual realizable por el usuario: visitar agua y mapas con lluvia/niebla,
 usar Surf y provocar fades; validar animacion, colores, reflejos, profundidad y FPS.
 
-Resultado del usuario: **BLOQUEADO POR FASE 7**
+Resultado del usuario: **PENDIENTE**
 
 ## Fase 9: interfaz 2D sobre mundo 3D
 

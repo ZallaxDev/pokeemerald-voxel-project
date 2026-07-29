@@ -170,12 +170,14 @@ MAKEFLAGS += --no-print-directory
 # Secondary expansion is required for dependency variables in object rules.
 .SECONDEXPANSION:
 
-.PHONY: all rom linux clean compare tidy mostlyclean libagbsyscall modern tidymodern tidynonmodern test-diorama test-diorama-snapshot test-diorama-metatile test-diorama-terrain test-diorama-sprite test-diorama-rules
+.PHONY: all rom linux clean compare tidy mostlyclean libagbsyscall modern tidymodern tidynonmodern test-diorama test-diorama-snapshot test-diorama-connection test-diorama-transition test-diorama-metatile test-diorama-terrain test-diorama-sprite test-diorama-rules
 
 linux:
 	$(MAKE) -f Makefile_pc NATIVE_LINUX=1 rom
 
 DIORAMA_SNAPSHOT_TEST := build/tests/diorama/test_snapshot
+DIORAMA_CONNECTION_TEST := build/tests/diorama/test_map_connection
+DIORAMA_TRANSITION_TEST := build/tests/diorama/test_presentation_transition
 DIORAMA_METATILE_TEST := build/tests/diorama/test_metatile_atlas
 DIORAMA_TERRAIN_TEST := build/tests/diorama/test_terrain_mesh
 DIORAMA_SPRITE_TEST := build/tests/diorama/test_sprite_frame
@@ -183,7 +185,7 @@ DIORAMA_RULES_TEST := build/tests/diorama/test_rules
 DIORAMA_TEST_CC ?= gcc
 DIORAMA_TEST_PKG_CONFIG := PKG_CONFIG_LIBDIR="$(PKG_CONFIG_32_PATH)" pkg-config
 
-test-diorama: test-diorama-snapshot test-diorama-metatile test-diorama-terrain test-diorama-sprite test-diorama-rules
+test-diorama: test-diorama-snapshot test-diorama-connection test-diorama-transition test-diorama-metatile test-diorama-terrain test-diorama-sprite test-diorama-rules
 
 test-diorama-snapshot: tests/diorama/test_snapshot.c src/diorama/scene/snapshot_exchange.c include/diorama/scene_snapshot.h
 	mkdir -p $(dir $(DIORAMA_SNAPSHOT_TEST))
@@ -192,6 +194,20 @@ test-diorama-snapshot: tests/diorama/test_snapshot.c src/diorama/scene/snapshot_
 		src/diorama/scene/snapshot_exchange.c $(shell $(DIORAMA_TEST_PKG_CONFIG) --libs sdl2) \
 		-o $(DIORAMA_SNAPSHOT_TEST)
 	$(DIORAMA_SNAPSHOT_TEST)
+
+test-diorama-connection: tests/diorama/test_map_connection.c src/diorama/scene/map_connection.c include/diorama/map_connection.h
+	mkdir -p $(dir $(DIORAMA_CONNECTION_TEST))
+	$(DIORAMA_TEST_CC) -m32 -std=gnu99 -Wall -Wextra -Werror -D ENABLE_DIORAMA -iquote include \
+		tests/diorama/test_map_connection.c src/diorama/scene/map_connection.c \
+		-o $(DIORAMA_CONNECTION_TEST)
+	$(DIORAMA_CONNECTION_TEST)
+
+test-diorama-transition: tests/diorama/test_presentation_transition.c src/diorama/gl/presentation_transition.c include/diorama/presentation_transition.h
+	mkdir -p $(dir $(DIORAMA_TRANSITION_TEST))
+	$(DIORAMA_TEST_CC) -m32 -std=gnu99 -Wall -Wextra -Werror -D ENABLE_DIORAMA -iquote include \
+		tests/diorama/test_presentation_transition.c src/diorama/gl/presentation_transition.c \
+		-o $(DIORAMA_TRANSITION_TEST)
+	$(DIORAMA_TRANSITION_TEST)
 
 test-diorama-metatile: tests/diorama/test_metatile_atlas.c src/diorama/scene/metatile_atlas.c include/diorama/metatile_atlas.h include/diorama/scene_snapshot.h
 	mkdir -p $(dir $(DIORAMA_METATILE_TEST))

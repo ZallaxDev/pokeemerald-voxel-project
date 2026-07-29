@@ -115,6 +115,14 @@ struct DioramaTerrainMesh
 };
 
 int32_t DioramaTerrain_FloorDiv(int32_t value, int32_t divisor);
+bool DioramaTerrain_DirtyCellAffectsChunk(int16_t mapX, int16_t mapY,
+                                         int16_t chunkX, int16_t chunkY);
+bool DioramaTerrain_ShouldInvalidateAll(uint64_t previousSequence,
+                                       uint64_t currentSequence,
+                                       uint32_t previousEditGeneration,
+                                       uint32_t currentEditGeneration,
+                                       uint8_t dirtyCellCount,
+                                       bool dirtyOverflow);
 float DioramaTerrain_NormalizeElevation(uint8_t rawElevation, uint8_t behavior);
 void DioramaTerrain_BuildHeightField(const struct DioramaTerrainHeightCell *cells,
                                      uint16_t width, uint16_t height,

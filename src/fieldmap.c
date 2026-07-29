@@ -404,10 +404,18 @@ void MapGridSetMetatileIdAt(int x, int y, u16 metatile)
     int i;
     if (AreCoordsWithinMapGridBounds(x, y))
     {
-        i = x + y * gBackupMapLayout.width;
+        u16 oldEntry;
+        u16 newEntry;
 
+        i = x + y * gBackupMapLayout.width;
+        oldEntry = gBackupMapLayout.map[i];
         // Elevation is ignored in the argument, but copy metatile ID and collision
-        gBackupMapLayout.map[i] = (gBackupMapLayout.map[i] & MAPGRID_ELEVATION_MASK) | (metatile & ~MAPGRID_ELEVATION_MASK);
+        newEntry = (oldEntry & MAPGRID_ELEVATION_MASK) | (metatile & ~MAPGRID_ELEVATION_MASK);
+        gBackupMapLayout.map[i] = newEntry;
+#ifdef ENABLE_DIORAMA
+        if (newEntry != oldEntry)
+            DioramaScene_MarkCellDirty(x, y);
+#endif
     }
 }
 
@@ -416,8 +424,19 @@ void MapGridSetMetatileEntryAt(int x, int y, u16 metatile)
     int i;
     if (AreCoordsWithinMapGridBounds(x, y))
     {
+#ifdef ENABLE_DIORAMA
+        u16 oldEntry;
+#endif
+
         i = x + gBackupMapLayout.width * y;
+#ifdef ENABLE_DIORAMA
+        oldEntry = gBackupMapLayout.map[i];
+#endif
         gBackupMapLayout.map[i] = metatile;
+#ifdef ENABLE_DIORAMA
+        if (metatile != oldEntry)
+            DioramaScene_MarkCellDirty(x, y);
+#endif
     }
 }
 
@@ -832,10 +851,19 @@ void MapGridSetMetatileImpassabilityAt(int x, int y, bool32 impassable)
 {
     if (AreCoordsWithinMapGridBounds(x, y))
     {
+        int i = x + gBackupMapLayout.width * y;
+#ifdef ENABLE_DIORAMA
+        u16 oldEntry = gBackupMapLayout.map[i];
+#endif
+
         if (impassable)
-            gBackupMapLayout.map[x + gBackupMapLayout.width * y] |= MAPGRID_COLLISION_MASK;
+            gBackupMapLayout.map[i] |= MAPGRID_COLLISION_MASK;
         else
-            gBackupMapLayout.map[x + gBackupMapLayout.width * y] &= ~MAPGRID_COLLISION_MASK;
+            gBackupMapLayout.map[i] &= ~MAPGRID_COLLISION_MASK;
+#ifdef ENABLE_DIORAMA
+        if (gBackupMapLayout.map[i] != oldEntry)
+            DioramaScene_MarkCellDirty(x, y);
+#endif
     }
 }
 

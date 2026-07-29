@@ -34,3 +34,12 @@ have a rule file with `supported: true` to render in 3D in `AUTO` mode.
 
 Generated files are `include/diorama/rules.generated.h` and
 `src/data/diorama/diorama_rules.generated.c`. Do not edit them manually.
+
+## Connected maps
+
+The scene snapshot can extend a cardinal connection beyond the gameplay map
+buffer when both maps are covered by diorama rules and use the exact same primary
+and secondary tilesets. Each copied cell keeps its source map, layout, and local
+coordinates so map overrides and building templates resolve before the player
+crosses the boundary. Connected object events are intentionally not synthesized;
+the original game remains authoritative for active objects and gameplay state.

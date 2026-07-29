@@ -47,7 +47,7 @@ static const struct DioramaGeneratedBuildingTemplate *FindBuildingTemplate(uint1
     return NULL;
 }
 
-static bool ResolveMapOverride(const struct DioramaSceneSnapshot *snapshot,
+static bool ResolveMapOverride(uint8_t mapGroup, uint8_t mapNum,
                                int mapX, int mapY,
                                struct DioramaResolvedCell *resolved)
 {
@@ -57,8 +57,8 @@ static bool ResolveMapOverride(const struct DioramaSceneSnapshot *snapshot,
     {
         const struct DioramaGeneratedMapOverride *override = &gDioramaMapOverrides[i];
 
-        if (override->mapGroup == snapshot->mapGroup
-         && override->mapNum == snapshot->mapNum
+        if (override->mapGroup == mapGroup
+         && override->mapNum == mapNum
          && override->x == mapX && override->y == mapY)
         {
             ApplyDefinition(&override->rule, DIORAMA_RULE_SOURCE_MAP, resolved);
@@ -68,11 +68,11 @@ static bool ResolveMapOverride(const struct DioramaSceneSnapshot *snapshot,
     return false;
 }
 
-static bool ResolveTileset(const struct DioramaSceneSnapshot *snapshot,
-                           const struct DioramaCellSnapshot *cell,
-                           struct DioramaResolvedCell *resolved)
+static bool ResolveTileset(uint16_t layoutId,
+                            const struct DioramaCellSnapshot *cell,
+                            struct DioramaResolvedCell *resolved)
 {
-    const struct DioramaGeneratedLayoutRule *layout = FindLayout(snapshot->mapLayoutId);
+    const struct DioramaGeneratedLayoutRule *layout = FindLayout(layoutId);
     uint8_t tileset;
     uint16_t metatileId;
     size_t i;
@@ -102,9 +102,10 @@ static bool ResolveTileset(const struct DioramaSceneSnapshot *snapshot,
     return false;
 }
 
-static bool ResolveBuilding(const struct DioramaSceneSnapshot *snapshot,
-                            int mapX, int mapY,
-                            struct DioramaResolvedCell *resolved)
+static bool ResolveBuilding(uint8_t mapGroup, uint8_t mapNum,
+                             const struct DioramaCellSnapshot *cell,
+                             int mapX, int mapY,
+                             struct DioramaResolvedCell *resolved)
 {
     size_t i;
 
@@ -116,7 +117,7 @@ static bool ResolveBuilding(const struct DioramaSceneSnapshot *snapshot,
         int relativeY;
         float roofFactor;
 
-        if (placement->mapGroup != snapshot->mapGroup || placement->mapNum != snapshot->mapNum)
+        if (placement->mapGroup != mapGroup || placement->mapNum != mapNum)
             continue;
         building = FindBuildingTemplate(placement->templateId);
         if (building == NULL)
@@ -130,8 +131,8 @@ static bool ResolveBuilding(const struct DioramaSceneSnapshot *snapshot,
         resolved->source = DIORAMA_RULE_SOURCE_BUILDING;
         resolved->baseMetatileId = DIORAMA_MATERIAL_METATILE_SELF;
         resolved->structureId = i + 1;
-        resolved->structureX = placement->x + snapshot->mapCoordinateOffset;
-        resolved->structureY = placement->y + snapshot->mapCoordinateOffset;
+        resolved->structureX = cell->mapX + placement->x - mapX;
+        resolved->structureY = cell->mapY + placement->y - mapY;
         resolved->structureWidth = building->width;
         resolved->structureHeight = building->height;
         resolved->structureRoofRows = building->roofRows;
@@ -210,20 +211,39 @@ bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
 {
     int mapX;
     int mapY;
+    uint8_t mapGroup;
+    uint8_t mapNum;
+    uint16_t layoutId;
+    bool sourceValid;
 
     if (snapshot == NULL || cell == NULL || resolved == NULL)
         return false;
-    mapX = cell->mapX - snapshot->mapCoordinateOffset;
-    mapY = cell->mapY - snapshot->mapCoordinateOffset;
+    sourceValid = (cell->flags & DIORAMA_CELL_SOURCE_VALID) != 0;
+    if (sourceValid)
+    {
+        mapX = cell->sourceMapX;
+        mapY = cell->sourceMapY;
+        mapGroup = cell->sourceMapGroup;
+        mapNum = cell->sourceMapNum;
+        layoutId = cell->sourceLayoutId;
+    }
+    else
+    {
+        mapX = cell->mapX - snapshot->mapCoordinateOffset;
+        mapY = cell->mapY - snapshot->mapCoordinateOffset;
+        mapGroup = snapshot->mapGroup;
+        mapNum = snapshot->mapNum;
+        layoutId = snapshot->mapLayoutId;
+        sourceValid = mapX >= 0 && mapY >= 0
+                   && mapX < snapshot->mapWidth && mapY < snapshot->mapHeight;
+    }
     ApplyDefinition(&gDioramaDefaultRule, DIORAMA_RULE_SOURCE_FALLBACK, resolved);
 
-    if (mapX >= 0 && mapY >= 0 && mapX < snapshot->mapWidth && mapY < snapshot->mapHeight
-     && ResolveMapOverride(snapshot, mapX, mapY, resolved))
+    if (sourceValid && ResolveMapOverride(mapGroup, mapNum, mapX, mapY, resolved))
         return true;
-    if (ResolveTileset(snapshot, cell, resolved))
+    if (ResolveTileset(layoutId, cell, resolved))
         return true;
-    if (mapX >= 0 && mapY >= 0 && mapX < snapshot->mapWidth && mapY < snapshot->mapHeight
-     && ResolveBuilding(snapshot, mapX, mapY, resolved))
+    if (sourceValid && ResolveBuilding(mapGroup, mapNum, cell, mapX, mapY, resolved))
         return true;
     if (ResolveBehavior(cell->behavior, resolved))
         return true;

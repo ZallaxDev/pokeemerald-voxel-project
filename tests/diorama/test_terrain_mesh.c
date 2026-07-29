@@ -213,6 +213,26 @@ static void TestSignaturesAndHashes(void)
     assert(DioramaTerrain_ChunkSignature(&input) != signature);
 }
 
+static void TestDirtyChunkCoverage(void)
+{
+    assert(DioramaTerrain_DirtyCellAffectsChunk(3, 3, 0, 0));
+    assert(!DioramaTerrain_DirtyCellAffectsChunk(3, 3, 1, 0));
+    assert(DioramaTerrain_DirtyCellAffectsChunk(7, 3, 0, 0));
+    assert(DioramaTerrain_DirtyCellAffectsChunk(7, 3, 1, 0));
+    assert(DioramaTerrain_DirtyCellAffectsChunk(7, 7, 0, 0));
+    assert(DioramaTerrain_DirtyCellAffectsChunk(7, 7, 1, 0));
+    assert(DioramaTerrain_DirtyCellAffectsChunk(7, 7, 0, 1));
+    assert(DioramaTerrain_DirtyCellAffectsChunk(7, 7, 1, 1));
+    assert(DioramaTerrain_DirtyCellAffectsChunk(-1, -1, 0, 0));
+    assert(DioramaTerrain_DirtyCellAffectsChunk(-1, -1, -1, -1));
+
+    assert(!DioramaTerrain_ShouldInvalidateAll(10, 11, 4, 5, 1, false));
+    assert(DioramaTerrain_ShouldInvalidateAll(10, 12, 4, 5, 1, false));
+    assert(DioramaTerrain_ShouldInvalidateAll(10, 11, 4, 5, 0, false));
+    assert(DioramaTerrain_ShouldInvalidateAll(10, 11, 5, 5, 0, true));
+    assert(!DioramaTerrain_ShouldInvalidateAll(10, 12, 5, 5, 0, false));
+}
+
 static void TestCutoutAndHiddenShapes(void)
 {
     struct DioramaTerrainChunkInput input;
@@ -337,6 +357,7 @@ int main(void)
     TestPartialChunk();
     TestLedge();
     TestSignaturesAndHashes();
+    TestDirtyChunkCoverage();
     TestCutoutAndHiddenShapes();
     TestStructureFacesAndRoofSlope();
     TestChunkSeamAndHaloInvalidation();
