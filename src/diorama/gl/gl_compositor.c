@@ -28,6 +28,7 @@
 #define CAMERA_ZOOM_STEP 10.0f
 #define SOURCE_FADE_SECONDS 0.12
 #define CAMERA_TELEPORT_LIMIT 2.0f
+#define UI_TRANSIENT_HOLD_FRAMES 3
 
 struct DioramaTexture
 {
@@ -43,6 +44,7 @@ static GLuint sVertexArray;
 static GLuint sVertexBuffer;
 static GLint sOpacityUniform;
 static struct DioramaTexture sFrameTexture;
+static struct DioramaTexture sUiTexture;
 static struct DioramaTexture sDebugTexture;
 static struct DioramaTexture sWeatherTexture;
 static struct DioramaTexture sAtlasTexture;
@@ -58,6 +60,7 @@ static struct DioramaSceneSnapshot sRenderedSceneSnapshot;
 static struct DioramaSceneSnapshot sPreviousRenderedSceneSnapshot;
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sWeatherPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static u32 sUiPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sBaseAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u32 sForegroundAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
@@ -90,6 +93,7 @@ static uint64_t sFadeStartCounter;
 static float sTwoDOpacity = 1.0f;
 static float sFadeStartOpacity = 1.0f;
 static float sFadeTargetOpacity = 1.0f;
+static u8 sUiTransientHoldFrames;
 
 #define RGB(r, g, b) (0xFF000000u | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
 #define RGBA(r, g, b, a) (((u32)(a) << 24) | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
@@ -694,7 +698,13 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sDebugTexture.height = DISPLAY_HEIGHT;
     ConfigureTexture(sDebugTexture.id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
-                  GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+                   GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+    glGenTextures(1, &sUiTexture.id);
+    sUiTexture.width = DISPLAY_WIDTH;
+    sUiTexture.height = DISPLAY_HEIGHT;
+    ConfigureTexture(sUiTexture.id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
+                 GL_BGRA, GL_UNSIGNED_BYTE, NULL);
     glGenTextures(1, &sWeatherTexture.id);
     sWeatherTexture.width = DISPLAY_WIDTH;
     sWeatherTexture.height = DISPLAY_HEIGHT;
@@ -732,6 +742,7 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sHasPreviousRenderedSceneSnapshot = false;
     sCurrent3DReady = false;
     sProcessedSequence = 0;
+    sUiTransientHoldFrames = 0;
     SnapOpacity(1.0f);
     sTerrainDebug = false;
     sCameraPitch = CAMERA_DEFAULT_PITCH;
@@ -761,11 +772,25 @@ void DioramaGL_LoadArtwork(void)
 
 void DioramaGL_UploadFrame(const u32 *argb8888)
 {
+    AdoptLatestSnapshot();
     glBindTexture(GL_TEXTURE_2D, sFrameTexture.id);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                     GL_BGRA, GL_UNSIGNED_BYTE, argb8888);
-    AdoptLatestSnapshot();
+    DioramaUI_RenderBgOverlay(
+        DISPLAY_WIDTH, DISPLAY_HEIGHT,
+        sHasSceneSnapshot ? sSceneSnapshot.uiRects : NULL,
+        sHasSceneSnapshot ? sSceneSnapshot.uiRectCount : 0,
+        sHasSceneSnapshot ? sSceneSnapshot.uiBgControl : 0,
+        sHasSceneSnapshot ? sSceneSnapshot.uiBgHOffset : 0,
+        sHasSceneSnapshot ? sSceneSnapshot.uiBgVOffset : 0,
+        sHasSceneSnapshot ? sSceneSnapshot.uiBgTileGraphics : NULL,
+        sHasSceneSnapshot ? sSceneSnapshot.uiBgTilemap : NULL,
+        sHasSceneSnapshot ? sSceneSnapshot.fadedPalette : NULL,
+        sUiPixels);
+    glBindTexture(GL_TEXTURE_2D, sUiTexture.id);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                    GL_BGRA, GL_UNSIGNED_BYTE, sUiPixels);
 }
 
 void DioramaGL_Present(u8 background, bool border, bool integerScale, float frameAlpha)
@@ -809,6 +834,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         &sRenderedSceneSnapshot, sHasRenderedSceneSnapshot);
     if (presentationDecision == DIORAMA_PRESENT_3D)
     {
+        sUiTransientHoldFrames = 0;
         bool mapDiscontinuity = !sHasRenderedSceneSnapshot
                              || !DioramaTransition_IsSameMap(&sSceneSnapshot,
                                                              &sRenderedSceneSnapshot);
@@ -832,8 +858,24 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         }
         drawTerrain = true;
     }
+    else if (presentationDecision == DIORAMA_PRESENT_HOLD_3D
+          && sHasRenderedSceneSnapshot)
+    {
+        if (newSequence && sUiTransientHoldFrames < 0xFF)
+            sUiTransientHoldFrames++;
+        if (sUiTransientHoldFrames <= UI_TRANSIENT_HOLD_FRAMES)
+        {
+            SetOpacityTarget(0.0f);
+            drawTerrain = true;
+        }
+        else
+        {
+            SnapOpacity(1.0f);
+        }
+    }
     else if (presentationDecision == DIORAMA_PRESENT_SOFT_2D)
     {
+        sUiTransientHoldFrames = 0;
         softFallback = true;
         if (newSequence)
             SetOpacityTarget(1.0f);
@@ -841,6 +883,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     }
     else if (newSequence || !sHasSceneSnapshot)
     {
+        sUiTransientHoldFrames = 0;
         SnapOpacity(1.0f);
     }
     if (newSequence)
@@ -917,6 +960,10 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
             DrawTexture(&sFrameTexture, outputWidth, outputHeight,
                         gameX, gameY, gameWidth, gameHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, sTwoDOpacity);
+        if (current3D && sSceneSnapshot.uiRectCount > 0)
+            DrawTexture(&sUiTexture, outputWidth, outputHeight,
+                        gameX, gameY, gameWidth, gameHeight,
+                        0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
     }
     else
         DrawTexture(gameTexture, outputWidth, outputHeight,
@@ -979,6 +1026,8 @@ void DioramaGL_Shutdown(void)
         glDeleteTextures(1, &sFrameTexture.id);
     if (sDebugTexture.id != 0)
         glDeleteTextures(1, &sDebugTexture.id);
+    if (sUiTexture.id != 0)
+        glDeleteTextures(1, &sUiTexture.id);
     if (sWeatherTexture.id != 0)
         glDeleteTextures(1, &sWeatherTexture.id);
     if (sAtlasTexture.id != 0)

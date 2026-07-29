@@ -9,6 +9,7 @@ enum DioramaPresentationDecision
 {
     DIORAMA_PRESENT_HARD_2D,
     DIORAMA_PRESENT_SOFT_2D,
+    DIORAMA_PRESENT_HOLD_3D,
     DIORAMA_PRESENT_3D,
 };
 

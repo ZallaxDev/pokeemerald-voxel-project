@@ -104,7 +104,9 @@ bool DioramaSnapshot_CanRenderGrid(const struct DioramaSceneSnapshot *snapshot)
         && snapshot->visibleCellCount == DIORAMA_MAX_VISIBLE_CELLS
         && snapshot->objectCount <= DIORAMA_MAX_OBJECTS
         && snapshot->fallbackReasons == DIORAMA_FALLBACK_NONE
-        && snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE;
+        && (snapshot->sceneKind == DIORAMA_SCENE_OVERWORLD_FREE
+         || snapshot->sceneKind == DIORAMA_SCENE_DIALOGUE
+         || snapshot->sceneKind == DIORAMA_SCENE_MENU);
 }
 
 bool DioramaSnapshot_CanRenderFlatMap(const struct DioramaSceneSnapshot *snapshot)

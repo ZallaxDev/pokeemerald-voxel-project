@@ -45,6 +45,17 @@ static struct DioramaDirtyCell sDirtyCells[DIORAMA_MAX_DIRTY_CELLS];
 static u8 sDirtyCellCount;
 static bool sDirtyOverflow;
 
+static bool HasFieldUiWindow(void)
+{
+    u8 mapPopupWindowId = GetMapNamePopUpWindowId();
+    unsigned i;
+
+    for (i = 1; i < WINDOWS_MAX; i++)
+        if (i != mapPopupWindowId && gWindows[i].window.bg != 0xFF)
+            return true;
+    return false;
+}
+
 static enum DioramaSceneKind GetOverworldSceneKind(u32 *fallbackReasons)
 {
     if (gMain.callback2 != CB2_Overworld)
@@ -58,18 +69,161 @@ static enum DioramaSceneKind GetOverworldSceneKind(u32 *fallbackReasons)
         return DIORAMA_SCENE_TRANSITION;
     }
     if (!IsFieldMessageBoxHidden())
-    {
-        *fallbackReasons |= DIORAMA_FALLBACK_MODAL_UI;
         return DIORAMA_SCENE_DIALOGUE;
-    }
     if (GetStartMenuWindowId() != WINDOW_NONE)
-    {
-        *fallbackReasons |= DIORAMA_FALLBACK_MODAL_UI;
         return DIORAMA_SCENE_MENU;
-    }
+    if (ArePlayerFieldControlsLocked() && HasFieldUiWindow())
+        return DIORAMA_SCENE_MENU;
     if (ArePlayerFieldControlsLocked())
         return DIORAMA_SCENE_OVERWORLD_SCRIPTED;
     return DIORAMA_SCENE_OVERWORLD_FREE;
+}
+
+static void AddUiRect(struct DioramaSceneSnapshot *snapshot,
+                      int x, int y, int width, int height)
+{
+    struct DioramaUiRect *rect;
+
+    if (snapshot->uiRectCount >= DIORAMA_MAX_UI_RECTS || width <= 0 || height <= 0)
+        return;
+    rect = &snapshot->uiRects[snapshot->uiRectCount++];
+    rect->x = x;
+    rect->y = y;
+    rect->width = width;
+    rect->height = height;
+}
+
+static void AddStandardWindowRect(struct DioramaSceneSnapshot *snapshot, u8 windowId)
+{
+    int left;
+    int top;
+    int width;
+    int height;
+
+    if (windowId == WINDOW_NONE || windowId >= WINDOWS_MAX
+     || gWindows[windowId].window.bg == 0xFF)
+        return;
+    left = GetWindowAttribute(windowId, WINDOW_TILEMAP_LEFT);
+    top = GetWindowAttribute(windowId, WINDOW_TILEMAP_TOP);
+    width = GetWindowAttribute(windowId, WINDOW_WIDTH);
+    height = GetWindowAttribute(windowId, WINDOW_HEIGHT);
+    AddUiRect(snapshot, (left - 1) * 8, (top - 1) * 8,
+              (width + 2) * 8, (height + 2) * 8);
+}
+
+static void MarkOam(u32 *mask, u8 oamOrder)
+{
+    if (oamOrder < 128)
+        mask[oamOrder / 32] |= 1u << (oamOrder % 32);
+}
+
+static void GetOamDimensions(const struct OamData *oam, int *width, int *height)
+{
+    static const u8 dimensions[3][4][2] = {
+        {{8, 8}, {16, 16}, {32, 32}, {64, 64}},
+        {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
+        {{8, 16}, {8, 32}, {16, 32}, {32, 64}},
+    };
+
+    if (oam->shape >= 3)
+    {
+        *width = 0;
+        *height = 0;
+        return;
+    }
+    *width = dimensions[oam->shape][oam->size][0];
+    *height = dimensions[oam->shape][oam->size][1];
+    if (oam->affineMode == ST_OAM_AFFINE_DOUBLE)
+    {
+        *width *= 2;
+        *height *= 2;
+    }
+}
+
+static void CopyUiProfile(struct DioramaSceneSnapshot *snapshot)
+{
+    u8 startMenuWindowId = GetStartMenuWindowId();
+    u8 mapPopupWindowId = GetMapNamePopUpWindowId();
+    bool hasFieldWindow = HasFieldUiWindow();
+    unsigned i;
+
+    if (!IsFieldMessageBoxHidden())
+    {
+        snapshot->uiFlags |= DIORAMA_UI_DIALOGUE;
+        AddUiRect(snapshot, 0, 14 * 8, DISPLAY_WIDTH, DISPLAY_HEIGHT - 14 * 8);
+    }
+    if (startMenuWindowId != WINDOW_NONE)
+        snapshot->uiFlags |= DIORAMA_UI_START_MENU;
+    if (hasFieldWindow)
+        snapshot->uiFlags |= DIORAMA_UI_FIELD_WINDOW;
+    if (snapshot->uiFlags
+        & (DIORAMA_UI_DIALOGUE | DIORAMA_UI_START_MENU | DIORAMA_UI_FIELD_WINDOW))
+    {
+        for (i = 1; i < WINDOWS_MAX; i++)
+            if (i != mapPopupWindowId)
+                AddStandardWindowRect(snapshot, i);
+    }
+    if (mapPopupWindowId != WINDOW_NONE)
+    {
+        snapshot->uiFlags |= DIORAMA_UI_MAP_POPUP;
+        AddUiRect(snapshot, 0, 0, 12 * 8, 5 * 8);
+    }
+
+    if (snapshot->uiRectCount > 0)
+    {
+        unsigned charBase;
+
+        snapshot->uiBgControl = REG_BG0CNT;
+        snapshot->uiBgHOffset = REG_BG0HOFS;
+        snapshot->uiBgVOffset = REG_BG0VOFS;
+        charBase = (snapshot->uiBgControl >> 2) & 3;
+        if (charBase > 2 || (snapshot->uiBgControl & (1 << 7))
+         || (snapshot->uiBgControl >> 14) != 0)
+        {
+            snapshot->fallbackReasons |= DIORAMA_FALLBACK_INTERNAL_ERROR;
+        }
+        else
+        {
+            memcpy(snapshot->uiBgTileGraphics,
+                   (const void *)BG_CHAR_ADDR(charBase),
+                   sizeof(snapshot->uiBgTileGraphics));
+            memcpy(snapshot->uiBgTilemap,
+                   (const void *)BG_SCREEN_ADDR((snapshot->uiBgControl >> 8) & 0x1F),
+                   sizeof(snapshot->uiBgTilemap));
+        }
+    }
+
+    for (i = 0; i < snapshot->objectCount; i++)
+        MarkOam(snapshot->fieldOamMask, snapshot->objects[i].oamOrder);
+    if (snapshot->surfBlobValid)
+        MarkOam(snapshot->fieldOamMask, snapshot->surfBlob.oamOrder);
+
+    for (i = 0; i < 128; i++)
+    {
+        const struct OamData *oam = &gMain.oamBuffer[i];
+        int x;
+        int y;
+        int width;
+        int height;
+        unsigned rectIndex;
+
+        if (oam->affineMode == ST_OAM_AFFINE_ERASE)
+            continue;
+        if (snapshot->fieldOamMask[i / 32] & (1u << (i % 32)))
+            continue;
+        x = oam->x >= DISPLAY_WIDTH ? oam->x - 512 : oam->x;
+        y = oam->y >= DISPLAY_HEIGHT ? oam->y - 256 : oam->y;
+        GetOamDimensions(oam, &width, &height);
+        for (rectIndex = 0; rectIndex < snapshot->uiRectCount; rectIndex++)
+        {
+            if (DioramaUI_RectIntersects(&snapshot->uiRects[rectIndex],
+                                         x, y, width, height))
+            {
+                MarkOam(snapshot->interfaceOamMask, i);
+                break;
+            }
+        }
+    }
 }
 
 static bool CopyCellVisual(const struct MapLayout *layout, u16 metatileId,
@@ -595,6 +749,7 @@ void DioramaScene_PublishOverworld(void)
         if (!sDraft.tilesetResourcesValid)
             sDraft.fallbackReasons |= DIORAMA_FALLBACK_TILESET_UNAVAILABLE;
         CopyObjects(&sDraft);
+        CopyUiProfile(&sDraft);
     }
     DioramaSnapshotExchange_Publish(&sDraft);
     sPublishedThisFrame = true;

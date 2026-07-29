@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "diorama/ui_overlay.h"
+
 #define DIORAMA_SNAPSHOT_COUNT 3
 #define DIORAMA_GRID_WIDTH 33
 #define DIORAMA_GRID_HEIGHT 33
@@ -190,6 +192,16 @@ struct DioramaSceneSnapshot
     struct DioramaDirtyCell dirtyCells[DIORAMA_MAX_DIRTY_CELLS];
     uint8_t objectCount;
     struct DioramaObjectSnapshot objects[DIORAMA_MAX_OBJECTS];
+    uint8_t uiFlags;
+    uint8_t uiRectCount;
+    struct DioramaUiRect uiRects[DIORAMA_MAX_UI_RECTS];
+    uint32_t fieldOamMask[DIORAMA_OAM_MASK_WORDS];
+    uint32_t interfaceOamMask[DIORAMA_OAM_MASK_WORDS];
+    uint16_t uiBgControl;
+    uint16_t uiBgHOffset;
+    uint16_t uiBgVOffset;
+    uint8_t uiBgTileGraphics[DIORAMA_UI_BG_TILE_BYTES];
+    uint16_t uiBgTilemap[DIORAMA_UI_BG_MAP_BYTES / sizeof(uint16_t)];
     uint8_t playerAvatarFlags;
     uint8_t surfBlobValid;
     int16_t surfBlobOffsetX;

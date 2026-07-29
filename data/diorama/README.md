@@ -59,3 +59,15 @@ Reflections use the game's faded reflection palettes and bridge offsets, and a
 per-pixel stencil excludes non-reflective terrain and foreground tile layers. The
 Surf blob remains a visual attachment to the player and never changes movement,
 collision, or elevation state.
+
+## Overworld interface
+
+Dialogue windows, the start menu, auxiliary field windows, and the map-name popup
+are described by immutable UI profiles in the scene snapshot. The profile copies
+only BG0 tile graphics, tilemap state, scroll, faded palettes, window rectangles,
+and field/interface OAM classifications. The graphics thread renders BG0 index zero
+as transparent alpha and composites the original 240x160 UI over the diorama, so
+text printers, timing, palette colors, and accessibility hooks remain authoritative.
+
+Battles, palette fades, unsupported weather, non-overworld callbacks, incomplete
+snapshots, and renderer failures continue to present the complete software frame.

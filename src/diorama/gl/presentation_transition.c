@@ -21,6 +21,10 @@ enum DioramaPresentationDecision DioramaTransition_Classify(
     if (current3DReady)
         return DIORAMA_PRESENT_3D;
     if (current != NULL && hasLast3D
+     && current->sceneKind == DIORAMA_SCENE_OVERWORLD_SCRIPTED
+     && DioramaTransition_IsSameMap(current, last3D))
+        return DIORAMA_PRESENT_HOLD_3D;
+    if (current != NULL && hasLast3D
      && (current->sceneKind == DIORAMA_SCENE_DIALOGUE
       || current->sceneKind == DIORAMA_SCENE_MENU)
      && DioramaTransition_IsSameMap(current, last3D))

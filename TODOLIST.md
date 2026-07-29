@@ -438,17 +438,40 @@ queda cerrada y se desbloquea la Fase 9.
 
 ## Fase 9: interfaz 2D sobre mundo 3D
 
-- [ ] Separar mundo, UI y alpha en el renderer software mediante perfiles de escena.
-- [ ] Clasificar OAM de campo frente a sprites de interfaz.
-- [ ] Superponer dialogos, popup de mapa y menu de inicio.
-- [ ] Mantener fallback completo para escenas complejas y errores.
-- [ ] Preservar resolucion, timings y accesibilidad del texto.
+- [x] Separar mundo, UI y alpha en el renderer software mediante perfiles de escena.
+- [x] Clasificar OAM de campo frente a sprites de interfaz.
+- [x] Superponer dialogos, popup de mapa y menu de inicio.
+- [x] Mantener fallback completo para escenas complejas y errores.
+- [x] Preservar resolucion, timings y accesibilidad del texto.
+
+Implementacion tecnica completada. El snapshot publica perfiles inmutables para
+dialogo, ventanas auxiliares, menu de inicio y popup de mapa, junto con la
+clasificacion OAM de campo/interfaz. BG0 se copia como tiles, tilemap, scroll y
+paleta faded y se reconstruye en una textura RGBA donde el indice cero es alpha
+transparente; no se recortan pixeles opacos del mundo software. El compositor
+mantiene el mundo 3D y superpone esta textura a 240x160 sin alterar impresoras de
+texto, tareas, voz ni timings originales.
+
+Batallas, fades, callbacks no-overworld, clima no soportado, snapshots incompletos
+y errores de renderer conservan el frame software completo. Hay pruebas para alpha,
+clipping, transparencia y elegibilidad de escenas con UI.
+
+`test-diorama`, los builds i386 clasico y diorama, `diff --check`, revision de
+codigo y un smoke OpenGL software de 10 segundos se completaron correctamente.
+
+Tras la primera validacion se elimino el parpadeo 2D al abrir y cerrar UI: los
+frames scripted transitorios del mismo mapa retienen brevemente la ultima escena
+3D, y las ventanas modales de campo (incluido Si/No) mantienen el perfil BG0
+durante toda su vida. Pendiente de revalidacion visual.
 
 Prueba manual realizable por el usuario: abrir dialogos, menu de inicio y popup de
 mapa sobre 3D; comprobar ausencia de fondo 2D residual y comparar texto, fades,
 voz y timings con el modo clasico.
 
-Resultado del usuario: **PENDIENTE**
+Resultado del usuario: **APROBADO** (2026-07-29)
+
+El usuario confirmo dialogos, menu de inicio, popup de mapa, ventanas Si/No y
+transiciones sin parpadeo 2D. La Fase 9 queda cerrada y se desbloquea la Fase 10.
 
 ## Fase 10: interiores y edificios avanzados
 
@@ -462,7 +485,7 @@ Prueba manual realizable por el usuario: recorrer los interiores obligatorios de
 la historia y accionar todos los objetos visibles; verificar que paredes y muebles
 no ocultan al jugador, NPC ni puntos interactivos.
 
-Resultado del usuario: **BLOQUEADO POR FASE 9**
+Resultado del usuario: **PENDIENTE**
 
 ## Fase 11: sombras y posprocesado
 

@@ -18,6 +18,9 @@ int main(void)
 
     assert(DioramaTransition_Classify(&current, true, &rendered, true)
         == DIORAMA_PRESENT_3D);
+    current.sceneKind = DIORAMA_SCENE_OVERWORLD_SCRIPTED;
+    assert(DioramaTransition_Classify(&current, false, &rendered, true)
+        == DIORAMA_PRESENT_HOLD_3D);
     current.sceneKind = DIORAMA_SCENE_DIALOGUE;
     assert(DioramaTransition_Classify(&current, false, &rendered, true)
         == DIORAMA_PRESENT_SOFT_2D);
@@ -32,6 +35,9 @@ int main(void)
         == DIORAMA_PRESENT_HARD_2D);
     current.sceneKind = DIORAMA_SCENE_DIALOGUE;
     current.mapGeneration++;
+    assert(DioramaTransition_Classify(&current, false, &rendered, true)
+        == DIORAMA_PRESENT_HARD_2D);
+    current.sceneKind = DIORAMA_SCENE_OVERWORLD_SCRIPTED;
     assert(DioramaTransition_Classify(&current, false, &rendered, true)
         == DIORAMA_PRESENT_HARD_2D);
     current = rendered;
