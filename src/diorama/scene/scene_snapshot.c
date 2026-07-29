@@ -4,6 +4,7 @@
 
 #include "global.h"
 #include "diorama/scene_snapshot.h"
+#include "diorama/sprite_frame.h"
 #include "event_object_movement.h"
 #include "field_camera.h"
 #include "field_message_box.h"
@@ -19,20 +20,12 @@
 
 #define CELL_RADIUS 16
 
-enum
-{
-    OBJECT_FLAG_PLAYER     = 1 << 0,
-    OBJECT_FLAG_INVISIBLE  = 1 << 1,
-    OBJECT_FLAG_OFFSCREEN  = 1 << 2,
-    OBJECT_FLAG_REFLECTION = 1 << 3,
-    OBJECT_FLAG_SHADOW     = 1 << 4,
-};
-
 static struct DioramaSceneSnapshot sDraft;
 static u16 sPreviousPalette[DIORAMA_FADED_PALETTE_ENTRIES];
 static u8 sPreviousTileGraphics[DIORAMA_TILE_GRAPHICS_SIZE];
 static u32 sMapGeneration;
 static u32 sPaletteGeneration;
+static u32 sObjPaletteGeneration;
 static u32 sTilesetAnimationGeneration;
 static bool sHasPreviousPalette;
 static bool sHasPreviousTileGraphics;
@@ -138,6 +131,100 @@ static void CopyTileGraphics(struct DioramaSceneSnapshot *snapshot)
     snapshot->tilesetAnimationGeneration = sTilesetAnimationGeneration;
 }
 
+static u64 HashFrame(const u8 *data, u16 size)
+{
+    u64 hash = UINT64_C(1469598103934665603);
+    u16 i;
+
+    for (i = 0; i < size; i++)
+        hash = (hash ^ data[i]) * UINT64_C(1099511628211);
+    return hash;
+}
+
+static bool CopyObjectFrame(struct DioramaObjectSnapshot *copy, const struct Sprite *sprite)
+{
+    const u8 *source;
+    u8 width;
+    u8 height;
+    u16 expectedSize;
+
+    if (!DioramaSprite_GetDimensions(copy->oamShape, copy->oamSize, &width, &height)
+     || copy->bpp != ST_OAM_4BPP)
+        return false;
+    expectedSize = width * height / 2;
+    if (expectedSize > sizeof(copy->frameGraphics))
+        return false;
+    if (!sprite->usingSheet && sprite->images != NULL && sprite->anims != NULL)
+    {
+        const union AnimCmd *command = &sprite->anims[sprite->animNum][sprite->animCmdIndex];
+        const struct SpriteFrameImage *image;
+
+        if (command->type < 0)
+            return false;
+        image = &sprite->images[command->frame.imageValue];
+        if (image->data == NULL || image->size < expectedSize)
+            return false;
+        source = image->data;
+    }
+    else
+    {
+        u32 byteOffset = sprite->oam.tileNum * DIORAMA_TILE_BYTES;
+
+        if (byteOffset + expectedSize > DIORAMA_TILE_GRAPHICS_SIZE)
+            return false;
+        source = (const u8 *)OBJ_VRAM0 + byteOffset;
+    }
+    memcpy(copy->frameGraphics, source, expectedSize);
+    copy->frameSize = expectedSize;
+    copy->frameHash = HashFrame(copy->frameGraphics, expectedSize);
+    return true;
+}
+
+static bool HasUnsupportedSubsprites(const struct Sprite *sprite,
+                                     const struct ObjectEventGraphicsInfo *graphicsInfo,
+                                     u8 *resolvedPriority)
+{
+    const struct SubspriteTable *table;
+    const struct Subsprite *subsprite;
+    u8 width;
+    u8 height;
+
+    if (sprite->subspriteTables == NULL || sprite->subspriteMode == SUBSPRITES_OFF)
+        return false;
+    table = &sprite->subspriteTables[sprite->subspriteTableNum];
+    if (table->subspriteCount == 0 || table->subsprites == NULL)
+        return false;
+    if (table->subspriteCount != 1 || graphicsInfo == NULL)
+        return true;
+    subsprite = &table->subsprites[0];
+    if (!DioramaSprite_GetDimensions(subsprite->shape, subsprite->size, &width, &height)
+     || width != graphicsInfo->width || height != graphicsInfo->height
+     || subsprite->tileOffset != 0
+     || subsprite->x != -(s8)(width / 2) || subsprite->y != -(s8)(height / 2))
+        return true;
+    if (sprite->subspriteMode != SUBSPRITES_IGNORE_PRIORITY)
+        *resolvedPriority = subsprite->priority;
+    return false;
+}
+
+static u8 FindOamOrder(const struct Sprite *sprite, u8 priority)
+{
+    u8 i;
+
+    for (i = 0; i < gOamLimit; i++)
+    {
+        const struct OamData *oam = &gMain.oamBuffer[i];
+
+        if (oam->x == sprite->oam.x && oam->y == sprite->oam.y
+         && oam->tileNum == sprite->oam.tileNum
+         && oam->paletteNum == sprite->oam.paletteNum
+         && oam->shape == sprite->oam.shape && oam->size == sprite->oam.size
+         && oam->priority == priority)
+            return i;
+    }
+    return 0xFF;
+}
+
 static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
 {
     int i;
@@ -147,12 +234,18 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         const struct ObjectEvent *object = &gObjectEvents[i];
         struct DioramaObjectSnapshot *copy;
         const struct Sprite *sprite;
+        const struct ObjectEventGraphicsInfo *graphicsInfo;
+        u8 resolvedPriority;
+        s16 baseX;
+        s16 baseY;
 
         if (!object->active || object->spriteId >= MAX_SPRITES)
             continue;
         sprite = &gSprites[object->spriteId];
         if (!sprite->inUse || snapshot->objectCount >= DIORAMA_MAX_OBJECTS)
             continue;
+        graphicsInfo = GetObjectEventGraphicsInfo(object->graphicsId);
+        resolvedPriority = sprite->oam.priority;
 
         copy = &snapshot->objects[snapshot->objectCount++];
         copy->active = TRUE;
@@ -163,11 +256,13 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         copy->previousElevation = object->previousElevation;
         copy->facingDirection = object->facingDirection;
         copy->movementDirection = object->movementDirection;
-        copy->flags = (object->isPlayer ? OBJECT_FLAG_PLAYER : 0)
-                    | (object->invisible ? OBJECT_FLAG_INVISIBLE : 0)
-                    | (object->offScreen ? OBJECT_FLAG_OFFSCREEN : 0)
-                    | (object->hasReflection ? OBJECT_FLAG_REFLECTION : 0)
-                    | (object->hasShadow ? OBJECT_FLAG_SHADOW : 0);
+        copy->flags = (object->isPlayer ? DIORAMA_OBJECT_PLAYER : 0)
+                    | ((object->invisible || sprite->invisible) ? DIORAMA_OBJECT_INVISIBLE : 0)
+                    | (object->offScreen ? DIORAMA_OBJECT_OFFSCREEN : 0)
+                    | (object->hasReflection ? DIORAMA_OBJECT_REFLECTION : 0)
+                    | (object->hasShadow ? DIORAMA_OBJECT_SHADOW : 0)
+                    | (HasUnsupportedSubsprites(sprite, graphicsInfo, &resolvedPriority)
+                        ? DIORAMA_OBJECT_SUBSPRITES : 0);
         copy->currentMapX = object->currentCoords.x;
         copy->currentMapY = object->currentCoords.y;
         copy->previousMapX = object->previousCoords.x;
@@ -176,6 +271,17 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         copy->screenY = sprite->y + sprite->y2;
         copy->spriteX2 = sprite->x2;
         copy->spriteY2 = sprite->y2;
+        copy->width = graphicsInfo != NULL ? graphicsInfo->width : 0;
+        copy->height = graphicsInfo != NULL ? graphicsInfo->height : 0;
+        SetSpritePosToMapCoords(object->currentCoords.x, object->currentCoords.y, &baseX, &baseY);
+        copy->mapPixelOffsetX = sprite->x - (baseX + 8);
+        copy->mapPixelOffsetY = sprite->y + copy->height / 2 - (baseY + 16);
+        copy->centerToCornerX = sprite->centerToCornerVecX;
+        copy->centerToCornerY = sprite->centerToCornerVecY;
+        copy->shadowSize = graphicsInfo != NULL ? graphicsInfo->shadowSize : 0;
+        copy->affineMode = sprite->oam.affineMode;
+        copy->objMode = sprite->oam.objMode;
+        copy->bpp = sprite->oam.bpp;
         copy->oamAttr0 = sprite->oam.y
                        | (sprite->oam.affineMode << 8)
                        | (sprite->oam.objMode << 10)
@@ -192,10 +298,13 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
                    && (sprite->oam.matrixNum & ST_OAM_HFLIP) != 0;
         copy->vFlip = sprite->oam.affineMode == ST_OAM_AFFINE_OFF
                    && (sprite->oam.matrixNum & ST_OAM_VFLIP) != 0;
-        copy->priority = sprite->oam.priority;
+        copy->priority = resolvedPriority;
         copy->subpriority = sprite->subpriority;
+        copy->oamOrder = FindOamOrder(sprite, resolvedPriority);
         copy->animNum = sprite->animNum;
         copy->animCmdIndex = sprite->animCmdIndex;
+        if (!CopyObjectFrame(copy, sprite))
+            copy->flags |= DIORAMA_OBJECT_FRAME_INVALID;
     }
 }
 
@@ -206,6 +315,7 @@ void DioramaScene_Init(void)
     memset(sPreviousTileGraphics, 0, sizeof(sPreviousTileGraphics));
     sMapGeneration = 0;
     sPaletteGeneration = 0;
+    sObjPaletteGeneration = 0;
     sTilesetAnimationGeneration = 0;
     sHasPreviousPalette = false;
     sHasPreviousTileGraphics = false;
@@ -261,15 +371,18 @@ void DioramaScene_PublishOverworld(void)
         sPreviousMapLayoutId = sDraft.mapLayoutId;
     }
     sDraft.mapGeneration = sMapGeneration;
-    if (memcmp(sPreviousPalette, gPlttBufferFaded, 256 * sizeof(*sPreviousPalette)) != 0
-     || !sHasPreviousPalette)
-    {
-        memcpy(sPreviousPalette, gPlttBufferFaded, sizeof(sPreviousPalette));
+    if (!sHasPreviousPalette
+     || memcmp(sPreviousPalette, gPlttBufferFaded, 256 * sizeof(*sPreviousPalette)) != 0)
         sPaletteGeneration++;
-        sHasPreviousPalette = true;
-    }
+    if (!sHasPreviousPalette
+     || memcmp(sPreviousPalette + 256, gPlttBufferFaded + 256,
+               256 * sizeof(*sPreviousPalette)) != 0)
+        sObjPaletteGeneration++;
+    memcpy(sPreviousPalette, gPlttBufferFaded, sizeof(sPreviousPalette));
+    sHasPreviousPalette = true;
     memcpy(sDraft.fadedPalette, gPlttBufferFaded, sizeof(sDraft.fadedPalette));
     sDraft.paletteGeneration = sPaletteGeneration;
+    sDraft.objPaletteGeneration = sObjPaletteGeneration;
 
     if (sDraft.valid)
     {

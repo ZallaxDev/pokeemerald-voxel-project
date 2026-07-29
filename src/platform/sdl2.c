@@ -433,9 +433,15 @@ int main(int argc, char **argv)
 
 #ifndef __ANDROID__
 #ifdef ENABLE_DIORAMA
+        double renderStep = fixedTimestep / timeScale;
+        float frameAlpha = renderStep > 0.0 ? accumulator / renderStep : 1.0f;
+
+        if (frameAlpha < 0.0f) frameAlpha = 0.0f;
+        if (frameAlpha > 1.0f) frameAlpha = 1.0f;
         DioramaGL_Present(Platform_GetBorderBackground(),
                           sPlatformSettings[PLATFORM_SETTING_BORDER],
-                          sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE]);
+                          sPlatformSettings[PLATFORM_SETTING_INTEGER_SCALE],
+                          frameAlpha);
 #else
         SDL_RenderPresent(sdlRenderer);
 #endif

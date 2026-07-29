@@ -222,18 +222,50 @@ y confirmar que movimiento y colision siguen identicos al modo clasico.
 
 ## Fase 5: jugador y NPC como billboards
 
-- [ ] Copiar frame, paleta, shape, size, flips y offsets desde OAM al snapshot.
-- [ ] Crear cache de texturas por clave visual y generaciones.
-- [ ] Dibujar jugador, NPC y shadow blobs anclados por los pies.
-- [ ] Resolver profundidad y elementos que cubren al jugador.
-- [ ] Interpolar movimiento y desactivarlo en warps o teletransportes.
-- [ ] Añadir pruebas de interpolacion y deteccion de saltos.
+- [x] Copiar frame, paleta, shape, size, flips y offsets desde OAM al snapshot.
+- [x] Crear cache de texturas por clave visual y generaciones.
+- [x] Dibujar jugador, NPC y shadow blobs anclados por los pies.
+- [x] Resolver profundidad y elementos que cubren al jugador.
+- [x] Interpolar movimiento y desactivarlo en warps o teletransportes.
+- [x] Añadir pruebas de interpolacion y deteccion de saltos.
+
+Implementacion completada el 2026-07-29. El hilo del juego copia por valor el
+frame OBJ que corresponde al comando de animacion vigente, su paleta visible,
+flips, dimensiones, offsets y orden OAM. El hilo GL usa una cache LRU acotada
+por hashes del frame y de la paleta, dibuja billboards inclinados con alpha
+cutout y pivote en los pies, y coloca shadow blobs sin escribir profundidad.
+Los objetos, la camara y el terreno comparten la misma interpolacion; cambios
+de mapa, snapshots no consecutivos, teletransportes y discontinuidades
+desactivan la interpolacion. Tablas de subsprites de una sola pieza se
+resuelven como un billboard; composites no representables conservan fallback
+2D completo.
+
+Pruebas CPU anadidas para las 12 combinaciones shape/size, direccionamiento
+OBJ 4bpp, paletas, transparencia, flips, claves visuales, anclaje cardinal,
+altura de terreno, salto vertical, orden de profundidad, interpolacion y
+rechazo de warps, teletransportes o secuencias discontinuas. `test-diorama`,
+los builds i386 clasico y diorama, y un smoke GLX software de 10 segundos se
+completaron correctamente.
 
 Prueba manual realizable por el usuario: caminar y correr en las cuatro direcciones,
 hablar con NPC, cruzar un warp y usar speedup; validar frames, flips, anclaje,
 orden de profundidad y ausencia de vibracion.
 
-Resultado del usuario: **PENDIENTE**
+Resultado del usuario: **APROBADO** (2026-07-29)
+
+La validacion manual confirmo frames y flips correctos al caminar y correr,
+anclaje estable en los pies, sombras sobre el terreno, orden de profundidad,
+transiciones sin interpolacion residual y ausencia de vibracion con la camara
+y speedup.
+
+Validacion solicitada: en Villa Raiz, caminar y correr en las cuatro
+direcciones junto a NPC y bordes de edificios, hablar con un NPC, cruzar un
+warp y repetir con speedup. Confirmar que cada frame y flip coincide con el
+2D, los pies permanecen fijados a la celda, los saltos suben sin deslizarse,
+las sombras permanecen en el suelo, el orden entre personajes y terreno es
+estable, y no aparece vibracion al seguir la camara. Con `F3`, `OBJ` debe
+mostrar los personajes visibles, `CAC` los frames residentes y `UPL` volver a
+0 cuando ningun frame o paleta cambia.
 
 ## Fase 6: reglas y vertical slice Villa Raiz + Ruta 101
 
@@ -251,7 +283,7 @@ Prueba manual realizable por el usuario: jugar el recorrido completo Villa Raiz
 -> Ruta 101, entrar en casas, hablar, abrir menus, combatir, guardar y cargar;
 confirmar volumen coherente, ausencia de huecos y fallback 2D correcto.
 
-Resultado del usuario: **BLOQUEADO POR FASE 5**
+Resultado del usuario: **PENDIENTE**
 
 ## Fase 7: cambios dinamicos, conexiones y transiciones
 

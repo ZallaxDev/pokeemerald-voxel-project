@@ -8,6 +8,7 @@
 
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_loader.h"
+#include "diorama/gl_object_renderer.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/scene_snapshot.h"
@@ -34,6 +35,8 @@ static struct DioramaTexture sBackgroundTextures[MAX_BORDER_BACKGROUNDS];
 static struct DioramaTexture sBorderTexture;
 static u8 sBackgroundCount;
 static struct DioramaSceneSnapshot sSceneSnapshot;
+static struct DioramaSceneSnapshot sPreviousSceneSnapshot;
+static struct DioramaSceneSnapshot sIncomingSceneSnapshot;
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u8 sPresentMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
@@ -41,7 +44,9 @@ static u32 sAtlasMapGeneration;
 static u32 sAtlasPaletteGeneration;
 static u32 sAtlasAnimationGeneration;
 static bool sHasSceneSnapshot;
+static bool sHasPreviousSceneSnapshot;
 static bool sTerrainAvailable;
+static bool sObjectsAvailable;
 static bool sTerrainDebug;
 static enum DioramaRenderMode sRenderMode = DIORAMA_RENDER_AUTO;
 
@@ -133,9 +138,10 @@ static void DrawValue(int x, int y, const char *label, int value)
 static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
 {
     const struct DioramaTerrainMetrics *metrics = DioramaGLTerrain_GetMetrics();
+    const struct DioramaObjectMetrics *objectMetrics = DioramaGLObjects_GetMetrics();
 
     memset(sDebugPixels, 0, sizeof(sDebugPixels));
-    FillRect(2, 2, 74, 66, RGBA(10, 14, 18, 220));
+    FillRect(2, 2, 74, 93, RGBA(10, 14, 18, 220));
     DrawValue(5, 5, "GEN:", snapshot->mapGeneration);
     DrawValue(5, 14, "CH:", metrics->activeChunks);
     DrawValue(5, 23, "VIS:", metrics->visibleChunks);
@@ -143,6 +149,9 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
     DrawValue(5, 41, "REB:", metrics->rebuiltChunks);
     DrawValue(5, 50, "TRI:", metrics->triangles);
     DrawValue(5, 59, "DRA:", metrics->drawCalls);
+    DrawValue(5, 68, "OBJ:", objectMetrics->visibleObjects);
+    DrawValue(5, 77, "CAC:", objectMetrics->cachedFrames);
+    DrawValue(5, 86, "UPL:", objectMetrics->uploadedFrames);
 
     glBindTexture(GL_TEXTURE_2D, sDebugTexture.id);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -322,6 +331,33 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     }
 }
 
+static void GetCameraPosition(float frameAlpha, float *cameraX, float *cameraZ)
+{
+    float currentX = sSceneSnapshot.cameraMapX
+                   + (sSceneSnapshot.cameraSubpixelX + sSceneSnapshot.cameraPanX) / 16.0f;
+    float currentZ = -(sSceneSnapshot.cameraMapY
+                     + (sSceneSnapshot.cameraSubpixelY + sSceneSnapshot.cameraPanY) / 16.0f);
+
+    *cameraX = currentX;
+    *cameraZ = currentZ;
+    if (sHasPreviousSceneSnapshot
+     && sSceneSnapshot.sequence == sPreviousSceneSnapshot.sequence + 1
+     && sSceneSnapshot.mapGeneration == sPreviousSceneSnapshot.mapGeneration
+     && sSceneSnapshot.sceneKind == DIORAMA_SCENE_OVERWORLD_FREE
+     && sPreviousSceneSnapshot.sceneKind == DIORAMA_SCENE_OVERWORLD_FREE)
+    {
+        float previousX = sPreviousSceneSnapshot.cameraMapX
+                        + (sPreviousSceneSnapshot.cameraSubpixelX
+                        + sPreviousSceneSnapshot.cameraPanX) / 16.0f;
+        float previousZ = -(sPreviousSceneSnapshot.cameraMapY
+                          + (sPreviousSceneSnapshot.cameraSubpixelY
+                          + sPreviousSceneSnapshot.cameraPanY) / 16.0f);
+
+        *cameraX = previousX + (currentX - previousX) * frameAlpha;
+        *cameraZ = previousZ + (currentZ - previousZ) * frameAlpha;
+    }
+}
+
 bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
 {
     sWindow = window;
@@ -337,6 +373,9 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sTerrainAvailable = DioramaGLTerrain_Init();
     if (!sTerrainAvailable)
         SDL_Log("Diorama terrain renderer unavailable; retaining the 2D OpenGL fallback");
+    sObjectsAvailable = DioramaGLObjects_Init();
+    if (!sObjectsAvailable)
+        SDL_Log("Diorama object renderer unavailable; retaining the 2D OpenGL fallback");
 
     dglGenVertexArrays(1, &sVertexArray);
     dglBindVertexArray(sVertexArray);
@@ -372,6 +411,7 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sAtlasPaletteGeneration = 0;
     sAtlasAnimationGeneration = 0;
     sHasSceneSnapshot = false;
+    sHasPreviousSceneSnapshot = false;
     sTerrainDebug = false;
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     return true;
@@ -404,7 +444,7 @@ void DioramaGL_UploadFrame(const u32 *argb8888)
                     GL_BGRA, GL_UNSIGNED_BYTE, argb8888);
 }
 
-void DioramaGL_Present(u8 background, bool border, bool integerScale)
+void DioramaGL_Present(u8 background, bool border, bool integerScale, float frameAlpha)
 {
     int outputWidth;
     int outputHeight;
@@ -414,18 +454,33 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale)
     int gameY;
     const struct DioramaTexture *gameTexture = &sFrameTexture;
     bool drawTerrain = false;
+    float cameraX;
+    float cameraZ;
 
-    if (DioramaSnapshotExchange_CopyLatest(&sSceneSnapshot))
+    if (DioramaSnapshotExchange_CopyLatest(&sIncomingSceneSnapshot))
     {
-        sHasSceneSnapshot = true;
+        if (!sHasSceneSnapshot)
+        {
+            sSceneSnapshot = sIncomingSceneSnapshot;
+            sPreviousSceneSnapshot = sIncomingSceneSnapshot;
+            sHasSceneSnapshot = true;
+        }
+        else if (sIncomingSceneSnapshot.sequence != sSceneSnapshot.sequence)
+        {
+            sPreviousSceneSnapshot = sSceneSnapshot;
+            sSceneSnapshot = sIncomingSceneSnapshot;
+            sHasPreviousSceneSnapshot = true;
+        }
     }
     if (sRenderMode == DIORAMA_RENDER_AUTO
      && sTerrainAvailable
+     && sObjectsAvailable
      && sHasSceneSnapshot
      && DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot))
     {
         EnsureAtlas(&sSceneSnapshot);
-        drawTerrain = DioramaGLTerrain_Sync(&sSceneSnapshot);
+        drawTerrain = DioramaGLTerrain_Sync(&sSceneSnapshot)
+                   && DioramaGLObjects_Sync(&sSceneSnapshot);
     }
     else if (sRenderMode == DIORAMA_RENDER_DEBUG
           && sHasSceneSnapshot
@@ -465,13 +520,15 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale)
     gameY = (outputHeight - gameHeight) / 2;
     if (drawTerrain)
     {
+        GetCameraPosition(frameAlpha, &cameraX, &cameraZ);
         glEnable(GL_SCISSOR_TEST);
         glScissor(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
         glClearColor(0.035f, 0.055f, 0.07f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glViewport(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
-        DioramaGLTerrain_Draw(&sSceneSnapshot, sAtlasTexture.id, sTerrainDebug);
+        DioramaGLTerrain_Draw(sAtlasTexture.id, cameraX, cameraZ, sTerrainDebug);
+        DioramaGLObjects_Draw(frameAlpha, cameraX, cameraZ);
         glDisable(GL_SCISSOR_TEST);
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
@@ -516,6 +573,7 @@ void DioramaGL_ToggleTerrainDebug(void)
 
 void DioramaGL_Shutdown(void)
 {
+    DioramaGLObjects_Shutdown();
     DioramaGLTerrain_Shutdown();
     for (int i = 0; i < sBackgroundCount; i++)
         if (sBackgroundTextures[i].id != 0)

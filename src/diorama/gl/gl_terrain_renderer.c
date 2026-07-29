@@ -389,13 +389,9 @@ static uint32_t AppendBoundsVertices(uint32_t count, const struct DioramaTerrain
     return count;
 }
 
-void DioramaGLTerrain_Draw(const struct DioramaSceneSnapshot *snapshot,
-                           GLuint atlasTexture, bool debug)
+void DioramaGLTerrain_Draw(GLuint atlasTexture, float cameraX, float cameraZ,
+                           bool debug)
 {
-    float cameraX = snapshot->cameraMapX
-                  + (snapshot->cameraSubpixelX + snapshot->cameraPanX) / 16.0f;
-    float cameraZ = -(snapshot->cameraMapY
-                    + (snapshot->cameraSubpixelY + snapshot->cameraPanY) / 16.0f);
     uint32_t debugVertexCount = 0;
     int i;
 

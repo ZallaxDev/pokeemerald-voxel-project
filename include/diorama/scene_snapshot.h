@@ -13,7 +13,19 @@
 #define DIORAMA_TILE_COUNT 1024
 #define DIORAMA_TILE_BYTES 32
 #define DIORAMA_TILE_GRAPHICS_SIZE (DIORAMA_TILE_COUNT * DIORAMA_TILE_BYTES)
+#define DIORAMA_OBJ_FRAME_MAX_BYTES 2048
 #define DIORAMA_METATILE_ENTRY_COUNT 8
+
+enum DioramaObjectFlags
+{
+    DIORAMA_OBJECT_PLAYER     = 1 << 0,
+    DIORAMA_OBJECT_INVISIBLE  = 1 << 1,
+    DIORAMA_OBJECT_OFFSCREEN  = 1 << 2,
+    DIORAMA_OBJECT_REFLECTION = 1 << 3,
+    DIORAMA_OBJECT_SHADOW     = 1 << 4,
+    DIORAMA_OBJECT_SUBSPRITES = 1 << 5,
+    DIORAMA_OBJECT_FRAME_INVALID = 1 << 6,
+};
 
 enum DioramaRenderMode
 {
@@ -84,6 +96,18 @@ struct DioramaObjectSnapshot
     int16_t screenY;
     int16_t spriteX2;
     int16_t spriteY2;
+    int16_t mapPixelOffsetX;
+    int16_t mapPixelOffsetY;
+    int8_t centerToCornerX;
+    int8_t centerToCornerY;
+    uint8_t width;
+    uint8_t height;
+    uint8_t shadowSize;
+    uint8_t affineMode;
+    uint8_t objMode;
+    uint8_t bpp;
+    uint16_t frameSize;
+    uint64_t frameHash;
     uint16_t oamAttr0;
     uint16_t oamAttr1;
     uint16_t oamAttr2;
@@ -95,8 +119,10 @@ struct DioramaObjectSnapshot
     uint8_t vFlip;
     uint8_t priority;
     uint8_t subpriority;
+    uint8_t oamOrder;
     uint8_t animNum;
     uint8_t animCmdIndex;
+    uint8_t frameGraphics[DIORAMA_OBJ_FRAME_MAX_BYTES];
 };
 
 struct DioramaSceneSnapshot
@@ -104,6 +130,7 @@ struct DioramaSceneSnapshot
     uint64_t sequence;
     uint32_t mapGeneration;
     uint32_t paletteGeneration;
+    uint32_t objPaletteGeneration;
     uint32_t tilesetAnimationGeneration;
     uint8_t valid;
     uint8_t tilesetResourcesValid;
