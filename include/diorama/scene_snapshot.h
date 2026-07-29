@@ -72,6 +72,7 @@ struct DioramaObjectSnapshot
     uint8_t graphicsId;
     uint8_t spriteId;
     uint8_t elevation;
+    uint8_t previousElevation;
     uint8_t facingDirection;
     uint8_t movementDirection;
     uint8_t flags;

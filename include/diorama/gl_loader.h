@@ -23,8 +23,12 @@ extern PFNGLGETPROGRAMINFOLOGPROC dglGetProgramInfoLog;
 extern PFNGLGETPROGRAMIVPROC dglGetProgramiv;
 extern PFNGLGETSHADERINFOLOGPROC dglGetShaderInfoLog;
 extern PFNGLGETSHADERIVPROC dglGetShaderiv;
+extern PFNGLGETUNIFORMLOCATIONPROC dglGetUniformLocation;
 extern PFNGLLINKPROGRAMPROC dglLinkProgram;
 extern PFNGLSHADERSOURCEPROC dglShaderSource;
+extern PFNGLUNIFORM1IPROC dglUniform1i;
+extern PFNGLUNIFORM2FPROC dglUniform2f;
+extern PFNGLUNIFORM4FPROC dglUniform4f;
 extern PFNGLUSEPROGRAMPROC dglUseProgram;
 extern PFNGLVERTEXATTRIBPOINTERPROC dglVertexAttribPointer;
 

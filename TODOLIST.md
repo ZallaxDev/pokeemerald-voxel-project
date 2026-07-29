@@ -161,19 +161,64 @@ obsoletos, ausencia de bleeding y rendimiento estable a 60 FPS.
 
 ## Fase 4: elevacion y mallas por chunks
 
-- [ ] Normalizar elevaciones sin interpretar literalmente valores especiales.
-- [ ] Generar caras superiores y laterales a partir de vecinos.
-- [ ] Dividir en chunks 8x8 y cerrar uniones sin grietas.
-- [ ] Implementar culling y reconstruccion selectiva de chunks sucios.
-- [ ] Añadir wireframe, limites de chunk y metricas.
-- [ ] Implementar ledges y acantilados basicos sin alterar colision.
-- [ ] Añadir tests de coordenadas, caras, bounds y hashes de geometria.
+- [x] Normalizar elevaciones sin interpretar literalmente valores especiales.
+- [x] Generar caras superiores y laterales a partir de vecinos.
+- [x] Dividir en chunks 8x8 y cerrar uniones sin grietas.
+- [x] Implementar culling y reconstruccion selectiva de chunks sucios.
+- [x] Añadir wireframe, limites de chunk y metricas.
+- [x] Implementar ledges y acantilados basicos sin alterar colision.
+- [x] Añadir tests de coordenadas, caras, bounds y hashes de geometria.
 
 Prueba manual realizable por el usuario: recorrer desniveles y ledges, inspeccionar
 uniones en wireframe y modificar un metatile mediante un evento; verificar que
 solo se reconstruyen los chunks necesarios y que la colision original no cambia.
 
-Resultado del usuario: **PENDIENTE**
+Resultado del usuario: **APROBADO** (2026-07-29)
+
+Implementacion completada el 2026-07-29:
+
+- Las elevaciones raw se conservan como planos de gameplay y no elevan terreno
+  ordinario. Solo behaviors visuales explicitos generan altura.
+- Los ledges se elevan solo en sus propias celdas, con el perfil bajo usado por
+  la referencia de Pokemon Rojo; no propagan terrazas al terreno vecino.
+- El agua surfable se dibuja 2/16 de unidad bajo el suelo para recuperar el
+  labio de costa; los puentes conservan alturas explicitas por tipo.
+- El terreno se divide en chunks mundiales 8x8 con halo, chunks parciales en el
+  borde del snapshot y ownership determinista de caras laterales.
+- Cada chunk conserva su VBO y solo se reconstruye cuando cambia la firma de su
+  contenido o halo; paletas, animaciones y camara no invalidan geometria.
+- El renderer aplica depth test, alpha cutout, frustum culling y fallback 2D si
+  el subsistema de terreno no esta disponible.
+- `F3` alterna wireframe, limites amarillos de chunk y metricas `CH`, `VIS`,
+  `CUL`, `REB`, `TRI` y `DRA`.
+- El snapshot conserva elevacion actual y previa de objetos para anclar el
+  jugador al plano efectivo en la siguiente fase.
+- `make -f Makefile_pc test-diorama` cubre coordenadas negativas, normalizacion,
+  campos de ledges, planos de gameplay, caras, chunks parciales, costuras,
+  bounds, firmas, hashes y frustum.
+
+Primera validacion visual rechazada el 2026-07-29: Ruta 101 seguia plana y dos
+celdas de mobiliario junto a la cama aparecian elevadas. Las capturas confirmaron
+que elevation `4` del dormitorio era un plano de colision/prioridad, mientras que
+los ledges de Ruta 101 usan behavior direccional con elevation `0`. Se sustituyo
+la tabla de alturas raw por clasificacion visual basada en behaviors.
+
+Segunda validacion visual rechazada el 2026-07-29: propagar la altura de los
+ledges elevaba regiones completas y partia arboles vecinos. La comparacion con
+la referencia de Pokemon Rojo confirmo que cada ledge debe ser un volumen bajo
+aislado y que el agua debe conservar una pequena depresion. Se eliminaron las
+terrazas propagadas y se restauro el agua a -2/16 de unidad.
+
+La tercera validacion manual fue aprobada: los ledges elevan solo sus propios
+tiles, el terreno y los arboles vecinos permanecen enteros, el agua recupera su
+depresion y los interiores no convierten planos de colision en altura visual.
+
+Validacion solicitada: recorrer desniveles y ledges con `F3` activado, cruzar
+limites amarillos caminando y confirmar que no hay grietas ni bloques que
+aparezcan de golpe. En las metricas, `REB` debe caer a `0` estando quieto y al
+caminar reconstruir solo los chunks cuyo contenido o halo entra en el snapshot.
+Probar tambien un evento que cambie un metatile, si esta disponible en la zona,
+y confirmar que movimiento y colision siguen identicos al modo clasico.
 
 ## Fase 5: jugador y NPC como billboards
 
@@ -188,7 +233,7 @@ Prueba manual realizable por el usuario: caminar y correr en las cuatro direccio
 hablar con NPC, cruzar un warp y usar speedup; validar frames, flips, anclaje,
 orden de profundidad y ausencia de vibracion.
 
-Resultado del usuario: **BLOQUEADO POR FASE 4**
+Resultado del usuario: **PENDIENTE**
 
 ## Fase 6: reglas y vertical slice Villa Raiz + Ruta 101
 

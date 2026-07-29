@@ -92,9 +92,9 @@ jobs:
       - name: Verify 32-bit executable
         run: file pokeemerald | tee /dev/stderr | grep -q "ELF 32-bit"
 
-      - name: Test snapshot publication
+      - name: Test diorama CPU modules
         if: matrix.diorama == 1
-        run: make -f Makefile_pc test-diorama-snapshot test-diorama-metatile
+        run: make -f Makefile_pc test-diorama
 
       - name: Smoke test desktop presentation
-        run: timeout 5s xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX" ./pokeemerald || test $? -eq 124
+        run: LIBGL_ALWAYS_SOFTWARE=1 timeout 5s xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX" ./pokeemerald || test $? -eq 124

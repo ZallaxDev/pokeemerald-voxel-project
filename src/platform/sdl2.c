@@ -1138,6 +1138,12 @@ void ProcessEvents(void)
                     SDL_PauseAudioDevice(sdlAudioDevice, 1);
                 }
                 break;
+#ifdef ENABLE_DIORAMA
+            case SDLK_F3:
+                if (event.key.repeat == 0)
+                    DioramaGL_ToggleTerrainDebug();
+                break;
+#endif
             // Screen-reader hotkeys. These aren't GBA buttons, so they're
             // latched here and drained by whichever screen is listening.
             case SDLK_l:

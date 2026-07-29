@@ -11,6 +11,7 @@ void DioramaGL_LoadArtwork(void);
 void DioramaGL_UploadFrame(const u32 *argb8888);
 void DioramaGL_Present(u8 background, bool border, bool integerScale);
 void DioramaGL_SetVSync(bool enabled);
+void DioramaGL_ToggleTerrainDebug(void);
 void DioramaGL_Shutdown(void);
 
 #endif

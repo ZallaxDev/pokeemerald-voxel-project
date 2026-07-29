@@ -8,6 +8,7 @@
 
 #include "diorama/gl_compositor.h"
 #include "diorama/gl_loader.h"
+#include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/scene_snapshot.h"
 #include "gba/defines.h"
@@ -36,15 +37,16 @@ static struct DioramaSceneSnapshot sSceneSnapshot;
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sAtlasPixels[DIORAMA_ATLAS_PIXEL_COUNT];
 static u8 sPresentMetatiles[DIORAMA_ATLAS_PRESENT_BYTES];
-static float sMapVertices[DIORAMA_MAX_VISIBLE_CELLS * 6 * 5];
-static uint64_t sDebugSequence;
 static u32 sAtlasMapGeneration;
 static u32 sAtlasPaletteGeneration;
 static u32 sAtlasAnimationGeneration;
 static bool sHasSceneSnapshot;
+static bool sTerrainAvailable;
+static bool sTerrainDebug;
 static enum DioramaRenderMode sRenderMode = DIORAMA_RENDER_AUTO;
 
 #define RGB(r, g, b) (0xFF000000u | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
+#define RGBA(r, g, b, a) (((u32)(a) << 24) | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
 
 static void FillRect(int x, int y, int width, int height, u32 color)
 {
@@ -82,9 +84,11 @@ static u16 GetGlyph(char character)
     case 'E': return GLYPH(7, 4, 6, 4, 7);
     case 'F': return GLYPH(7, 4, 6, 4, 4);
     case 'G': return GLYPH(3, 4, 5, 5, 3);
+    case 'H': return GLYPH(5, 5, 7, 5, 5);
     case 'I': return GLYPH(7, 2, 2, 2, 7);
     case 'J': return GLYPH(1, 1, 1, 5, 2);
     case 'K': return GLYPH(5, 5, 6, 5, 5);
+    case 'L': return GLYPH(4, 4, 4, 4, 7);
     case 'M': return GLYPH(5, 7, 7, 5, 5);
     case 'N': return GLYPH(5, 7, 7, 7, 5);
     case 'O': return GLYPH(2, 5, 5, 5, 2);
@@ -94,6 +98,7 @@ static u16 GetGlyph(char character)
     case 'S': return GLYPH(3, 4, 2, 1, 6);
     case 'T': return GLYPH(7, 2, 2, 2, 2);
     case 'U': return GLYPH(5, 5, 5, 5, 7);
+    case 'V': return GLYPH(5, 5, 5, 5, 2);
     case '-': return GLYPH(0, 0, 7, 0, 0);
     case ':': return GLYPH(0, 2, 0, 2, 0);
     case ',': return GLYPH(0, 0, 0, 2, 4);
@@ -127,48 +132,17 @@ static void DrawValue(int x, int y, const char *label, int value)
 
 static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
 {
-    int i;
+    const struct DioramaTerrainMetrics *metrics = DioramaGLTerrain_GetMetrics();
 
-    FillRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, RGB(10, 14, 18));
-    for (i = 0; i < snapshot->visibleCellCount; i++)
-    {
-        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
-        int column = i % DIORAMA_GRID_WIDTH;
-        int row = i / DIORAMA_GRID_WIDTH;
-        int x0 = 2 + column * 156 / DIORAMA_GRID_WIDTH;
-        int y0 = 2 + row * 156 / DIORAMA_GRID_HEIGHT;
-        int x1 = 2 + (column + 1) * 156 / DIORAMA_GRID_WIDTH;
-        int y1 = 2 + (row + 1) * 156 / DIORAMA_GRID_HEIGHT;
-        u8 red = 35 + (cell->behavior * 29 + cell->collision * 70) % 170;
-        u8 green = 35 + (cell->metatileId * 13) % 170;
-        u8 blue = 35 + (cell->elevation * 17 + cell->layerType * 31) % 170;
-
-        FillRect(x0, y0, x1 - x0 - 1, y1 - y0 - 1, RGB(red, green, blue));
-    }
-
-    FillRect(2 + 16 * 156 / 33, 2 + 16 * 156 / 33, 5, 1, RGB(255, 240, 80));
-    FillRect(2 + 16 * 156 / 33, 2 + 16 * 156 / 33, 1, 5, RGB(255, 240, 80));
-    for (i = 0; i < snapshot->objectCount; i++)
-    {
-        const struct DioramaObjectSnapshot *object = &snapshot->objects[i];
-        int column = object->currentMapX - snapshot->gridOriginX;
-        int row = object->currentMapY - snapshot->gridOriginY;
-
-        if (column >= 0 && column < DIORAMA_GRID_WIDTH && row >= 0 && row < DIORAMA_GRID_HEIGHT)
-            FillRect(2 + column * 156 / 33, 2 + row * 156 / 33, 3, 3,
-                     object->flags & 1 ? RGB(255, 255, 255) : RGB(255, 70, 210));
-    }
-
-    DrawText(164, 4, "AUTO", RGB(100, 230, 170));
-    DrawValue(164, 13, "SEQ:", snapshot->sequence % 1000000);
-    DrawValue(164, 22, "GEN:", snapshot->mapGeneration);
-    DrawValue(164, 31, "MAP:", snapshot->mapGroup);
-    DrawValue(164, 40, "NUM:", snapshot->mapNum);
-    DrawValue(164, 49, "CAM:", snapshot->cameraMapX);
-    DrawValue(164, 58, "   :", snapshot->cameraMapY);
-    DrawValue(164, 67, "OBJ:", snapshot->objectCount);
-    DrawValue(164, 76, "KIND:", snapshot->sceneKind);
-    DrawValue(164, 85, "PAL:", snapshot->paletteGeneration);
+    memset(sDebugPixels, 0, sizeof(sDebugPixels));
+    FillRect(2, 2, 74, 66, RGBA(10, 14, 18, 220));
+    DrawValue(5, 5, "GEN:", snapshot->mapGeneration);
+    DrawValue(5, 14, "CH:", metrics->activeChunks);
+    DrawValue(5, 23, "VIS:", metrics->visibleChunks);
+    DrawValue(5, 32, "CUL:", metrics->culledChunks);
+    DrawValue(5, 41, "REB:", metrics->rebuiltChunks);
+    DrawValue(5, 50, "TRI:", metrics->triangles);
+    DrawValue(5, 59, "DRA:", metrics->drawCalls);
 
     glBindTexture(GL_TEXTURE_2D, sDebugTexture.id);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -348,108 +322,6 @@ static void EnsureAtlas(const struct DioramaSceneSnapshot *snapshot)
     }
 }
 
-static void ProjectMapPoint(float worldX, float worldZ,
-                            int outputWidth, int outputHeight,
-                            int gameX, int gameY, int gameWidth, int gameHeight,
-                            float *screenX, float *screenY, float *screenW)
-{
-    const float cameraHeight = 16.0f;
-    const float cameraDistance = 18.0f;
-    const float pitchSin = 0.65f;
-    const float pitchCos = 0.759934f;
-    const float focalLength = 130.0f;
-    float depth = cameraHeight * pitchSin + (worldZ + cameraDistance) * pitchCos;
-    float vertical = -cameraHeight * pitchCos + (worldZ + cameraDistance) * pitchSin;
-    float virtualX = DISPLAY_WIDTH * 0.5f + worldX * focalLength / depth;
-    float virtualY = DISPLAY_HEIGHT * 0.52f - vertical * focalLength / depth;
-    float outputX = gameX + virtualX * gameWidth / DISPLAY_WIDTH;
-    float outputY = gameY + virtualY * gameHeight / DISPLAY_HEIGHT;
-
-    *screenX = outputX * 2.0f / outputWidth - 1.0f;
-    *screenY = 1.0f - outputY * 2.0f / outputHeight;
-    *screenW = depth;
-}
-
-static int AppendMapVertex(float *vertices, int vertexCount,
-                           float x, float y, float w, float u, float v)
-{
-    vertices[vertexCount * 5] = x;
-    vertices[vertexCount * 5 + 1] = y;
-    vertices[vertexCount * 5 + 2] = w;
-    vertices[vertexCount * 5 + 3] = u;
-    vertices[vertexCount * 5 + 4] = v;
-    return vertexCount + 1;
-}
-
-static void DrawFlatMap(const struct DioramaSceneSnapshot *snapshot,
-                        int outputWidth, int outputHeight,
-                        int gameX, int gameY, int gameWidth, int gameHeight)
-{
-    int vertexCount = 0;
-    unsigned i;
-
-    for (i = 0; i < snapshot->visibleCellCount; i++)
-    {
-        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
-        struct DioramaAtlasUv uv;
-        float x0;
-        float y0;
-        float x1;
-        float y1;
-        float w1;
-        float x2;
-        float y2;
-        float w2;
-        float x3;
-        float y3;
-        float w3;
-        float w0;
-        float worldLeft;
-        float worldRight;
-        float worldTop;
-        float worldBottom;
-
-        if (cell->metatileId >= DIORAMA_TILE_COUNT)
-            continue;
-        worldLeft = cell->mapX - snapshot->cameraMapX
-                  - (snapshot->cameraSubpixelX + snapshot->cameraPanX) / 16.0f - 0.5f;
-        worldRight = worldLeft + 1.0f;
-        worldTop = snapshot->cameraMapY
-                 + (snapshot->cameraSubpixelY + snapshot->cameraPanY) / 16.0f
-                 - cell->mapY + 0.5f;
-        worldBottom = worldTop - 1.0f;
-        ProjectMapPoint(worldLeft, worldTop, outputWidth, outputHeight,
-                        gameX, gameY, gameWidth, gameHeight, &x0, &y0, &w0);
-        ProjectMapPoint(worldRight, worldTop, outputWidth, outputHeight,
-                        gameX, gameY, gameWidth, gameHeight, &x1, &y1, &w1);
-        ProjectMapPoint(worldRight, worldBottom, outputWidth, outputHeight,
-                        gameX, gameY, gameWidth, gameHeight, &x2, &y2, &w2);
-        ProjectMapPoint(worldLeft, worldBottom, outputWidth, outputHeight,
-                        gameX, gameY, gameWidth, gameHeight, &x3, &y3, &w3);
-        uv = DioramaAtlas_GetUv(cell->metatileId);
-
-        vertexCount = AppendMapVertex(sMapVertices, vertexCount, x0, y0, w0, uv.u0, uv.v0);
-        vertexCount = AppendMapVertex(sMapVertices, vertexCount, x1, y1, w1, uv.u1, uv.v0);
-        vertexCount = AppendMapVertex(sMapVertices, vertexCount, x2, y2, w2, uv.u1, uv.v1);
-        vertexCount = AppendMapVertex(sMapVertices, vertexCount, x0, y0, w0, uv.u0, uv.v0);
-        vertexCount = AppendMapVertex(sMapVertices, vertexCount, x2, y2, w2, uv.u1, uv.v1);
-        vertexCount = AppendMapVertex(sMapVertices, vertexCount, x3, y3, w3, uv.u0, uv.v1);
-    }
-
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
-    glClearColor(0.035f, 0.055f, 0.07f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glBindTexture(GL_TEXTURE_2D, sAtlasTexture.id);
-    dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
-    dglBufferData(GL_ARRAY_BUFFER, vertexCount * 5 * sizeof(float), sMapVertices, GL_STREAM_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, vertexCount);
-    glDisable(GL_SCISSOR_TEST);
-}
-
 bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
 {
     sWindow = window;
@@ -462,6 +334,9 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     }
     if (!DioramaGL_LoadFunctions() || !CreateProgram())
         return false;
+    sTerrainAvailable = DioramaGLTerrain_Init();
+    if (!sTerrainAvailable)
+        SDL_Log("Diorama terrain renderer unavailable; retaining the 2D OpenGL fallback");
 
     dglGenVertexArrays(1, &sVertexArray);
     dglBindVertexArray(sVertexArray);
@@ -496,8 +371,8 @@ bool DioramaGL_Init(SDL_Window *window, u8 backgroundCount)
     sAtlasMapGeneration = 0;
     sAtlasPaletteGeneration = 0;
     sAtlasAnimationGeneration = 0;
-    sDebugSequence = 0;
     sHasSceneSnapshot = false;
+    sTerrainDebug = false;
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     return true;
 }
@@ -538,23 +413,19 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale)
     int gameX;
     int gameY;
     const struct DioramaTexture *gameTexture = &sFrameTexture;
-    bool drawFlatMap = false;
+    bool drawTerrain = false;
 
     if (DioramaSnapshotExchange_CopyLatest(&sSceneSnapshot))
     {
         sHasSceneSnapshot = true;
-        if (sSceneSnapshot.sequence != sDebugSequence && DioramaSnapshot_CanRenderGrid(&sSceneSnapshot))
-        {
-            BuildDebugImage(&sSceneSnapshot);
-            sDebugSequence = sSceneSnapshot.sequence;
-        }
     }
     if (sRenderMode == DIORAMA_RENDER_AUTO
+     && sTerrainAvailable
      && sHasSceneSnapshot
      && DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot))
     {
         EnsureAtlas(&sSceneSnapshot);
-        drawFlatMap = true;
+        drawTerrain = DioramaGLTerrain_Sync(&sSceneSnapshot);
     }
     else if (sRenderMode == DIORAMA_RENDER_DEBUG
           && sHasSceneSnapshot
@@ -592,9 +463,27 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale)
     }
     gameX = (outputWidth - gameWidth) / 2;
     gameY = (outputHeight - gameHeight) / 2;
-    if (drawFlatMap)
-        DrawFlatMap(&sSceneSnapshot, outputWidth, outputHeight,
-                    gameX, gameY, gameWidth, gameHeight);
+    if (drawTerrain)
+    {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
+        glClearColor(0.035f, 0.055f, 0.07f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glViewport(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
+        DioramaGLTerrain_Draw(&sSceneSnapshot, sAtlasTexture.id, sTerrainDebug);
+        glDisable(GL_SCISSOR_TEST);
+        glViewport(0, 0, outputWidth, outputHeight);
+        dglUseProgram(sProgram);
+        dglBindVertexArray(sVertexArray);
+        if (sTerrainDebug)
+        {
+            BuildDebugImage(&sSceneSnapshot);
+            DrawTexture(&sDebugTexture, outputWidth, outputHeight,
+                        gameX, gameY, gameWidth, gameHeight,
+                        0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true);
+        }
+    }
     else
         DrawTexture(gameTexture, outputWidth, outputHeight,
                     gameX, gameY, gameWidth, gameHeight,
@@ -620,8 +509,14 @@ void DioramaGL_SetVSync(bool enabled)
         SDL_Log("OpenGL VSync could not be changed: %s", SDL_GetError());
 }
 
+void DioramaGL_ToggleTerrainDebug(void)
+{
+    sTerrainDebug = !sTerrainDebug;
+}
+
 void DioramaGL_Shutdown(void)
 {
+    DioramaGLTerrain_Shutdown();
     for (int i = 0; i < sBackgroundCount; i++)
         if (sBackgroundTextures[i].id != 0)
             glDeleteTextures(1, &sBackgroundTextures[i].id);

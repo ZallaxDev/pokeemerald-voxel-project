@@ -160,6 +160,7 @@ static void CopyObjects(struct DioramaSceneSnapshot *snapshot)
         copy->graphicsId = object->graphicsId;
         copy->spriteId = object->spriteId;
         copy->elevation = object->currentElevation;
+        copy->previousElevation = object->previousElevation;
         copy->facingDirection = object->facingDirection;
         copy->movementDirection = object->movementDirection;
         copy->flags = (object->isPlayer ? OBJECT_FLAG_PLAYER : 0)
