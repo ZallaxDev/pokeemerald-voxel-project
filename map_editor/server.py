@@ -96,6 +96,11 @@ def load_templates() -> dict:
     templates = {}
     for path in sorted((REPO_ROOT / "data/diorama/buildings").glob("*.json")):
         templates.update(load_json(path).get("templates", {}))
+    compiled = compile_data(REPO_ROOT)
+    profiles = compiled["roof_profiles"]
+    for name, row in zip(sorted(templates), compiled["templates"]):
+        offset, count = row[12], row[13]
+        templates[name]["compiledRoofProfile"] = profiles[offset:offset + count]
     return templates
 
 

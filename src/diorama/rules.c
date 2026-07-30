@@ -47,6 +47,55 @@ static const struct DioramaGeneratedBuildingTemplate *FindBuildingTemplate(uint1
     return NULL;
 }
 
+const struct DioramaGeneratedBuildingTemplate *DioramaRules_GetBuildingTemplate(uint16_t id)
+{
+    return FindBuildingTemplate(id);
+}
+
+static void AttachBuildingMetadata(uint8_t mapGroup, uint8_t mapNum,
+                                   const struct DioramaCellSnapshot *cell,
+                                   int mapX, int mapY,
+                                   struct DioramaResolvedCell *resolved)
+{
+    size_t i;
+
+    if (resolved->shape != DIORAMA_SHAPE_ROOF
+     && resolved->shape != DIORAMA_SHAPE_BUILDING_PART)
+        return;
+    for (i = 0; i < gDioramaBuildingPlacementCount; i++)
+    {
+        const struct DioramaGeneratedBuildingPlacement *placement = &gDioramaBuildingPlacements[i];
+        const struct DioramaGeneratedBuildingTemplate *building;
+        int relativeX;
+        int relativeY;
+
+        if (placement->mapGroup != mapGroup || placement->mapNum != mapNum)
+            continue;
+        building = FindBuildingTemplate(placement->templateId);
+        if (building == NULL)
+            continue;
+        relativeX = mapX - placement->x;
+        relativeY = mapY - placement->y;
+        if (relativeX < 0 || relativeY < 0
+         || relativeX >= building->width || relativeY >= building->height)
+            continue;
+        resolved->structureId = i + 1;
+        resolved->structureTemplateId = building->id;
+        resolved->structureX = cell->mapX + placement->x - mapX;
+        resolved->structureY = cell->mapY + placement->y - mapY;
+        resolved->structureWidth = building->width;
+        resolved->structureHeight = building->height;
+        resolved->structureRoofRows = building->roofRows;
+        resolved->structureLocalX = relativeX;
+        resolved->structureLocalY = relativeY;
+        resolved->structureSouthFacadeRows = building->southFacadeRows;
+        resolved->structureBodyHeight = building->bodyHeight;
+        resolved->structureRoofHeight = building->roofHeight;
+        resolved->structureSouthFacadeUnitHeight = building->southFacadeUnitHeight;
+        return;
+    }
+}
+
 static bool ResolveMapOverride(uint8_t mapGroup, uint8_t mapNum,
                                int mapX, int mapY,
                                struct DioramaResolvedCell *resolved)
@@ -131,6 +180,7 @@ static bool ResolveBuilding(uint8_t mapGroup, uint8_t mapNum,
         resolved->source = DIORAMA_RULE_SOURCE_BUILDING;
         resolved->baseMetatileId = DIORAMA_MATERIAL_METATILE_SELF;
         resolved->structureId = i + 1;
+        resolved->structureTemplateId = building->id;
         resolved->structureX = cell->mapX + placement->x - mapX;
         resolved->structureY = cell->mapY + placement->y - mapY;
         resolved->structureWidth = building->width;
@@ -138,8 +188,10 @@ static bool ResolveBuilding(uint8_t mapGroup, uint8_t mapNum,
         resolved->structureRoofRows = building->roofRows;
         resolved->structureLocalX = relativeX;
         resolved->structureLocalY = relativeY;
+        resolved->structureSouthFacadeRows = building->southFacadeRows;
         resolved->structureBodyHeight = building->bodyHeight;
         resolved->structureRoofHeight = building->roofHeight;
+        resolved->structureSouthFacadeUnitHeight = building->southFacadeUnitHeight;
         resolved->groundHeight = 0.0f;
         resolved->profile = building->profile;
         resolved->planeAxis = DIORAMA_PLANE_AXIS_X;
@@ -260,9 +312,16 @@ bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
     ApplyDefinition(&gDioramaDefaultRule, DIORAMA_RULE_SOURCE_FALLBACK, resolved);
 
     if (sourceValid && ResolveMapOverride(mapGroup, mapNum, mapX, mapY, resolved))
+    {
+        AttachBuildingMetadata(mapGroup, mapNum, cell, mapX, mapY, resolved);
         return true;
+    }
     if (ResolveTileset(layoutId, cell, resolved))
+    {
+        if (sourceValid)
+            AttachBuildingMetadata(mapGroup, mapNum, cell, mapX, mapY, resolved);
         return true;
+    }
     if (sourceValid && ResolveBuilding(mapGroup, mapNum, cell, mapX, mapY, resolved))
         return true;
     if (ResolveBehavior(cell->behavior, resolved))

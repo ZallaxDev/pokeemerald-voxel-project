@@ -82,6 +82,12 @@ static void TestPriority(void)
     assert(resolved.planeAxis == DIORAMA_PLANE_AXIS_X);
     assert(resolved.featureHeight == 0.85f);
 
+    cell = MakeCell(2, 4, 0x208, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.source == DIORAMA_RULE_SOURCE_MAP);
+    assert(resolved.structureId != 0);
+    assert(resolved.structureTemplateId == 2);
+
     cell = MakeCell(10, 10, 0x1CE, MB_TALL_GRASS);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
     assert(resolved.source == DIORAMA_RULE_SOURCE_TILESET);
@@ -90,7 +96,7 @@ static void TestPriority(void)
     assert(resolved.groundHeight == 0.0f);
     assert(resolved.materials[DIORAMA_MATERIAL_FACE_TOP].layer == DIORAMA_MATERIAL_BASE);
 
-    cell = MakeCell(5, 8, 0x248, MB_NORMAL);
+    cell = MakeCell(16, 8, 0x248, MB_NORMAL);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
     assert(resolved.source == DIORAMA_RULE_SOURCE_BUILDING);
     assert(resolved.shape == DIORAMA_SHAPE_BUILDING_PART);
@@ -122,12 +128,12 @@ static void TestBuildingProfile(void)
     struct DioramaResolvedCell edge;
     struct DioramaResolvedCell center;
     struct DioramaResolvedCell body;
-    struct DioramaCellSnapshot cell = MakeCell(2, 4, 1, MB_NORMAL);
+    struct DioramaCellSnapshot cell = MakeCell(13, 4, 1, MB_NORMAL);
 
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &edge));
-    cell = MakeCell(4, 4, 1, MB_NORMAL);
+    cell = MakeCell(15, 4, 1, MB_NORMAL);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &center));
-    cell = MakeCell(4, 7, 1, MB_NORMAL);
+    cell = MakeCell(15, 7, 1, MB_NORMAL);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &body));
     assert(edge.shape == DIORAMA_SHAPE_ROOF);
     assert(center.shape == DIORAMA_SHAPE_ROOF);
@@ -138,6 +144,9 @@ static void TestBuildingProfile(void)
     assert(edge.structureId == center.structureId);
     assert(body.structureId == center.structureId);
     assert(center.structureWidth == 5 && center.structureHeight == 5);
+    assert(center.structureTemplateId == 2);
+    assert(center.structureSouthFacadeRows == 2);
+    assert(center.structureSouthFacadeUnitHeight == 1.0f);
     assert(center.structureLocalX == 2 && center.structureLocalY == 0);
     assert(body.materials[DIORAMA_MATERIAL_FACE_EAST].metatileId == 0x212);
 }
@@ -149,7 +158,7 @@ static void TestGridAndConnectedCoordinates(void)
     sSnapshot.visibleCellCount = 2;
     sSnapshot.cells[0] = MakeCell(7, 8, 3, MB_NORMAL);
     sSnapshot.cells[1] = MakeCell(5, -1, 1, MB_NORMAL);
-    sSnapshot.cells[1].sourceMapX = 5;
+    sSnapshot.cells[1].sourceMapX = 16;
     sSnapshot.cells[1].sourceMapY = 8;
     sSnapshot.cells[1].sourceMapGroup = 0;
     sSnapshot.cells[1].sourceMapNum = 9;
@@ -256,8 +265,8 @@ static void TestMapGoldens(void)
     uint64_t littleroot = ResolveMapGolden("data/layouts/LittlerootTown/map.bin", 9, 10);
     uint64_t route101 = ResolveMapGolden("data/layouts/Route101/map.bin", 16, 17);
 
-    assert(littleroot == UINT64_C(0xED0CDB60065A01D2));
-    assert(route101 == UINT64_C(0x51D25147420FAA51));
+    assert(littleroot == UINT64_C(0x74B4761964A0CBD0));
+    assert(route101 == UINT64_C(0xE57FFED9A2F4A6D1));
 }
 
 int main(void)

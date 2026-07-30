@@ -222,6 +222,30 @@ static struct GLTerrainChunk *AllocateChunk(void)
     return oldest;
 }
 
+static const struct DioramaCellSnapshot *FindSnapshotCell(
+    const struct DioramaSceneSnapshot *snapshot, int mapX, int mapY)
+{
+    uint16_t i;
+
+    for (i = 0; i < snapshot->visibleCellCount; i++)
+        if (snapshot->cells[i].mapX == mapX && snapshot->cells[i].mapY == mapY)
+            return &snapshot->cells[i];
+    return NULL;
+}
+
+static void SetTerrainMaterial(struct DioramaTerrainMaterial *material,
+                               uint16_t metatileId, uint8_t layer)
+{
+    struct DioramaAtlasUv uv = DioramaAtlas_GetUv(metatileId);
+
+    material->metatileId = metatileId;
+    material->layer = layer;
+    material->u0 = uv.u0;
+    material->v0 = uv.v0;
+    material->u1 = uv.u1;
+    material->v1 = uv.v1;
+}
+
 static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                         const struct DioramaResolvedCell *resolvedCells,
                        int chunkX, int chunkY,
@@ -275,6 +299,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->profile = resolvedCells[gridIndex].profile;
             cell->planeAxis = resolvedCells[gridIndex].planeAxis;
             cell->structureId = resolvedCells[gridIndex].structureId;
+            cell->structureTemplateId = resolvedCells[gridIndex].structureTemplateId;
             cell->structureX = resolvedCells[gridIndex].structureX;
             cell->structureY = resolvedCells[gridIndex].structureY;
             cell->structureWidth = resolvedCells[gridIndex].structureWidth;
@@ -287,20 +312,39 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->featureHeight = resolvedCells[gridIndex].featureHeight;
             cell->structureBodyHeight = resolvedCells[gridIndex].structureBodyHeight;
             cell->structureRoofHeight = resolvedCells[gridIndex].structureRoofHeight;
+            cell->southFacadeUnitHeight = resolvedCells[gridIndex].structureSouthFacadeUnitHeight;
             for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
             {
                 uint16_t materialId = resolvedCells[gridIndex].materials[face].metatileId;
-                struct DioramaAtlasUv uv;
-
                 if (materialId == DIORAMA_MATERIAL_METATILE_SELF)
                     materialId = source->metatileId;
-                uv = DioramaAtlas_GetUv(materialId);
-                cell->materials[face].metatileId = materialId;
-                cell->materials[face].layer = resolvedCells[gridIndex].materials[face].layer;
-                cell->materials[face].u0 = uv.u0;
-                cell->materials[face].v0 = uv.v0;
-                cell->materials[face].u1 = uv.u1;
-                cell->materials[face].v1 = uv.v1;
+                SetTerrainMaterial(&cell->materials[face], materialId,
+                                   resolvedCells[gridIndex].materials[face].layer);
+            }
+            if (resolvedCells[gridIndex].structureSouthFacadeRows != 0
+             && cell->structureLocalY == cell->structureHeight - 1)
+            {
+                uint8_t facadeRow;
+
+                for (facadeRow = 0;
+                     facadeRow < resolvedCells[gridIndex].structureSouthFacadeRows;
+                     facadeRow++)
+                {
+                    const struct DioramaCellSnapshot *facadeSource = FindSnapshotCell(
+                        snapshot, cell->structureX + cell->structureLocalX,
+                        cell->structureY + cell->structureHeight - 1 - facadeRow);
+                    uint16_t materialId = resolvedCells[gridIndex]
+                        .materials[DIORAMA_MATERIAL_FACE_SOUTH].metatileId;
+
+                    if (facadeSource == NULL || facadeSource->metatileId >= DIORAMA_TILE_COUNT)
+                        break;
+                    if (materialId == DIORAMA_MATERIAL_METATILE_SELF)
+                        materialId = facadeSource->metatileId;
+                    SetTerrainMaterial(&cell->southFacadeMaterials[facadeRow], materialId,
+                        resolvedCells[gridIndex].materials[DIORAMA_MATERIAL_FACE_SOUTH].layer);
+                }
+                if (facadeRow == resolvedCells[gridIndex].structureSouthFacadeRows)
+                    cell->southFacadeCount = facadeRow;
             }
             if (x >= DIORAMA_TERRAIN_HALO && x < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE
              && y >= DIORAMA_TERRAIN_HALO && y < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE)

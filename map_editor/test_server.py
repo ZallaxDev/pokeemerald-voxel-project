@@ -22,6 +22,11 @@ class EditorServerTests(unittest.TestCase):
                 document["map"]["width"] * document["map"]["height"],
             )
             self.assertEqual(len(document["editor"]["resolved"]), len(document["cells"]))
+            for template in document["editor"]["templates"].values():
+                if "pixelProfile" in template:
+                    self.assertGreater(template["pixelProfile"]["facades"]["south"]["rows"], 0)
+                    self.assertEqual(len(template["compiledRoofProfile"]),
+                                     template["width"] * 16 + 1)
             primary = document["tilesets"]["primary"]["symbol"]
             secondary = document["tilesets"]["secondary"]["symbol"]
             atlas_pairs.add((primary, primary))

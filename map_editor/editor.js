@@ -349,7 +349,7 @@ function lookAt(eye,target){let zx=eye[0]-target[0],zy=eye[1]-target[1],zz=eye[2
 function multiply(a,b){const o=new Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++)o[c*4+r]=a[r]*b[c*4]+a[4+r]*b[c*4+1]+a[8+r]*b[c*4+2]+a[12+r]*b[c*4+3];return o}
 function atlasUV(id,role){const local=id-(role==="secondary"?512:0),rows=Math.ceil(state.document.tilesets[role].count/16),u=(local%16)/16,v=Math.floor(local/16)/rows;return[u,v,1/16,1/rows]}
 function previewMaterial(material,cell){if(material==="none"||material?.layer==="none")return null;const raw=material?.metatile??"self";return{id:raw==="self"?cell.metatile:Number(raw),layer:material?.layer||"full"}}
-function addFace(batch,corners,material,shade,selected){if(material===null)return;const role=material.id>=512?"secondary":"primary",uv=atlasUV(material.id,role),base=batch[`${role}:${material.layer}`],start=base.vertices.length/7;[[0,0],[1,0],[1,1],[0,1]].forEach(([u,v],i)=>base.vertices.push(...corners[i],uv[0]+u*uv[2],uv[1]+v*uv[3],shade,selected?1:0));base.indices.push(start,start+1,start+2,start,start+2,start+3)}
+function addFace(batch,corners,material,shade,selected,vTop=0,vBottom=1,uLeft=0,uRight=1){if(material===null)return;const role=material.id>=512?"secondary":"primary",uv=atlasUV(material.id,role),base=batch[`${role}:${material.layer}`],start=base.vertices.length/7;[[uLeft,vTop],[uRight,vTop],[uRight,vBottom],[uLeft,vBottom]].forEach(([u,v],i)=>base.vertices.push(...corners[i],uv[0]+u*uv[2],uv[1]+v*uv[3],shade,selected?1:0));base.indices.push(start,start+1,start+2,start,start+2,start+3)}
 function buildingAtCell(cell) {
   const placement=state.rules.buildings.find((item)=>{
     const template=state.document.editor.templates[item.template];
@@ -367,8 +367,8 @@ function roofFactor(position,span) {
 function sameBuildingNeighbor(building,x,y) {
   if(!building||x<0||y<0||x>=state.document.map.width||y>=state.document.map.height)return false;
   const neighbor=state.document.cells[y*state.document.map.width+x];
-  const effective=effectiveAt(neighbor);
-  return effective.source.startsWith("building:")&&buildingAtCell(neighbor)?.placement===building.placement;
+  const shape=normalizeClientRule(effectiveAt(neighbor).rule).shape;
+  return (shape==="roof"||shape==="building-part")&&buildingAtCell(neighbor)?.placement===building.placement;
 }
 
 function previewGeometry() {
@@ -386,14 +386,20 @@ function previewGeometry() {
     const ground=Number(r.groundHeight)||0;
     const featureHeight=["extruded","cutout","roof","building-part"].includes(r.shape)?Math.max(Number(r.height)||.05,.05):.04;
     const selected=state.selection.has(cell.id),faces=r.faces;
-    const building=effective.source.startsWith("building:")?buildingAtCell(cell):null;
+    const building=buildingAtCell(cell);
     let topNW=ground+featureHeight,topNE=topNW,topSE=topNW,topSW=topNW;
+    let profiledRoof=false;
 
     if(building&&r.shape==="roof") {
       const {placement,template}=building;
       const localX=cell.x-placement.x,localY=cell.y-placement.y;
       const body=template.bodyHeight,roof=template.roofHeight;
-      if(template.profile==="gable-x") {
+      if(template.compiledRoofProfile?.length===template.width*16+1&&localY<template.roofRows) {
+        const profile=template.compiledRoofProfile,start=localX*16;
+        topNW=topSW=ground+body+profile[start]/16;
+        topNE=topSE=ground+body+profile[start+16]/16;
+        profiledRoof=true;
+      } else if(template.profile==="gable-x") {
         topNW=topSW=body+roof*roofFactor(localX,template.width);
         topNE=topSE=body+roof*roofFactor(localX+1,template.width);
       } else if(template.profile==="gable-z") {
@@ -412,11 +418,33 @@ function previewGeometry() {
       return;
     }
 
-    addFace(batch,[[left,topNW,north],[right,topNE,north],[right,topSE,south],[left,topSW,south]],previewMaterial(faces.top,cell),1,selected);
+    if(profiledRoof) {
+      const {placement,template}=building,localX=cell.x-placement.x,localY=cell.y-placement.y;
+      const profile=template.compiledRoofProfile,start=localX*16,slab=template.pixelProfile.roof.slabPixels/16,eave=template.pixelProfile.roof.eaves.south/16,material=previewMaterial(faces.top,cell);
+      for(let pixel=0;pixel<16;pixel++) {
+        const x0=left+pixel/16,x1=left+(pixel+1)/16,y0=ground+template.bodyHeight+profile[start+pixel]/16,y1=ground+template.bodyHeight+profile[start+pixel+1]/16,u0=pixel/16,u1=(pixel+1)/16;
+        addFace(batch,[[x0,y0,north],[x1,y1,north],[x1,y1,south],[x0,y0,south]],material,1,selected,0,1,u0,u1);
+        if(slab)addFace(batch,[[x0,y0-slab,south],[x1,y1-slab,south],[x1,y1-slab,north],[x0,y0-slab,north]],material,.58,selected,1,1-slab,u0,u1);
+        if(localY===0&&slab)addFace(batch,[[x1,y1,north],[x0,y0,north],[x0,y0-slab,north],[x1,y1-slab,north]],material,.72,selected,0,slab,u0,u1);
+        if(localY===template.roofRows-1&&eave){const edge=south-eave;addFace(batch,[[x0,y0,south],[x1,y1,south],[x1,y1,edge],[x0,y0,edge]],material,1,selected,1-eave,1,u0,u1);addFace(batch,[[x0,y0-slab,edge],[x1,y1-slab,edge],[x1,y1-slab,south],[x0,y0-slab,south]],material,.58,selected,1-eave,1,u0,u1);addFace(batch,[[x0,y0,edge],[x1,y1,edge],[x1,y1-slab,edge],[x0,y0-slab,edge]],material,.68,selected,0,slab,u0,u1)}
+      }
+    } else addFace(batch,[[left,topNW,north],[right,topNE,north],[right,topSE,south],[left,topSW,south]],previewMaterial(faces.top,cell),1,selected);
     if(featureHeight<=.05)return;
     if(!sameBuildingNeighbor(building,cell.x,cell.y-1))addFace(batch,[[right,topNE,north],[left,topNW,north],[left,ground,north],[right,ground,north]],previewMaterial(faces.north,cell),.72,selected);
     if(!sameBuildingNeighbor(building,cell.x+1,cell.y))addFace(batch,[[right,topSE,south],[right,topNE,north],[right,ground,north],[right,ground,south]],previewMaterial(faces.east,cell),.84,selected);
-    if(!sameBuildingNeighbor(building,cell.x,cell.y+1))addFace(batch,[[left,topSW,south],[right,topSE,south],[right,ground,south],[left,ground,south]],previewMaterial(faces.south,cell),.9,selected);
+    if(!sameBuildingNeighbor(building,cell.x,cell.y+1)) {
+      const facade=building?.template.pixelProfile?.facades?.south;
+      if(facade&&building&&cell.y===building.placement.y+building.template.height-1) {
+        const bodyTop=ground+Number(building.template.bodyHeight);
+        for(let row=0;row<facade.rows;row++) {
+          const bottom=ground+row*facade.unitHeight,top=Math.min(bottom+facade.unitHeight,bodyTop);
+          if(top<=bottom)break;
+          const source=state.document.cells[(building.placement.y+building.template.height-1-row)*state.document.map.width+cell.x];
+          const fraction=(top-bottom)/facade.unitHeight;
+          addFace(batch,[[left,top,south],[right,top,south],[right,bottom,south],[left,bottom,south]],previewMaterial(faces.south,source),.9,selected,1-fraction,1);
+        }
+      } else addFace(batch,[[left,topSW,south],[right,topSE,south],[right,ground,south],[left,ground,south]],previewMaterial(faces.south,cell),.9,selected);
+    }
     if(!sameBuildingNeighbor(building,cell.x-1,cell.y))addFace(batch,[[left,topNW,north],[left,topSW,south],[left,ground,south],[left,ground,north]],previewMaterial(faces.west,cell),.78,selected);
   });
   return batch;

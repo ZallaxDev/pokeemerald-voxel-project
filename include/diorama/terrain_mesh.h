@@ -9,7 +9,8 @@
 #define DIORAMA_TERRAIN_CHUNK_SIZE 8
 #define DIORAMA_TERRAIN_HALO 1
 #define DIORAMA_TERRAIN_INPUT_SIZE (DIORAMA_TERRAIN_CHUNK_SIZE + 2 * DIORAMA_TERRAIN_HALO)
-#define DIORAMA_TERRAIN_MAX_FACES (DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_TERRAIN_CHUNK_SIZE * 7)
+#define DIORAMA_TERRAIN_MAX_PROFILED_ROOF_FACES_PER_CELL 90
+#define DIORAMA_TERRAIN_MAX_FACES (DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_TERRAIN_MAX_PROFILED_ROOF_FACES_PER_CELL)
 #define DIORAMA_TERRAIN_MAX_VERTICES (DIORAMA_TERRAIN_MAX_FACES * 6)
 #define DIORAMA_TERRAIN_LEDGE_HEIGHT 0.375f
 #define DIORAMA_TERRAIN_WATER_HEIGHT -0.125f
@@ -51,6 +52,7 @@ struct DioramaTerrainCell
     uint8_t profile;
     uint8_t planeAxis;
     uint16_t structureId;
+    uint16_t structureTemplateId;
     int16_t structureX;
     int16_t structureY;
     uint8_t structureWidth;
@@ -58,12 +60,15 @@ struct DioramaTerrainCell
     uint8_t structureRoofRows;
     uint8_t structureLocalX;
     uint8_t structureLocalY;
+    uint8_t southFacadeCount;
     float groundHeight;
     float visualHeight;
     float featureHeight;
     float structureBodyHeight;
     float structureRoofHeight;
+    float southFacadeUnitHeight;
     struct DioramaTerrainMaterial materials[DIORAMA_MATERIAL_FACE_COUNT];
+    struct DioramaTerrainMaterial southFacadeMaterials[DIORAMA_BUILDING_MAX_FACADE_ROWS];
 };
 
 struct DioramaTerrainHeightCell

@@ -57,6 +57,15 @@ enum DioramaPlaneAxis
 };
 
 #define DIORAMA_MATERIAL_METATILE_SELF UINT16_C(0xFFFF)
+#define DIORAMA_BUILDING_MAX_FACADE_ROWS 4
+#define DIORAMA_BUILDING_PIXELS_PER_CELL 16
+#define DIORAMA_BUILDING_MAX_PROFILE_COLUMNS (32 * DIORAMA_BUILDING_PIXELS_PER_CELL + 1)
+
+enum DioramaBuildingFacadeFit
+{
+    DIORAMA_BUILDING_FACADE_FIT_NONE,
+    DIORAMA_BUILDING_FACADE_FIT_NATURAL
+};
 
 struct DioramaFaceMaterial
 {
@@ -117,6 +126,7 @@ struct DioramaResolvedCell
     uint8_t planeAxis;
     uint16_t baseMetatileId;
     uint16_t structureId;
+    uint16_t structureTemplateId;
     int16_t structureX;
     int16_t structureY;
     uint8_t structureWidth;
@@ -124,11 +134,13 @@ struct DioramaResolvedCell
     uint8_t structureRoofRows;
     uint8_t structureLocalX;
     uint8_t structureLocalY;
+    uint8_t structureSouthFacadeRows;
     float groundHeight;
     float topHeight;
     float featureHeight;
     float structureBodyHeight;
     float structureRoofHeight;
+    float structureSouthFacadeUnitHeight;
     struct DioramaFaceMaterial materials[DIORAMA_MATERIAL_FACE_COUNT];
 };
 
@@ -176,8 +188,15 @@ struct DioramaGeneratedBuildingTemplate
     uint8_t height;
     uint8_t roofRows;
     uint8_t profile;
+    uint8_t southFacadeRows;
+    uint8_t facadeFit;
+    uint8_t roofSlabPixels;
+    uint8_t roofEaveSouthPixels;
+    uint16_t roofProfileOffset;
+    uint16_t roofProfileCount;
     float bodyHeight;
     float roofHeight;
+    float southFacadeUnitHeight;
     struct DioramaFaceMaterial materials[DIORAMA_MATERIAL_FACE_COUNT];
 };
 
@@ -191,6 +210,7 @@ struct DioramaGeneratedBuildingPlacement
 };
 
 uint32_t DioramaRules_GetGeneration(void);
+const struct DioramaGeneratedBuildingTemplate *DioramaRules_GetBuildingTemplate(uint16_t id);
 bool DioramaRules_IsMapSupported(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId);
 bool DioramaRules_GetMapProfile(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId,
                                 struct DioramaMapProfile *profile);

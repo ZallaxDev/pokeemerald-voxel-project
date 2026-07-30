@@ -1,9 +1,12 @@
 DIORAMA_RULE_JSON := $(sort $(wildcard data/diorama/*.json data/diorama/*/*.json))
 DIORAMA_RULE_DIRS := data/diorama data/diorama/maps data/diorama/tilesets data/diorama/buildings
 DIORAMA_RULE_CATALOGS := $(sort $(wildcard data/maps/*/map.json)) \
- $(sort $(wildcard data/tilesets/*/*/metatile_attributes.bin \
-                       data/tilesets/*/*/metatiles.bin))
-DIORAMA_RULE_COMPILER := tools/diorama_rules/compile_rules.py
+	$(sort $(wildcard data/layouts/*/map.bin)) \
+	 $(sort $(wildcard data/tilesets/*/*/metatile_attributes.bin \
+	                       data/tilesets/*/*/metatiles.bin \
+	                       data/tilesets/*/*/tiles.png \
+	                       data/tilesets/*/*/palettes/*.gbapal))
+DIORAMA_RULE_COMPILER := tools/diorama_rules/compile_rules.py tools/diorama_rules/building_profiles.py
 DIORAMA_RULE_SOURCE := src/data/diorama/diorama_rules.generated.c
 DIORAMA_RULE_HEADER := include/diorama/rules.generated.h
 

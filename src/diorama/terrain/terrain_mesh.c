@@ -4,6 +4,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "diorama/rules.generated.h"
 #include "diorama/terrain_mesh.h"
 
 #define FNV_OFFSET UINT64_C(1469598103934665603)
@@ -90,10 +91,186 @@ static bool AppendQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
     return true;
 }
 
+static bool AppendQuadCropped(struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                              uint32_t *count, const float positions[4][3],
+                              const struct DioramaTerrainMaterial *material, float shade,
+                              float reflectionMask, float visibleFraction)
+{
+    struct DioramaTerrainMaterial cropped = *material;
+
+    cropped.v0 = material->v1 + (material->v0 - material->v1) * visibleFraction;
+    return AppendQuad(vertices, capacity, count, positions, &cropped, shade, reflectionMask);
+}
+
+static bool AppendQuadRegion(struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                             uint32_t *count, const float positions[4][3],
+                             const struct DioramaTerrainMaterial *material, float shade,
+                             float uStart, float uEnd, float vStart, float vEnd)
+{
+    struct DioramaTerrainMaterial cropped = *material;
+    float width = material->u1 - material->u0;
+    float height = material->v1 - material->v0;
+
+    cropped.u0 = material->u0 + width * uStart;
+    cropped.u1 = material->u0 + width * uEnd;
+    cropped.v0 = material->v0 + height * vStart;
+    cropped.v1 = material->v0 + height * vEnd;
+    return AppendQuad(vertices, capacity, count, positions, &cropped, shade, 0.0f);
+}
+
+static const uint8_t *GetRoofProfile(const struct DioramaTerrainCell *cell,
+                                     const struct DioramaGeneratedBuildingTemplate **template)
+{
+    *template = DioramaRules_GetBuildingTemplate(cell->structureTemplateId);
+    if (*template == NULL || (*template)->roofProfileCount != cell->structureWidth * 16 + 1
+     || (*template)->roofProfileOffset + (*template)->roofProfileCount
+        > gDioramaBuildingRoofProfilePixelCount)
+        return NULL;
+    return &gDioramaBuildingRoofProfilePixels[(*template)->roofProfileOffset];
+}
+
+static float ProfileHeight(const struct DioramaTerrainCell *cell,
+                           const uint8_t *profile, int localPixel)
+{
+    return cell->groundHeight + cell->structureBodyHeight + profile[localPixel] / 16.0f;
+}
+
+static bool IsProfiledRoof(const struct DioramaTerrainCell *cell)
+{
+    const struct DioramaGeneratedBuildingTemplate *building;
+
+    return cell->shape == DIORAMA_SHAPE_ROOF
+        && cell->structureId != 0
+        && cell->structureLocalY < cell->structureRoofRows
+        && GetRoofProfile(cell, &building) != NULL
+        && cell->materials[DIORAMA_MATERIAL_FACE_TOP].layer != DIORAMA_MATERIAL_NONE;
+}
+
+static bool AppendProfiledRoof(struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                               uint32_t *count, const struct DioramaTerrainCell *cell,
+                               float left, float right, float north, float south,
+                               struct DioramaTerrainMesh *mesh)
+{
+    const struct DioramaGeneratedBuildingTemplate *building;
+    const uint8_t *profile = GetRoofProfile(cell, &building);
+    const struct DioramaTerrainMaterial *material = &cell->materials[DIORAMA_MATERIAL_FACE_TOP];
+    float slab;
+    float eave;
+    int pixel;
+
+    if (profile == NULL || cell->structureLocalY >= cell->structureRoofRows
+     || material->layer == DIORAMA_MATERIAL_NONE)
+        return false;
+    slab = building->roofSlabPixels / 16.0f;
+    eave = building->roofEaveSouthPixels / 16.0f;
+    for (pixel = 0; pixel < 16; pixel++)
+    {
+        int sample = cell->structureLocalX * 16 + pixel;
+        float x0 = left + pixel / 16.0f;
+        float x1 = left + (pixel + 1) / 16.0f;
+        float y0 = ProfileHeight(cell, profile, sample);
+        float y1 = ProfileHeight(cell, profile, sample + 1);
+        float u0 = pixel / 16.0f;
+        float u1 = (pixel + 1) / 16.0f;
+        const float top[4][3] = {
+            {x0, y0, north}, {x1, y1, north}, {x1, y1, south}, {x0, y0, south},
+        };
+        const float underside[4][3] = {
+            {x0, y0 - slab, south}, {x1, y1 - slab, south},
+            {x1, y1 - slab, north}, {x0, y0 - slab, north},
+        };
+
+        if (!AppendQuadRegion(vertices, capacity, count, top, material, 1.0f,
+                              u0, u1, 0.0f, 1.0f)
+         || (slab > 0.0f && !AppendQuadRegion(vertices, capacity, count, underside,
+                              material, 0.58f, u0, u1, 1.0f, 1.0f - slab)))
+            return false;
+        mesh->topFaceCount++;
+        if (slab > 0.0f) mesh->featureFaceCount++;
+        if (cell->structureLocalY == 0 && slab > 0.0f)
+        {
+            const float fascia[4][3] = {
+                {x1, y1, north}, {x0, y0, north},
+                {x0, y0 - slab, north}, {x1, y1 - slab, north},
+            };
+            if (!AppendQuadRegion(vertices, capacity, count, fascia, material, 0.72f,
+                                  u0, u1, 0.0f, slab))
+                return false;
+            mesh->featureFaceCount++;
+        }
+        if (cell->structureLocalY == cell->structureRoofRows - 1 && eave > 0.0f)
+        {
+            float eaveSouth = south - eave;
+            const float eaveTop[4][3] = {
+                {x0, y0, south}, {x1, y1, south},
+                {x1, y1, eaveSouth}, {x0, y0, eaveSouth},
+            };
+            const float eaveUnder[4][3] = {
+                {x0, y0 - slab, eaveSouth}, {x1, y1 - slab, eaveSouth},
+                {x1, y1 - slab, south}, {x0, y0 - slab, south},
+            };
+            const float fascia[4][3] = {
+                {x0, y0, eaveSouth}, {x1, y1, eaveSouth},
+                {x1, y1 - slab, eaveSouth}, {x0, y0 - slab, eaveSouth},
+            };
+            if (!AppendQuadRegion(vertices, capacity, count, eaveTop, material, 1.0f,
+                                  u0, u1, 1.0f - eave, 1.0f)
+             || !AppendQuadRegion(vertices, capacity, count, eaveUnder, material, 0.58f,
+                                  u0, u1, 1.0f - eave, 1.0f)
+             || !AppendQuadRegion(vertices, capacity, count, fascia, material, 0.68f,
+                                  u0, u1, 0.0f, slab))
+                return false;
+            mesh->featureFaceCount += 3;
+            if (eaveSouth < mesh->bounds.minZ) mesh->bounds.minZ = eaveSouth;
+        }
+        if (y0 > mesh->bounds.maxY) mesh->bounds.maxY = y0;
+        if (y1 > mesh->bounds.maxY) mesh->bounds.maxY = y1;
+        if (y0 - slab < mesh->bounds.minY) mesh->bounds.minY = y0 - slab;
+        if (y1 - slab < mesh->bounds.minY) mesh->bounds.minY = y1 - slab;
+    }
+    if (slab > 0.0f && cell->structureLocalX == 0)
+    {
+        float y = ProfileHeight(cell, profile, 0);
+        const float fascia[4][3] = {
+            {left, y, north}, {left, y, south},
+            {left, y - slab, south}, {left, y - slab, north},
+        };
+        if (!AppendQuadRegion(vertices, capacity, count, fascia, material, 0.62f,
+                              0.0f, 1.0f, 0.0f, slab))
+            return false;
+        mesh->featureFaceCount++;
+    }
+    if (slab > 0.0f && cell->structureLocalX == cell->structureWidth - 1)
+    {
+        float y = ProfileHeight(cell, profile, building->roofProfileCount - 1);
+        const float fascia[4][3] = {
+            {right, y, south}, {right, y, north},
+            {right, y - slab, north}, {right, y - slab, south},
+        };
+        if (!AppendQuadRegion(vertices, capacity, count, fascia, material, 0.78f,
+                              0.0f, 1.0f, 0.0f, slab))
+            return false;
+        mesh->featureFaceCount++;
+    }
+    (void)right;
+    return true;
+}
+
 static float ResolveRoofHeight(const struct DioramaTerrainCell *cell, float worldX)
 {
+    const struct DioramaGeneratedBuildingTemplate *building;
+    const uint8_t *profile = GetRoofProfile(cell, &building);
     float factor;
     float localX;
+
+    if (profile != NULL && cell->structureLocalY < cell->structureRoofRows)
+    {
+        float pixel = (worldX - (cell->structureX - 0.5f)) * 16.0f;
+        int index = (int)floorf(pixel + 0.5f);
+        if (index < 0) index = 0;
+        if (index >= building->roofProfileCount) index = building->roofProfileCount - 1;
+        return ProfileHeight(cell, profile, index);
+    }
 
     if (cell->structureId == 0 || cell->profile != DIORAMA_ROOF_GABLE_X)
         return cell->visualHeight;
@@ -222,6 +399,7 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         hash = HashByte(hash, cell->profile);
         hash = HashByte(hash, cell->planeAxis);
         hash = HashU16(hash, cell->structureId);
+        hash = HashU16(hash, cell->structureTemplateId);
         hash = HashU16(hash, cell->structureX);
         hash = HashU16(hash, cell->structureY);
         hash = HashByte(hash, cell->structureWidth);
@@ -229,15 +407,22 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         hash = HashByte(hash, cell->structureRoofRows);
         hash = HashByte(hash, cell->structureLocalX);
         hash = HashByte(hash, cell->structureLocalY);
+        hash = HashByte(hash, cell->southFacadeCount);
         hash = HashFloat(hash, cell->groundHeight);
         hash = HashFloat(hash, cell->visualHeight);
         hash = HashFloat(hash, cell->featureHeight);
         hash = HashFloat(hash, cell->structureBodyHeight);
         hash = HashFloat(hash, cell->structureRoofHeight);
+        hash = HashFloat(hash, cell->southFacadeUnitHeight);
         for (unsigned face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
         {
             hash = HashU16(hash, cell->materials[face].metatileId);
             hash = HashByte(hash, cell->materials[face].layer);
+        }
+        for (unsigned row = 0; row < cell->southFacadeCount; row++)
+        {
+            hash = HashU16(hash, cell->southFacadeMaterials[row].metatileId);
+            hash = HashByte(hash, cell->southFacadeMaterials[row].layer);
         }
     }
     return hash;
@@ -286,7 +471,13 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                 topPositions[2][1] = ResolveRoofHeight(cell, right);
                 topPositions[3][1] = ResolveRoofHeight(cell, left);
             }
-            if (cell->materials[DIORAMA_MATERIAL_FACE_TOP].layer != DIORAMA_MATERIAL_NONE)
+            if (IsProfiledRoof(cell))
+            {
+                if (!AppendProfiledRoof(vertices, vertexCapacity, &vertexCount, cell,
+                                        left, right, north, south, mesh))
+                    return false;
+            }
+            else if (cell->materials[DIORAMA_MATERIAL_FACE_TOP].layer != DIORAMA_MATERIAL_NONE)
             {
                 if (!AppendQuad(vertices, vertexCapacity, &vertexCount, topPositions,
                                 &cell->materials[DIORAMA_MATERIAL_FACE_TOP], 1.0f,
@@ -383,6 +574,34 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                         sidePositions[0][1] = edgeHeight;
                         sidePositions[1][1] = edgeHeight;
                     }
+                }
+                if (face == DIORAMA_TERRAIN_FACE_SOUTH && cell->southFacadeCount != 0)
+                {
+                    uint8_t row;
+
+                    for (row = 0; row < cell->southFacadeCount; row++)
+                    {
+                        float stripBottom = cell->groundHeight + row * cell->southFacadeUnitHeight;
+                        float stripTop = stripBottom + cell->southFacadeUnitHeight;
+                        float fraction;
+
+                        if (stripBottom >= cell->groundHeight + cell->structureBodyHeight)
+                            break;
+                        if (stripTop > cell->groundHeight + cell->structureBodyHeight)
+                            stripTop = cell->groundHeight + cell->structureBodyHeight;
+                        fraction = (stripTop - stripBottom) / cell->southFacadeUnitHeight;
+                        GetSidePositions(face, left, right, north, south,
+                                         stripTop, stripBottom, sidePositions);
+                        if (!AppendQuadCropped(vertices, vertexCapacity, &vertexCount,
+                                               sidePositions,
+                                               &cell->southFacadeMaterials[row], 0.68f,
+                                               0.0f, fraction))
+                            return false;
+                        mesh->sideFaceCount++;
+                    }
+                    if (cell->groundHeight < mesh->bounds.minY)
+                        mesh->bounds.minY = cell->groundHeight;
+                    continue;
                 }
                 if (!AppendQuad(vertices, vertexCapacity, &vertexCount, sidePositions,
                                   sideMaterial,

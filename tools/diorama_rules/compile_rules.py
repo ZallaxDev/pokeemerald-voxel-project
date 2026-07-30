@@ -13,6 +13,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from building_profiles import BuildingProfileError, compose_reference, extract_roof_profile
+
 
 SHAPES = {
     "flat": "DIORAMA_SHAPE_FLAT",
@@ -60,6 +62,10 @@ TILESETS = {
 CAMERA_PROFILES = {
     "exterior": ("DIORAMA_CAMERA_EXTERIOR", 40.542, 130.0),
     "interior": ("DIORAMA_CAMERA_INTERIOR", 60.0, 145.0),
+}
+
+FACADE_FITS = {
+    "natural": "DIORAMA_BUILDING_FACADE_FIT_NATURAL",
 }
 
 
@@ -198,6 +204,97 @@ def parse_materials(value: object, path: str) -> tuple[tuple[int, str], ...]:
     for face, material in value.items():
         materials[MATERIAL_FACES.index(face)] = parse_material(material, f"{path}.{face}")
     return tuple(materials)
+
+
+def parse_pixel_profile(value: object, path: str, width: int, height: int, roof_rows: int) -> tuple:
+    if value is None:
+        return (0, "DIORAMA_BUILDING_FACADE_FIT_NONE", 0.0, 0, 0, None, None, ())
+    if not isinstance(value, dict):
+        raise RuleError(f"{path}: pixelProfile must be an object")
+    unknown = set(value) - {"version", "reference", "facades", "roof", "recesses"}
+    if unknown:
+        raise RuleError(f"{path}: unknown fields: {', '.join(sorted(unknown))}")
+    if value.get("version") != 1:
+        raise RuleError(f"{path}: unsupported or missing version")
+    if "recesses" in value:
+        raise RuleError(f"{path}.recesses: recesses are not supported")
+    facades = value.get("facades", {})
+    if not isinstance(facades, dict):
+        raise RuleError(f"{path}.facades: must be an object")
+    unknown_faces = set(facades) - {"south"}
+    if unknown_faces:
+        raise RuleError(f"{path}.facades: unsupported faces: {', '.join(sorted(unknown_faces))}")
+    if "south" not in facades:
+        rows, fit_value, unit_height = 0, "DIORAMA_BUILDING_FACADE_FIT_NONE", 0.0
+    else:
+        south = facades["south"]
+        if not isinstance(south, dict):
+            raise RuleError(f"{path}.facades.south: must be an object")
+        unknown = set(south) - {"mode", "rows", "unitHeight", "fit"}
+        if unknown:
+            raise RuleError(f"{path}.facades.south: unknown fields: {', '.join(sorted(unknown))}")
+        if south.get("mode") != "footprint-rows":
+            raise RuleError(f"{path}.facades.south: mode must be 'footprint-rows'")
+        rows = south.get("rows")
+        if not isinstance(rows, int) or isinstance(rows, bool) or not 1 <= rows <= 4:
+            raise RuleError(f"{path}.facades.south.rows: value must be between 1 and 4")
+        if rows > height - roof_rows:
+            raise RuleError(f"{path}.facades.south.rows: exceeds non-roof footprint rows")
+        fit = south.get("fit")
+        if fit not in FACADE_FITS:
+            raise RuleError(f"{path}.facades.south.fit: only 'natural' is supported")
+        fit_value = FACADE_FITS[fit]
+        unit_height = number(south.get("unitHeight"), f"{path}.facades.south.unitHeight", 0.000001, 8.0)
+
+    reference = value.get("reference")
+    roof = value.get("roof")
+    if (reference is None) != (roof is None):
+        raise RuleError(f"{path}: reference and roof must be provided together")
+    if reference is None:
+        return rows, fit_value, unit_height, 0, 0, None, None, ()
+    if not isinstance(reference, dict):
+        raise RuleError(f"{path}.reference: must be an object")
+    unknown = set(reference) - {"map", "x", "y"}
+    if unknown or set(reference) != {"map", "x", "y"}:
+        raise RuleError(f"{path}.reference: must contain only map, x and y")
+    if not isinstance(reference["map"], str) or not reference["map"].startswith("MAP_"):
+        raise RuleError(f"{path}.reference.map: must be a map symbol")
+    if any(not isinstance(reference[key], int) or isinstance(reference[key], bool) for key in ("x", "y")):
+        raise RuleError(f"{path}.reference: x and y must be integers")
+    if not isinstance(roof, dict):
+        raise RuleError(f"{path}.roof: must be an object")
+    unknown = set(roof) - {"mode", "layer", "slabPixels", "eaves", "seal"}
+    if unknown:
+        raise RuleError(f"{path}.roof: unknown fields: {', '.join(sorted(unknown))}")
+    if roof.get("mode") != "pixel-silhouette":
+        raise RuleError(f"{path}.roof.mode: must be 'pixel-silhouette'")
+    layer = roof.get("layer")
+    if layer not in ("base", "foreground", "full"):
+        raise RuleError(f"{path}.roof.layer: must be base, foreground or full")
+    slab = roof.get("slabPixels")
+    if not isinstance(slab, int) or isinstance(slab, bool) or not 0 <= slab <= 255:
+        raise RuleError(f"{path}.roof.slabPixels: value must be between 0 and 255")
+    eaves = roof.get("eaves")
+    if not isinstance(eaves, dict) or set(eaves) != {"north", "east", "south", "west"}:
+        raise RuleError(f"{path}.roof.eaves: must contain north, east, south and west")
+    for side, amount in eaves.items():
+        if not isinstance(amount, int) or isinstance(amount, bool) or not 0 <= amount <= 255:
+            raise RuleError(f"{path}.roof.eaves.{side}: value must be between 0 and 255")
+    raw_seals = array(roof.get("seal"), f"{path}.roof.seal")
+    seals = []
+    for index, seal in enumerate(raw_seals):
+        seal_path = f"{path}.roof.seal[{index}]"
+        if not isinstance(seal, dict) or set(seal) != {"x", "y"}:
+            raise RuleError(f"{seal_path}: must contain only x and y")
+        x, y = seal["x"], seal["y"]
+        if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
+            raise RuleError(f"{seal_path}: x and y must be integers")
+        if not 0 <= x < width * 16 or not 0 <= y < roof_rows * 16:
+            raise RuleError(f"{seal_path}: pixel is outside the roof image")
+        seals.append((x, y))
+    if len(set(seals)) != len(seals):
+        raise RuleError(f"{path}.roof.seal: duplicate pixel")
+    return rows, fit_value, unit_height, slab, eaves["south"], reference, layer, tuple(seals)
 
 
 def parse_definition(value: object, path: str) -> tuple:
@@ -339,6 +436,7 @@ def compile_data(root: Path) -> dict:
     tileset_rules.sort(key=lambda item: (item[0], item[1]))
 
     templates = {}
+    profile_references = {}
     for path in sorted((rules_root / "buildings").glob("*.json")):
         data = load_json(path)
         for name, value in data.get("templates", {}).items():
@@ -346,7 +444,7 @@ def compile_data(root: Path) -> dict:
                 raise RuleError(f"{path}: duplicate building template {name}")
             if not isinstance(value, dict):
                 raise RuleError(f"{path}: template {name} must be an object")
-            unknown = set(value) - {"width", "height", "roofRows", "bodyHeight", "roofHeight", "profile", "faces"}
+            unknown = set(value) - {"width", "height", "roofRows", "bodyHeight", "roofHeight", "profile", "faces", "pixelProfile"}
             if unknown:
                 raise RuleError(f"{path}: template {name} has unknown fields: {', '.join(sorted(unknown))}")
             width = value.get("width")
@@ -360,15 +458,31 @@ def compile_data(root: Path) -> dict:
             profile = value.get("profile")
             if profile not in PROFILES or profile in (None, "none"):
                 raise RuleError(f"{path}: template {name} requires a roof profile")
+            pixel_profile = parse_pixel_profile(value.get("pixelProfile"),
+                                                f"{path}:{name}.pixelProfile",
+                                                width, height, roof_rows)
+            south_rows, facade_fit, unit_height, slab, eave_south, reference, layer, seals = pixel_profile
+            roof_profile = ()
+            if reference is not None:
+                try:
+                    footprint = compose_reference(root, reference["map"], reference["x"], reference["y"],
+                                                  width, height)
+                    roof_profile = extract_roof_profile(footprint, roof_rows, layer, seals,
+                                                        f"{path}:{name}")
+                except BuildingProfileError as error:
+                    raise RuleError(str(error)) from error
+                profile_references[name] = (reference["map"], reference["x"], reference["y"])
             templates[name] = (width, height, roof_rows, PROFILES[profile],
                                number(value.get("bodyHeight"), f"{path}:{name}.bodyHeight", 0.0),
                                number(value.get("roofHeight"), f"{path}:{name}.roofHeight", 0.0),
+                               south_rows, facade_fit, unit_height, slab, eave_south, roof_profile,
                                parse_materials(value.get("faces"), f"{path}:{name}.faces"))
     template_ids = {name: index for index, name in enumerate(sorted(templates), start=1)}
 
     map_rules = []
     map_overrides = []
     placements = []
+    matched_profile_references = set()
     used_layouts = set()
     seen_maps = set()
     for path in sorted((rules_root / "maps").glob("*.json")):
@@ -437,6 +551,15 @@ def compile_data(root: Path) -> dict:
                 raise RuleError(f"{path}: building {index} overlaps another building")
             occupied |= cells
             placements.append((info.group, info.number, template_ids[template_name], x, y))
+            if profile_references.get(template_name) == (symbol, x, y):
+                matched_profile_references.add(template_name)
+
+    missing_references = set(profile_references) - matched_profile_references
+    if missing_references:
+        name = sorted(missing_references)[0]
+        symbol, x, y = profile_references[name]
+        raise RuleError(f"building template {name}: reference ({symbol}, {x}, {y}) "
+                        "does not match a declared placement with the template dimensions")
 
     layout_rules = []
     for symbol in sorted(used_layouts, key=lambda item: layouts[item][0]):
@@ -451,6 +574,15 @@ def compile_data(root: Path) -> dict:
     for path in sorted(rules_root.rglob("*.json")):
         source_hash.update(path.relative_to(root).as_posix().encode("ascii"))
         source_hash.update(path.read_bytes())
+    roof_profiles = []
+    compiled_templates = []
+    for name in sorted(templates):
+        template = templates[name]
+        profile = template[-2]
+        offset = len(roof_profiles)
+        roof_profiles.extend(profile)
+        compiled_templates.append((template_ids[name], *template[:-2], offset, len(profile), template[-1]))
+    source_hash.update(bytes(roof_profiles))
     generation = int.from_bytes(source_hash.digest()[:4], "little") or 1
     return {
         "generation": generation,
@@ -460,7 +592,8 @@ def compile_data(root: Path) -> dict:
         "behavior_rules": sorted(behavior_rules),
         "tileset_rules": tileset_rules,
         "map_overrides": sorted(map_overrides, key=lambda item: item[:4]),
-        "templates": [(template_ids[name], *templates[name]) for name in sorted(templates)],
+        "templates": compiled_templates,
+        "roof_profiles": roof_profiles,
         "placements": sorted(placements),
     }
 
@@ -488,6 +621,8 @@ extern const struct DioramaGeneratedMapOverride gDioramaMapOverrides[];
 extern const size_t gDioramaMapOverrideCount;
 extern const struct DioramaGeneratedBuildingTemplate gDioramaBuildingTemplates[];
 extern const size_t gDioramaBuildingTemplateCount;
+extern const uint8_t gDioramaBuildingRoofProfilePixels[];
+extern const size_t gDioramaBuildingRoofProfilePixelCount;
 extern const struct DioramaGeneratedBuildingPlacement gDioramaBuildingPlacements[];
 extern const size_t gDioramaBuildingPlacementCount;
 
@@ -527,8 +662,10 @@ def render_c(data: dict) -> str:
           [f"{{ {group}, {number}, {x}, {y}, {fmt_rule(rule)} }}"
            for group, number, x, y, rule in data["map_overrides"]])
     table("struct DioramaGeneratedBuildingTemplate", "gDioramaBuildingTemplates",
-          [f"{{ {template_id}, {width}, {height}, {roof_rows}, {profile}, {fmt_float(body)}, {fmt_float(roof)}, {fmt_materials(materials)} }}"
-           for template_id, width, height, roof_rows, profile, body, roof, materials in data["templates"]])
+          [f"{{ {template_id}, {width}, {height}, {roof_rows}, {profile}, {south_rows}, {facade_fit}, {slab}, {eave_south}, {profile_offset}, {profile_count}, {fmt_float(body)}, {fmt_float(roof)}, {fmt_float(unit_height)}, {fmt_materials(materials)} }}"
+           for template_id, width, height, roof_rows, profile, body, roof, south_rows, facade_fit, unit_height, slab, eave_south, profile_offset, profile_count, materials in data["templates"]])
+    table("uint8_t", "gDioramaBuildingRoofProfilePixels",
+          [str(value) for value in data["roof_profiles"]])
     table("struct DioramaGeneratedBuildingPlacement", "gDioramaBuildingPlacements",
           [f"{{ {group}, {number}, {template_id}, {x}, {y} }}"
            for group, number, template_id, x, y in data["placements"]])

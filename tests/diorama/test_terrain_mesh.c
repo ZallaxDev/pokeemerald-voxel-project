@@ -300,6 +300,85 @@ static void TestStructureFacesAndRoofSlope(void)
          > sVertices[(3 * 8 + 3) * 6].y);
 }
 
+static void TestStackedSouthFacadeAndCrop(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *cell;
+    uint64_t signature;
+    bool foundCroppedTop = false;
+    bool foundCroppedBottom = false;
+
+    InitInput(&input, 3, MB_NORMAL);
+    cell = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    cell->shape = DIORAMA_SHAPE_BUILDING_PART;
+    cell->structureId = 1;
+    cell->structureTemplateId = 2;
+    cell->structureHeight = 5;
+    cell->structureLocalY = 4;
+    cell->groundHeight = 0.0f;
+    cell->visualHeight = 1.2f;
+    cell->structureBodyHeight = 1.2f;
+    cell->southFacadeCount = 2;
+    cell->southFacadeUnitHeight = 1.0f;
+    cell->southFacadeMaterials[0] = cell->materials[DIORAMA_MATERIAL_FACE_SOUTH];
+    cell->southFacadeMaterials[1] = cell->materials[DIORAMA_MATERIAL_FACE_SOUTH];
+    cell->southFacadeMaterials[1].metatileId = 2;
+
+    signature = DioramaTerrain_ChunkSignature(&input);
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.sideFaceCount == 5);
+    assert(mesh.vertexCount == (64 + 5) * 6);
+    for (uint32_t i = 0; i < mesh.vertexCount; i++)
+    {
+        if (sVertices[i].z != -3.5f)
+            continue;
+        if (sVertices[i].y > 1.19f && sVertices[i].y < 1.21f
+         && sVertices[i].v > 0.35f && sVertices[i].v < 0.37f)
+            foundCroppedTop = true;
+        if (sVertices[i].y == 1.0f && sVertices[i].v == 0.4f)
+            foundCroppedBottom = true;
+    }
+    assert(foundCroppedTop && foundCroppedBottom);
+    cell->southFacadeMaterials[1].metatileId = 3;
+    assert(DioramaTerrain_ChunkSignature(&input) != signature);
+}
+
+static void TestPixelProfiledRoofShell(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *cell;
+
+    InitInput(&input, 3, MB_NORMAL);
+    cell = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    cell->shape = DIORAMA_SHAPE_ROOF;
+    cell->structureId = 1;
+    cell->structureTemplateId = 2;
+    cell->structureX = 3;
+    cell->structureWidth = 5;
+    cell->structureRoofRows = 3;
+    cell->structureLocalX = 0;
+    cell->structureLocalY = 0;
+    cell->structureBodyHeight = 1.2f;
+    cell->visualHeight = 1.2f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.topFaceCount == 63 + 16);
+    assert(mesh.featureFaceCount == 33);
+    assert(mesh.bounds.maxY > 3.0f);
+
+    cell->structureLocalY = 2;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.featureFaceCount == 65);
+    {
+        bool foundEave = false;
+        for (uint32_t i = 0; i < mesh.vertexCount; i++)
+            if (sVertices[i].z == -3.625f)
+                foundEave = true;
+        assert(foundEave);
+    }
+}
+
 static void TestChunkSeamAndHaloInvalidation(void)
 {
     struct DioramaTerrainChunkInput west;
@@ -376,6 +455,8 @@ int main(void)
     TestDirtyChunkCoverage();
     TestCutoutAndHiddenShapes();
     TestStructureFacesAndRoofSlope();
+    TestStackedSouthFacadeAndCrop();
+    TestPixelProfiledRoofShell();
     TestChunkSeamAndHaloInvalidation();
     TestFrustum();
     puts("terrain mesh tests passed");

@@ -20,6 +20,8 @@ extern const struct DioramaGeneratedMapOverride gDioramaMapOverrides[];
 extern const size_t gDioramaMapOverrideCount;
 extern const struct DioramaGeneratedBuildingTemplate gDioramaBuildingTemplates[];
 extern const size_t gDioramaBuildingTemplateCount;
+extern const uint8_t gDioramaBuildingRoofProfilePixels[];
+extern const size_t gDioramaBuildingRoofProfilePixelCount;
 extern const struct DioramaGeneratedBuildingPlacement gDioramaBuildingPlacements[];
 extern const size_t gDioramaBuildingPlacementCount;
 
