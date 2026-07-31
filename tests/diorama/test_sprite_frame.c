@@ -180,7 +180,7 @@ static void TestPoseAndInterpolation(void)
     CHECK(DioramaSprite_BuildPose(&sSnapshot, &current, &pose));
     CHECK_CLOSE(pose.x, 1.5f);
     CHECK_CLOSE(pose.z, -1.0f);
-    CHECK_CLOSE(pose.y, DIORAMA_TERRAIN_LEDGE_HEIGHT * 0.5f);
+    CHECK_CLOSE(pose.y, 0.0f);
 
     previous.previousMapX = 1;
     previous.previousMapY = 1;

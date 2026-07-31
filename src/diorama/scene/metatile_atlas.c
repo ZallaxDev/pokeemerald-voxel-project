@@ -9,6 +9,8 @@
 #define TILE_VFLIP (1 << 11)
 #define TILE_PALETTE_SHIFT 12
 
+static uint16_t sForegroundAlpha[DIORAMA_TILE_COUNT][DIORAMA_METATILE_SIZE];
+
 uint8_t DioramaMetatile_DecodePixel(const uint8_t *tileGraphics, uint16_t tileEntry,
                                     uint8_t x, uint8_t y)
 {
@@ -100,10 +102,27 @@ void DioramaMetatile_ComposeLayer(const uint8_t *tileGraphics, const uint16_t *t
     }
 }
 
+void DioramaMetatile_BuildAlphaMask(const uint32_t *pixels,
+                                    uint16_t rows[DIORAMA_METATILE_SIZE])
+{
+    int y;
+
+    for (y = 0; y < DIORAMA_METATILE_SIZE; y++)
+    {
+        int x;
+
+        rows[y] = 0;
+        for (x = 0; x < DIORAMA_METATILE_SIZE; x++)
+            if (pixels[y * DIORAMA_METATILE_SIZE + x] >> 24)
+                rows[y] |= (uint16_t)1 << x;
+    }
+}
+
 void DioramaAtlas_Clear(uint32_t *atlasPixels, uint8_t *presentMetatiles)
 {
     memset(atlasPixels, 0, DIORAMA_ATLAS_PIXEL_COUNT * sizeof(*atlasPixels));
     memset(presentMetatiles, 0, DIORAMA_ATLAS_PRESENT_BYTES);
+    memset(sForegroundAlpha, 0, sizeof(sForegroundAlpha));
 }
 
 static bool IsPresent(const uint8_t *presentMetatiles, uint16_t metatileId)
@@ -223,6 +242,8 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
                     if (metatilePixels[pixel] == layerPixels[pixel])
                         metatilePixels[pixel] = 0;
                 BlitWithGutter(foregroundAtlasPixels, cell->metatileId, metatilePixels);
+                DioramaMetatile_BuildAlphaMask(metatilePixels,
+                                               sForegroundAlpha[cell->metatileId]);
             }
             else
             {
@@ -232,6 +253,8 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
                 DioramaMetatile_ComposeLayer(snapshot->tileGraphics, cell->tileEntries,
                                              snapshot->fadedPalette, 1, layerPixels);
                 BlitWithGutter(foregroundAtlasPixels, cell->metatileId, layerPixels);
+                DioramaMetatile_BuildAlphaMask(layerPixels,
+                                               sForegroundAlpha[cell->metatileId]);
             }
         }
         else
@@ -242,6 +265,8 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
             DioramaMetatile_ComposeLayer(snapshot->tileGraphics, cell->tileEntries,
                                          snapshot->fadedPalette, 1, layerPixels);
             BlitWithGutter(foregroundAtlasPixels, cell->metatileId, layerPixels);
+            DioramaMetatile_BuildAlphaMask(layerPixels,
+                                           sForegroundAlpha[cell->metatileId]);
         }
         presentMetatiles[cell->metatileId / 8] |= 1 << (cell->metatileId % 8);
         if (updatedMetatiles != NULL)
@@ -275,6 +300,16 @@ struct DioramaAtlasUv DioramaAtlas_GetUv(uint16_t metatileId)
     };
 
     return uv;
+}
+
+void DioramaAtlas_GetForegroundAlphaMask(uint16_t metatileId,
+                                         uint16_t rows[DIORAMA_METATILE_SIZE])
+{
+    if (metatileId >= DIORAMA_TILE_COUNT)
+        memset(rows, 0, DIORAMA_METATILE_SIZE * sizeof(*rows));
+    else
+        memcpy(rows, sForegroundAlpha[metatileId],
+               DIORAMA_METATILE_SIZE * sizeof(*rows));
 }
 
 #endif

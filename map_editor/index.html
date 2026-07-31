@@ -45,17 +45,12 @@
         <section class="inspector-section">
           <h3>Geometry</h3>
           <div class="field-grid">
-            <label class="wide">Shape<select id="shape"><option>flat</option><option>extruded</option><option>ledge</option><option>water</option><option>cutout</option><option>roof</option><option>building-part</option><option>hidden</option></select></label>
+            <label class="wide">Shape<select id="shape"><option>flat</option><option>extruded</option><option>ledge</option><option>water</option><option>hidden</option></select></label>
             <label>Ground height<input id="ground-height" type="number" min="-1" max="8" step="0.125"></label><label>Volume height<input id="height" type="number" min="0" max="8" step="0.125"></label>
-            <label>Plane axis<select id="axis"><option>x</option><option>z</option><option>cross</option></select></label><label>Roof profile<select id="profile"><option>none</option><option>flat</option><option>gable-x</option><option>gable-z</option></select></label>
-            <label class="wide">Cutout base<input id="base-metatile" type="number" min="0" max="1023" placeholder="Required for cutout"></label>
           </div>
           <button id="apply-geometry" class="primary wide-button">Apply override to selection</button><button id="remove-overrides" class="danger wide-button">Remove selected overrides</button>
         </section>
         <section class="inspector-section"><div class="section-title"><h3>Face materials</h3><button id="clear-faces" class="text-button">Use self</button></div><div id="face-list" class="face-list"></div></section>
-        <section class="inspector-section">
-          <h3>Reusable rules</h3><label class="wide">Building template<select id="building-template"></select></label><button id="place-building" class="wide-button">Place at selection origin</button><button id="remove-building" class="danger wide-button">Remove building under selection</button><hr><button id="apply-sign-preset" class="wide-button">Apply panel rule to all signs</button><small class="hint">Uses the compiler-supported reusable sign event rule: a cross-axis cutout with a depth-like appearance.</small>
-        </section>
       </div>
     </aside>
   </main>

@@ -1,191 +1,267 @@
 #!/usr/bin/env python3
 
+import copy
+import hashlib
+import json
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
-from building_profiles import (ComposedFootprint, Pixel, PixelSource, TilesetComposer,
-                               TRANSPARENT_PIXEL, compose_reference, extract_roof_profile)
-from compile_rules import (RuleError, array, compile_data, parse_camera,
-                           parse_definition, parse_pixel_profile, render_c)
-from export_editor_map import build_editor_document
+from compile_rules import (ARCHETYPES, RuleError, _action, _ground_policy, _mask,
+                            _pattern_placements, _patterns, _profiles, _selector,
+                            _validate_logical_ids, _validate_pattern_claim_overlaps,
+                            compile_data, load_json, parse_camera, render_c, render_header)
+from migrate_v1_to_v2 import MigrationError, migrate_document
+
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class DioramaRuleCompilerTests(unittest.TestCase):
-    def test_repository_rules_are_deterministic(self):
-        root = Path(__file__).resolve().parents[2]
-        first = compile_data(root)
-        second = compile_data(root)
-        self.assertEqual(first, second)
-        self.assertEqual(render_c(first), render_c(second))
-        self.assertEqual(len(first["map_rules"]), 7)
-        self.assertEqual(len(first["map_overrides"]), 68)
-        self.assertEqual(len(first["placements"]), 3)
-        inferred = {metatile: rule[3] for _, metatile, rule in first["tileset_rules"]}
-        self.assertEqual(inferred[0x1C6], 0x00D)
-        self.assertEqual(inferred[0x1C7], 0x00D)
-        self.assertEqual(inferred[0x1CE], 0x001)
-        self.assertEqual(inferred[0x1CF], 0x001)
+    @classmethod
+    def setUpClass(cls):
+        cls.data = compile_data(ROOT)
 
-    def test_rejects_unknown_shape(self):
-        with self.assertRaises(RuleError):
-            parse_definition({"shape": "sphere"}, "test")
+    def test_repository_ir_is_complete_and_deterministic(self):
+        second = compile_data(ROOT)
+        self.assertEqual(self.data, second)
+        self.assertEqual(render_c(self.data), render_c(second))
+        self.assertEqual(len(self.data["tilesets"]), 75)
+        self.assertEqual([row["id"] for row in self.data["tilesets"]], list(range(1, 76)))
+        self.assertEqual(len(self.data["layouts"]), 441)
+        self.assertEqual([row["id"] for row in self.data["layouts"]], list(range(1, 442)))
+        self.assertEqual(len(self.data["maps"]), 518)
+        self.assertEqual(sum(row["supported"] for row in self.data["maps"]), 518)
+        references = {"MAP_FORTREE_CITY", "MAP_SOOTOPOLIS_CITY", "MAP_MT_CHIMNEY",
+                      "MAP_JAGGED_PASS", "MAP_GRANITE_CAVE_B1F", "MAP_MT_PYRE_2F"}
+        self.assertTrue(references <= {row["symbol"] for row in self.data["maps"]
+                                      if row["supported"]})
+        indoor = next(row for row in self.data["maps"]
+                      if row["mapType"] == "MAP_TYPE_INDOOR"
+                      and row["symbol"] not in {"MAP_LITTLEROOT_TOWN_BRENDANS_HOUSE_1F",
+                                                "MAP_LITTLEROOT_TOWN_BRENDANS_HOUSE_2F",
+                                                "MAP_LITTLEROOT_TOWN_MAYS_HOUSE_1F",
+                                                "MAP_LITTLEROOT_TOWN_MAYS_HOUSE_2F",
+                                                "MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB"})
+        self.assertEqual(indoor["camera"]["profile"], "interior")
+        self.assertTrue(all(row["unsupportedReason"] for row in self.data["maps"]
+                            if not row["supported"]))
 
-    def test_rejects_invalid_height(self):
-        with self.assertRaises(RuleError):
-            parse_definition({"shape": "cutout", "height": 0}, "test")
-        with self.assertRaises(RuleError):
-            parse_definition({"shape": "flat", "groundHeight": 20}, "test")
+    def test_sha256_is_canonical_and_covers_every_ir_section(self):
+        canonical_keys = ("schemaVersion", "tilesets", "layouts", "pools", "profiles", "default",
+                          "behaviorRules", "tilesetPins", "contextualRules", "exactPatterns",
+                          "eventPresets", "maps")
+        canonical = {key: self.data[key] for key in canonical_keys}
+        encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=True).encode("ascii")
+        self.assertEqual(self.data["sha256"], hashlib.sha256(encoded).hexdigest())
+        self.assertEqual(len(self.data["sha256"]), 64)
+        changed = copy.deepcopy(canonical)
+        changed["profiles"][0]["masks"]["claim"]["rows"][0] = "fffe"
+        changed_hash = hashlib.sha256(json.dumps(changed, sort_keys=True, separators=(",", ":"),
+                                                 ensure_ascii=True).encode("ascii")).hexdigest()
+        self.assertNotEqual(changed_hash, self.data["sha256"])
 
-    def test_rejects_unknown_fields(self):
-        with self.assertRaises(RuleError):
-            parse_definition({"shape": "flat", "typo": 1}, "test")
+    def test_migrated_behavior_is_live_or_has_structured_exception(self):
+        for rule in self.data["behaviorRules"]:
+            if rule["placementCount"] == 0:
+                self.assertEqual(set(rule["allowedUnused"]), {"reason"})
+                self.assertTrue(rule["allowedUnused"]["reason"])
+            else:
+                self.assertIsNone(rule["allowedUnused"])
 
-    def test_rejects_invalid_face_material(self):
-        with self.assertRaises(RuleError):
-            parse_definition({"shape": "flat", "faces": {"bottom": "none"}}, "test")
-        with self.assertRaises(RuleError):
-            parse_definition({"shape": "flat", "faces": {"north": {"layer": "glow"}}}, "test")
+    def test_all_g3_archetypes_are_closed(self):
+        self.assertEqual(len(ARCHETYPES), len(set(ARCHETYPES)))
+        self.assertIn("ground", ARCHETYPES)
+        self.assertIn("stairs-down-w", ARCHETYPES)
+        self.assertIn("animated-cutout", ARCHETYPES)
+        with self.assertRaisesRegex(RuleError, "unknown archetype"):
+            _action({"archetype": "sphere", "pool": "terrain"}, "test", {"terrain"}, {})
 
-    def test_camera_profile_is_editor_friendly(self):
+    def test_action_heights_align_to_voxel_grid(self):
+        action = _action({"archetype": "ground", "pool": "terrain",
+                          "groundOffset": -0.125, "height": 0.375},
+                         "test", {"terrain"}, {})
+        self.assertEqual(action["height"], 0.375)
+        with self.assertRaisesRegex(RuleError, "1/16-cell"):
+            _action({"archetype": "ground", "pool": "terrain", "height": 0.1},
+                    "test", {"terrain"}, {})
+
+    def test_action_terrain_class_is_closed(self):
+        action = _action({"archetype": "ground", "pool": "terrain",
+                          "terrainClass": "pavement"}, "test", {"terrain"}, {})
+        self.assertEqual(action["terrainClass"], "pavement")
+        with self.assertRaisesRegex(RuleError, "unknown terrain class"):
+            _action({"archetype": "ground", "pool": "terrain",
+                     "terrainClass": "generic-stuff"}, "test", {"terrain"}, {})
+
+    def test_rejects_v1_and_duplicate_json_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rules.json"
+            path.write_text('{"version":1}', encoding="utf-8")
+            with self.assertRaisesRegex(RuleError, "schemaVersion must be 2"):
+                load_json(path)
+            path.write_text('{"schemaVersion":2,"kind":"global","kind":"map"}', encoding="utf-8")
+            with self.assertRaisesRegex(RuleError, "duplicate key"):
+                load_json(path)
+
+    def test_profile_masks_samples_ranges_and_references(self):
+        tilesets = {"gTileset_Test": SimpleNamespace(metatile_count=2)}
+        values = [{"id": "tree-profile", "archetype": "tree",
+                   "masks": {"occupancy": {"width": 3, "height": 1, "rows": ["7"]}},
+                   "samples": [{"tileset": "gTileset_Test", "metatile": 1, "layer": "full"}]}]
+        profiles, by_id = _profiles(values, "profiles", tilesets)
+        self.assertEqual(profiles[0]["masks"]["occupancy"]["rows"], ["7"])
+        self.assertIn("tree-profile", by_id)
+        bad = copy.deepcopy(values)
+        bad[0]["samples"][0]["metatile"] = 2
+        with self.assertRaisesRegex(RuleError, "0 through 1"):
+            _profiles(bad, "profiles", tilesets)
+        with self.assertRaisesRegex(RuleError, "outside mask width"):
+            _mask({"width": 3, "height": 1, "rows": ["f"]}, "mask")
+
+    def test_context_selector_accepts_every_context_dimension(self):
+        tilesets = {"gTileset_Test": object()}
+        behaviors = {"MB_NORMAL": 0}
+        selector = _selector({
+            "tilesets": ["gTileset_Test"], "metatiles": [4], "behaviors": ["MB_NORMAL"],
+            "layerTypes": ["split"], "elevations": [3], "mapTypes": ["MAP_TYPE_ROUTE"],
+            "neighbors": {"n": {"behavior": "MB_NORMAL", "layerType": "normal",
+                                  "elevation": 2, "metatile": 7}},
+            "event": {"kind": "object", "class": "berry-tree"},
+        }, "selector", tilesets, behaviors)
+        self.assertEqual(set(selector["neighbors"]), {"n"})
+        self.assertEqual(selector["event"]["class"], "berry-tree")
+        with self.assertRaisesRegex(RuleError, "unknown fields"):
+            _selector({"collision": [1]}, "selector", tilesets, behaviors)
+
+    def test_exact_pattern_dimensions_claim_and_placement_scan(self):
+        tilesets = {"P": SimpleNamespace(role="primary", metatile_count=5),
+                    "S": SimpleNamespace(role="secondary", metatile_count=4)}
+        raw = [{"id": "door-pattern", "dimensions": {"width": 2, "height": 2},
+                "tilesets": {"primary": "P", "secondary": "S"},
+                "cells": [[1, 2], [3, 4]], "priority": 10, "claimMask": ["11", "01"],
+                "action": {"archetype": "building", "pool": "structure"}}]
+        pattern = _patterns(raw, "patterns", tilesets, {"structure"}, {})[0]
+        layout = {"id": "L", "primary_tileset": "P", "secondary_tileset": "S",
+                  "width": 3, "height": 2}
+        cells = {"L": tuple({"metatile": value} for value in (1, 2, 9, 3, 4, 9))}
+        self.assertEqual(_pattern_placements(pattern, [layout], cells), 1)
+        bad = copy.deepcopy(raw)
+        bad[0]["claimMask"] = ["00", "00"]
+        with self.assertRaisesRegex(RuleError, "claim at least one"):
+            _patterns(bad, "patterns", tilesets, {"structure"}, {})
+
+    def test_exact_pattern_rejects_cells_outside_declared_tilesets(self):
+        tilesets = {"P": SimpleNamespace(role="primary", metatile_count=2),
+                    "S": SimpleNamespace(role="secondary", metatile_count=1)}
+        base = {"id": "range-pattern", "dimensions": {"width": 1, "height": 1},
+                "tilesets": {"primary": "P", "secondary": "S"}, "priority": 1,
+                "claimMask": ["1"],
+                "action": {"archetype": "building", "pool": "structure"}}
+        for metatile in (2, 0x201):
+            raw = [{**base, "cells": [[metatile]]}]
+            with self.assertRaisesRegex(RuleError, "outside the declared"):
+                _patterns(raw, "patterns", tilesets, {"structure"}, {})
+
+    def test_equal_priority_concrete_pattern_claim_overlap_is_rejected(self):
+        action = {"archetype": "building", "pool": "structure"}
+        patterns = [
+            {"id": name, "dimensions": {"width": 1, "height": 1},
+             "tilesets": {"primary": "P", "secondary": "S"}, "cells": [[1]],
+             "priority": priority, "claimMask": ["1"], "action": action}
+            for name, priority in (("first", 4), ("second", 4))
+        ]
+        layout = {"id": "L", "primary_tileset": "P", "secondary_tileset": "S",
+                  "width": 1, "height": 1}
+        maps = [{"symbol": "MAP_TEST", "layout": "L"}]
+        cells = {"L": ({"metatile": 1},)}
+        with self.assertRaisesRegex(RuleError, "equal-priority pattern claim overlap"):
+            _validate_pattern_claim_overlaps(patterns, maps, {"L": layout}, cells, {})
+        patterns[1]["priority"] = 3
+        _validate_pattern_claim_overlaps(patterns, maps, {"L": layout}, cells, {})
+
+    def test_duplicate_logical_ids_are_global_across_sections_and_scopes(self):
+        with self.assertRaisesRegex(RuleError, "duplicate logical ID 'shared'"):
+            _validate_logical_ids([("shared", "profiles"),
+                                   ("shared", "MAP_TEST.contextualRules")])
+
+    def test_ground_policy_is_closed(self):
+        self.assertEqual(_ground_policy({"mode": "automatic"}, "ground"), {"mode": "automatic"})
+        self.assertEqual(_ground_policy({"mode": "manual", "metatile": 17}, "ground")["metatile"], 17)
+        with self.assertRaisesRegex(RuleError, "unknown fields"):
+            _ground_policy({"mode": "automatic", "metatile": 1}, "ground")
+
+    def test_camera_ranges(self):
         profile, pitch, focal = parse_camera(
             {"profile": "interior", "pitch": 55, "focalLength": 150}, "test")
-        self.assertEqual(profile, "DIORAMA_CAMERA_INTERIOR")
+        self.assertEqual(profile, "interior")
         self.assertAlmostEqual(pitch, 0.959931, places=5)
         self.assertEqual(focal, 150)
-
-    def test_rejects_invalid_camera(self):
-        with self.assertRaises(RuleError):
-            parse_camera({"profile": "cinematic"}, "test")
         with self.assertRaises(RuleError):
             parse_camera({"profile": "interior", "pitch": 90}, "test")
 
-    def test_rejects_non_array_editor_collections(self):
-        with self.assertRaisesRegex(RuleError, "must be an array"):
-            array(None, "test.overrides")
+    def test_explicit_migration_never_revives_retired_prototypes(self):
+        migrated = migrate_document({"version": 1, "map": "MAP_X", "layout": "LAYOUT_X",
+                                     "supported": True, "overrides": [], "buildings": []})
+        self.assertEqual(migrated["schemaVersion"], 2)
+        self.assertEqual(migrated["contextualRules"], [])
+        with self.assertRaisesRegex(MigrationError, "retired"):
+            migrate_document({"version": 1, "map": "MAP_X", "layout": "LAYOUT_X",
+                              "supported": True, "overrides": [{"x": 1}], "buildings": []})
+        with self.assertRaisesRegex(MigrationError, "retired"):
+            migrate_document({"version": 1, "templates": {"house": {}}})
 
-    def test_pixel_profile_south_facade(self):
-        profile = {
-            "version": 1,
-            "facades": {"south": {
-                "mode": "footprint-rows", "rows": 2,
-                "unitHeight": 1.0, "fit": "natural",
-            }},
-        }
-        self.assertEqual(parse_pixel_profile(profile, "test", 5, 5, 3),
-                         (2, "DIORAMA_BUILDING_FACADE_FIT_NATURAL", 1.0,
-                          0, 0, None, None, ()))
+    def test_c_contract_contains_full_catalog_base_tables(self):
+        header, source = render_header(), render_c(self.data)
+        self.assertIn("struct DioramaGeneratedTilesetV2", header)
+        self.assertIn("struct DioramaGeneratedLayoutV2", header)
+        self.assertIn("struct DioramaGeneratedMapV2", header)
+        self.assertEqual(source.count("gTileset_"), 75)
+        self.assertIn("gDioramaBehaviorRulesV2", source)
+        self.assertIn("gDioramaBehaviorRuleV2Count", source)
+        self.assertIn(self.data["sha256"], source)
 
-    def test_rejects_invalid_pixel_profile_facades(self):
-        base = {"version": 1, "facades": {"south": {
-            "mode": "footprint-rows", "rows": 2,
-            "unitHeight": 1.0, "fit": "natural",
-        }}}
-        for field, value in (("rows", 0), ("rows", 5), ("unitHeight", 0),
-                             ("fit", "contain"), ("mode", "tiles")):
-            candidate = {"version": 1, "facades": {"south": dict(base["facades"]["south"])}}
-            candidate["facades"]["south"][field] = value
-            with self.assertRaises(RuleError):
-                parse_pixel_profile(candidate, "test", 5, 5, 3)
-        with self.assertRaises(RuleError):
-            parse_pixel_profile({"version": 1, "facades": {"north": {}}}, "test", 5, 5, 3)
-        with self.assertRaises(RuleError):
-            parse_pixel_profile({"version": 1, "recesses": {}}, "test", 5, 5, 3)
-
-    def test_pixel_profile_reference_roof_schema(self):
-        profile = {
-            "version": 1,
-            "reference": {"map": "MAP_TEST", "x": 1, "y": 2},
-            "roof": {
-                "mode": "pixel-silhouette", "layer": "full", "slabPixels": 2,
-                "eaves": {"north": 0, "east": 1, "south": 2, "west": 3},
-                "seal": [{"x": 0, "y": 0}],
-            },
-        }
-        parsed = parse_pixel_profile(profile, "test", 5, 5, 3)
-        self.assertEqual(parsed[3:5], (2, 2))
-        self.assertEqual(parsed[5], {"map": "MAP_TEST", "x": 1, "y": 2})
-        self.assertEqual(parsed[6:], ("full", ((0, 0),)))
-        invalid = dict(profile)
-        invalid["roof"] = dict(profile["roof"], slabPixels=-1)
-        with self.assertRaises(RuleError):
-            parse_pixel_profile(invalid, "test", 5, 5, 3)
-        invalid = dict(profile)
-        invalid["roof"] = dict(profile["roof"], seal=[{"x": 80, "y": 0}])
-        with self.assertRaises(RuleError):
-            parse_pixel_profile(invalid, "test", 5, 5, 3)
-
-    def test_flood_fill_profile_and_seal(self):
-        visible = Pixel((1, 2, 3, 255), PixelSource(1, 0, 0, 0, 0, 1, 0, 0, False, False))
-        pixels = [TRANSPARENT_PIXEL] * 64
-        for x, y in ((1, 1), (2, 1), (1, 2), (2, 2)):
-            pixels[y * 4 + x] = visible
-        image = ComposedFootprint(4, 16, (1,), tuple(pixels), tuple(pixels), tuple(pixels))
-        self.assertEqual(extract_roof_profile(image, 1, "full"), (0, 15, 15, 0, 0))
-        self.assertEqual(extract_roof_profile(image, 1, "full", ((0, 1),)),
-                         (15, 15, 15, 0, 0))
-
-    def test_repository_reference_profiles(self):
-        root = Path(__file__).resolve().parents[2]
-        house = compose_reference(root, "MAP_LITTLEROOT_TOWN", 2, 4, 5, 5)
-        lab = compose_reference(root, "MAP_LITTLEROOT_TOWN", 3, 12, 7, 5)
-        self.assertEqual(house.metatiles[:5], (0x208, 0x209, 0x209, 0x209, 0x20A))
-        house_profile = extract_roof_profile(house, 3, "foreground")
-        lab_profile = extract_roof_profile(lab, 3, "foreground")
-        self.assertEqual(house_profile,
-                         (30, 31, 31, 31, 31, 31, 31, 30,
-                          46, 47, 47, 47, 47, 47, 47, 46,
-                          46, 46, 47, 47, 47, 47, 47, 46,
-                          46, 46, 47, 47, 47, 47, 47, 46,
-                          46, 46, 47, 47, 47, 47, 47, 46,
-                          46, 46, 47, 47, 47, 47, 47, 46,
-                          46, 46, 47, 47, 47, 47, 47, 46,
-                          46, 46, 47, 47, 47, 47, 47, 46,
-                          46, 46, 47, 47, 47, 47, 47, 46,
-                          30, 30, 31, 31, 31, 31, 31, 30, 30))
-        self.assertEqual(lab_profile, (47,) * 113)
-
-    def test_composition_uses_both_tilesets_flips_layers_and_index_zero(self):
-        root = Path(__file__).resolve().parents[2]
-        house = compose_reference(root, "MAP_LITTLEROOT_TOWN", 2, 4, 5, 5)
-        sources = [pixel.source for layer in (house.base, house.foreground)
-                   for pixel in layer if pixel.source is not None]
-        self.assertTrue(any(source.tile < 0x200 for source in sources))
-        self.assertTrue(any(source.tile >= 0x200 for source in sources))
-        composer = TilesetComposer(root / "data/tilesets/primary/general",
-                                   root / "data/tilesets/secondary/petalburg")
-        primary = composer.compose_metatile(0)
-        secondary = composer.compose_metatile(0x200)
-        self.assertTrue(all(pixel.source.metatile_id == 0 for layer in primary[:2]
-                            for pixel in layer if pixel.source is not None))
-        self.assertTrue(all(pixel.source.metatile_id == 0x200 for layer in secondary[:2]
-                            for pixel in layer if pixel.source is not None))
-        hflipped = [pixel.source for layer in composer.compose_metatile(0xB)[:2]
-                    for pixel in layer if pixel.source is not None]
-        vflipped = [pixel.source for layer in composer.compose_metatile(0xC9)[:2]
-                    for pixel in layer if pixel.source is not None]
-        self.assertTrue(any(source.hflip and source.u == 7 for source in hflipped))
-        self.assertTrue(any(source.vflip and source.v == 7 for source in vflipped))
-        self.assertTrue(any(source.color_index == 0 for source in sources))
-        self.assertTrue(all(not pixel.visible and pixel.rgba[3] == 0
-                            for pixel in house.foreground
-                            if pixel.source is not None and pixel.source.color_index == 0))
-        for base, foreground, full in zip(house.base, house.foreground, house.full):
-            self.assertEqual(full, foreground if foreground.visible else base)
-
-    def test_reference_outside_map_is_explicit(self):
-        root = Path(__file__).resolve().parents[2]
-        with self.assertRaisesRegex(ValueError, "outside MAP_LITTLEROOT_TOWN"):
-            compose_reference(root, "MAP_LITTLEROOT_TOWN", 19, 19, 5, 5)
-
-    def test_editor_export_uses_authoritative_map_data(self):
-        root = Path(__file__).resolve().parents[2]
-        document = build_editor_document(root, "MAP_LITTLEROOT_TOWN_BRENDANS_HOUSE_1F")
-        self.assertEqual(document["schemaVersion"], 1)
-        self.assertEqual(document["map"]["width"], 11)
-        self.assertEqual(document["map"]["height"], 9)
-        self.assertEqual(len(document["cells"]), 99)
-        self.assertEqual(document["rules"]["camera"]["profile"], "interior")
-        self.assertEqual(document["tilesets"]["primary"]["symbol"], "gTileset_Building")
+    def test_c_contract_packs_every_normalized_g3_section_and_map_scope(self):
+        packed = copy.deepcopy(self.data)
+        action = {"archetype": "ground", "pool": "terrain", "profile": "flat-cell",
+                  "axis": "cross", "groundOffset": 0.25, "height": 1.0,
+                  "groundPolicy": {"mode": "manual", "metatile": 1}}
+        selector = {"tilesets": [packed["tilesets"][0]["symbol"]], "metatiles": [1],
+                    "behaviors": ["MB_NORMAL"], "behaviorIds": [0],
+                    "layerTypes": ["normal"], "elevations": [2],
+                    "mapTypes": ["MAP_TYPE_TOWN"],
+                    "neighbors": {"nw": {"metatile": 1, "behavior": "MB_NORMAL",
+                                             "behaviorId": 0, "layerType": "normal",
+                                             "elevation": 2}},
+                    "event": {"kind": "object", "class": "berry-tree"}}
+        rule = {"id": "packed-rule", "selector": selector, "action": action,
+                "priority": 7, "placementCount": 1, "allowedUnused": None}
+        primary = next(row for row in packed["tilesets"] if row["role"] == "primary")
+        secondary = next(row for row in packed["tilesets"] if row["role"] == "secondary")
+        pattern = {"id": "packed-pattern", "dimensions": {"width": 1, "height": 1},
+                   "tilesets": {"primary": primary["symbol"], "secondary": secondary["symbol"]},
+                   "cells": [[0]], "priority": 8, "claimMask": ["1"], "action": action,
+                   "placementCount": 0, "allowedNoPlacements": {"reason": "fixture"}}
+        packed["contextualRules"] = [rule]
+        packed["exactPatterns"] = [pattern]
+        packed["eventPresets"] = [{"id": "packed-preset",
+                                    "event": {"kind": "object", "class": "berry-tree"},
+                                    "action": action, "placementCount": 1,
+                                    "allowedUnused": None}]
+        packed["maps"][0]["contextualRules"] = [{**rule, "id": "local-rule"}]
+        packed["maps"][0]["exactPatterns"] = [{**pattern, "id": "local-pattern"}]
+        header, source = render_header(), render_c(packed)
+        for name in ("Pools", "Profiles", "Masks", "MaskRows", "Samples", "TilesetPins",
+                     "Selectors", "Neighbors", "ContextualRules", "PatternCells",
+                     "PatternClaims", "ExactPatterns", "EventPresets"):
+            self.assertIn(f"gDiorama{name}V2", header)
+            self.assertIn(f"gDiorama{name}V2", source)
+        for content in ("packed-rule", "local-rule", "packed-pattern", "local-pattern",
+                        "packed-preset", "berry-tree"):
+            self.assertIn(content, source)
+        self.assertIn("UINT64_C(0xFFFF)", source)
 
 
 if __name__ == "__main__":

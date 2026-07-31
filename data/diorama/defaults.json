@@ -1,44 +1,114 @@
 {
-  "version": 1,
+  "schemaVersion": 2,
+  "kind": "global",
+  "semanticPools": [
+    { "id": "terrain", "description": "Continuous walkable terrain and elevation features." },
+    { "id": "water", "description": "Water surfaces that may merge only with compatible water." },
+    { "id": "structure", "description": "Buildings, roofs, bridges, supports and architectural shells." },
+    { "id": "vegetation", "description": "Trees, shrubs, grass and flowers." },
+    { "id": "furniture", "description": "Indoor counters, tables, desks, beds and bookcases." },
+    { "id": "prop", "description": "Independent signs, posts, rocks, consoles and cutouts." }
+  ],
+  "profiles": [
+    {
+      "id": "flat-cell",
+      "archetype": "ground",
+      "masks": {
+        "occupancy": {
+          "width": 16,
+          "height": 16,
+          "rows": [
+            "ffff", "ffff", "ffff", "ffff", "ffff", "ffff", "ffff", "ffff",
+            "ffff", "ffff", "ffff", "ffff", "ffff", "ffff", "ffff", "ffff"
+          ]
+        },
+        "claim": {
+          "width": 16,
+          "height": 16,
+          "rows": [
+            "ffff", "ffff", "ffff", "ffff", "ffff", "ffff", "ffff", "ffff",
+            "ffff", "ffff", "ffff", "ffff", "ffff", "ffff", "ffff", "ffff"
+          ]
+        }
+      },
+      "samples": [
+        { "tileset": "gTileset_General", "metatile": 0, "layer": "full" }
+      ]
+    }
+  ],
   "default": {
-    "shape": "flat"
+    "archetype": "ground",
+    "pool": "terrain",
+    "profile": "flat-cell",
+    "groundPolicy": { "mode": "automatic" }
   },
-  "behaviors": {
-    "MB_TALL_GRASS": { "shape": "cutout", "axis": "x", "height": 0.55, "baseMetatile": 1,
-      "faces": { "top": { "metatile": "self", "layer": "base" } } },
-    "MB_JUMP_EAST": { "shape": "ledge", "groundHeight": 0.375 },
-    "MB_JUMP_WEST": { "shape": "ledge", "groundHeight": 0.375 },
-    "MB_JUMP_NORTH": { "shape": "ledge", "groundHeight": 0.375 },
-    "MB_JUMP_SOUTH": { "shape": "ledge", "groundHeight": 0.375 },
-    "MB_JUMP_NORTHEAST": { "shape": "ledge", "groundHeight": 0.375 },
-    "MB_JUMP_NORTHWEST": { "shape": "ledge", "groundHeight": 0.375 },
-    "MB_JUMP_SOUTHEAST": { "shape": "ledge", "groundHeight": 0.375 },
-    "MB_JUMP_SOUTHWEST": { "shape": "ledge", "groundHeight": 0.375 },
-    "MB_POND_WATER": { "shape": "water", "groundHeight": -0.125 },
-    "MB_INTERIOR_DEEP_WATER": { "shape": "water", "groundHeight": -0.125 },
-    "MB_DEEP_WATER": { "shape": "water", "groundHeight": -0.125 },
-    "MB_WATERFALL": { "shape": "water", "groundHeight": -0.125 },
-    "MB_SOOTOPOLIS_DEEP_WATER": { "shape": "water", "groundHeight": -0.125 },
-    "MB_OCEAN_WATER": { "shape": "water", "groundHeight": -0.125 },
-    "MB_NO_SURFACING": { "shape": "water", "groundHeight": -0.125 },
-    "MB_SEAWEED": { "shape": "water", "groundHeight": -0.125 },
-    "MB_SEAWEED_NO_SURFACING": { "shape": "water", "groundHeight": -0.125 },
-    "MB_EASTWARD_CURRENT": { "shape": "water", "groundHeight": -0.125 },
-    "MB_WESTWARD_CURRENT": { "shape": "water", "groundHeight": -0.125 },
-    "MB_NORTHWARD_CURRENT": { "shape": "water", "groundHeight": -0.125 },
-    "MB_SOUTHWARD_CURRENT": { "shape": "water", "groundHeight": -0.125 },
-    "MB_WATER_DOOR": { "shape": "water", "groundHeight": -0.125 },
-    "MB_WATER_SOUTH_ARROW_WARP": { "shape": "water", "groundHeight": -0.125 },
-    "MB_UNUSED_6F": { "shape": "water", "groundHeight": -0.125 },
-    "MB_BRIDGE_OVER_OCEAN": { "shape": "flat", "groundHeight": 0.75 },
-    "MB_BRIDGE_OVER_POND_LOW": { "shape": "flat", "groundHeight": 0.75 },
-    "MB_BRIDGE_OVER_POND_MED": { "shape": "flat", "groundHeight": 1.75 },
-    "MB_BRIDGE_OVER_POND_HIGH": { "shape": "flat", "groundHeight": 2.75 },
-    "MB_FORTREE_BRIDGE": { "shape": "flat", "groundHeight": 0.75 },
-    "MB_BRIDGE_OVER_POND_MED_EDGE_1": { "shape": "flat", "groundHeight": 1.75 },
-    "MB_BRIDGE_OVER_POND_MED_EDGE_2": { "shape": "flat", "groundHeight": 1.75 },
-    "MB_BRIDGE_OVER_POND_HIGH_EDGE_1": { "shape": "flat", "groundHeight": 2.75 },
-    "MB_BRIDGE_OVER_POND_HIGH_EDGE_2": { "shape": "flat", "groundHeight": 2.75 },
-    "MB_BIKE_BRIDGE_OVER_BARRIER": { "shape": "flat", "groundHeight": 0.75 }
+  "behaviorRules": [
+    { "behavior": "MB_DEEP_SAND", "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "sand" } },
+    { "behavior": "MB_SAND", "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "sand" } },
+    { "behavior": "MB_ASHGRASS", "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "ash" } },
+    { "behavior": "MB_CAVE", "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "rock" } },
+    { "behavior": "MB_MOUNTAIN_TOP", "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "rock" } },
+    { "behavior": "MB_MT_PYRE_HOLE", "action": { "archetype": "void", "pool": "terrain", "terrainClass": "void" } },
+    { "behavior": "MB_PUDDLE", "action": { "archetype": "shallow-water", "pool": "water", "groundOffset": -0.0625 } },
+    { "behavior": "MB_SHALLOW_WATER", "action": { "archetype": "shallow-water", "pool": "water", "groundOffset": -0.0625 } },
+    { "behavior": "MB_HOT_SPRINGS", "action": { "archetype": "hot-spring", "pool": "water", "groundOffset": -0.0625 } },
+    { "behavior": "MB_FOOTPRINTS", "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "sand" }, "allowedUnused": { "reason": "The behavior is a reliable sand classification retained for runtime map mutations." } },
+    { "behavior": "MB_ICE", "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "pavement" } },
+    { "behavior": "MB_THIN_ICE", "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "pavement" } },
+    { "behavior": "MB_CRACKED_ICE", "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "pavement" }, "allowedUnused": { "reason": "The behavior remains valid for runtime ice-state mutations even though no static layout currently uses it." } },
+    { "behavior": "MB_JUMP_EAST", "action": { "archetype": "ledge", "pool": "terrain", "height": 0.375 } },
+    { "behavior": "MB_JUMP_WEST", "action": { "archetype": "ledge", "pool": "terrain", "height": 0.375 } },
+    { "behavior": "MB_JUMP_NORTH", "action": { "archetype": "ledge", "pool": "terrain", "height": 0.375 }, "allowedUnused": { "reason": "Preserved from the active v1 behavior table; no current layout uses this direction." } },
+    { "behavior": "MB_JUMP_SOUTH", "action": { "archetype": "ledge", "pool": "terrain", "height": 0.375 } },
+    { "behavior": "MB_JUMP_NORTHEAST", "action": { "archetype": "ledge", "pool": "terrain", "height": 0.375 }, "allowedUnused": { "reason": "Preserved from the active v1 behavior table; no current layout uses this direction." } },
+    { "behavior": "MB_JUMP_NORTHWEST", "action": { "archetype": "ledge", "pool": "terrain", "height": 0.375 }, "allowedUnused": { "reason": "Preserved from the active v1 behavior table; no current layout uses this direction." } },
+    { "behavior": "MB_JUMP_SOUTHEAST", "action": { "archetype": "ledge", "pool": "terrain", "height": 0.375 } },
+    { "behavior": "MB_JUMP_SOUTHWEST", "action": { "archetype": "ledge", "pool": "terrain", "height": 0.375 } },
+    { "behavior": "MB_STAIRS_OUTSIDE_ABANDONED_SHIP", "action": { "archetype": "stairs-n", "pool": "terrain", "height": 1.0 } },
+    { "behavior": "MB_UP_ESCALATOR", "action": { "archetype": "stairs-n", "pool": "terrain", "height": 1.0 } },
+    { "behavior": "MB_DOWN_ESCALATOR", "action": { "archetype": "stairs-down-s", "pool": "terrain", "height": 1.0 } },
+    { "behavior": "MB_MUDDY_SLOPE", "action": { "archetype": "stairs-n", "pool": "terrain", "height": 1.0 } },
+    { "behavior": "MB_BUMPY_SLOPE", "action": { "archetype": "stairs-n", "pool": "terrain", "height": 1.0 } },
+    { "behavior": "MB_POND_WATER", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_INTERIOR_DEEP_WATER", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_DEEP_WATER", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_WATERFALL", "action": { "archetype": "waterfall", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_SOOTOPOLIS_DEEP_WATER", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_OCEAN_WATER", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_NO_SURFACING", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_SEAWEED", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_SEAWEED_NO_SURFACING", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_REFLECTION_UNDER_BRIDGE", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_EASTWARD_CURRENT", "action": { "archetype": "current", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_WESTWARD_CURRENT", "action": { "archetype": "current", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_NORTHWARD_CURRENT", "action": { "archetype": "current", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_SOUTHWARD_CURRENT", "action": { "archetype": "current", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_WATER_DOOR", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_WATER_SOUTH_ARROW_WARP", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 } },
+    { "behavior": "MB_UNUSED_6F", "action": { "archetype": "water", "pool": "water", "groundOffset": -0.125 }, "allowedUnused": { "reason": "Preserved from the active v1 behavior table; the symbol is intentionally unused by current layouts." } },
+    { "behavior": "MB_BRIDGE_OVER_OCEAN", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 0.75 } },
+    { "behavior": "MB_BRIDGE_OVER_POND_LOW", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 0.75 }, "allowedUnused": { "reason": "Preserved from the active v1 behavior table; no current layout uses the low pond bridge behavior." } },
+    { "behavior": "MB_BRIDGE_OVER_POND_MED", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 1.75 } },
+    { "behavior": "MB_BRIDGE_OVER_POND_HIGH", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 2.75 } },
+    { "behavior": "MB_FORTREE_BRIDGE", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 0.75 } },
+    { "behavior": "MB_BRIDGE_OVER_POND_MED_EDGE_1", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 1.75 } },
+    { "behavior": "MB_BRIDGE_OVER_POND_MED_EDGE_2", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 1.75 } },
+    { "behavior": "MB_BRIDGE_OVER_POND_HIGH_EDGE_1", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 2.75 } },
+    { "behavior": "MB_BRIDGE_OVER_POND_HIGH_EDGE_2", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 2.75 } },
+    { "behavior": "MB_BIKE_BRIDGE_OVER_BARRIER", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 0.75 } },
+    { "behavior": "MB_PACIFIDLOG_VERTICAL_LOG_TOP", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 0.75 } },
+    { "behavior": "MB_PACIFIDLOG_VERTICAL_LOG_BOTTOM", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 0.75 } },
+    { "behavior": "MB_PACIFIDLOG_HORIZONTAL_LOG_LEFT", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 0.75 } },
+    { "behavior": "MB_PACIFIDLOG_HORIZONTAL_LOG_RIGHT", "action": { "archetype": "bridge", "pool": "structure", "groundOffset": 0.75 } },
+    { "behavior": "MB_CRACKED_FLOOR_HOLE", "action": { "archetype": "void", "pool": "terrain", "terrainClass": "void" } },
+    { "behavior": "MB_SECRET_BASE_HOLE", "action": { "archetype": "void", "pool": "terrain", "terrainClass": "void" } }
+  ],
+  "contextualRules": [],
+  "exactPatterns": [],
+  "eventPresets": [],
+  "mapDefault": {
+    "supported": true,
+    "groundPolicy": { "mode": "automatic" },
+    "camera": { "profile": "automatic" }
   }
 }

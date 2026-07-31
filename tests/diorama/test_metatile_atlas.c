@@ -76,6 +76,20 @@ static void TestColorAndComposition(void)
     CHECK(layerPixels[1] == 0);
 }
 
+static void TestAlphaMask(void)
+{
+    uint32_t pixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE] = {0};
+    uint16_t rows[DIORAMA_METATILE_SIZE];
+
+    pixels[10 * DIORAMA_METATILE_SIZE + 0] = 0xFF000000;
+    pixels[10 * DIORAMA_METATILE_SIZE + 15] = 0xFFFFFFFF;
+    pixels[15 * DIORAMA_METATILE_SIZE + 4] = 0xFF123456;
+    DioramaMetatile_BuildAlphaMask(pixels, rows);
+    CHECK(rows[9] == 0);
+    CHECK(rows[10] == 0x8001);
+    CHECK(rows[15] == 0x0010);
+}
+
 static void TestAtlasGuttersAndUv(void)
 {
     static struct DioramaSceneSnapshot snapshot;
@@ -224,6 +238,7 @@ int main(void)
 {
     TestDecodeAndFlips();
     TestColorAndComposition();
+    TestAlphaMask();
     TestAtlasGuttersAndUv();
     TestCutoutDifference();
     TestDirtyTileUpdates();

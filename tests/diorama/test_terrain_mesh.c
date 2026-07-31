@@ -29,6 +29,7 @@ static void InitInput(struct DioramaTerrainChunkInput *input, uint8_t elevation,
             cell->behavior = behavior;
             cell->rawElevation = elevation;
             cell->shape = DIORAMA_SHAPE_FLAT;
+            cell->archetype = DIORAMA_ARCHETYPE_GROUND;
             cell->planeAxis = DIORAMA_PLANE_AXIS_X;
             cell->groundHeight = DioramaTerrain_NormalizeElevation(elevation, behavior);
             cell->visualHeight = DioramaTerrain_NormalizeElevation(elevation, behavior);
@@ -42,6 +43,8 @@ static void InitInput(struct DioramaTerrainChunkInput *input, uint8_t elevation,
                 cell->materials[face].v0 = 0.2f;
                 cell->materials[face].u1 = 0.3f;
                 cell->materials[face].v1 = 0.4f;
+                cell->underlayMaterials[face] = cell->materials[face];
+                cell->underlayMaterials[face].layer = DIORAMA_MATERIAL_BASE;
             }
         }
     }
@@ -66,10 +69,13 @@ static void TestElevationNormalization(void)
     assert(DioramaTerrain_NormalizeElevation(5, MB_NORMAL) == 0.0f);
     assert(DioramaTerrain_NormalizeElevation(12, MB_NORMAL) == 0.0f);
     assert(DioramaTerrain_NormalizeElevation(14, MB_NORMAL) == 0.0f);
-    assert(DioramaTerrain_NormalizeElevation(0, MB_JUMP_SOUTH) == DIORAMA_TERRAIN_LEDGE_HEIGHT);
+    assert(DioramaTerrain_NormalizeElevation(0, MB_JUMP_SOUTH) == 0.0f);
     assert(DioramaTerrain_NormalizeElevation(3, MB_POND_WATER) == DIORAMA_TERRAIN_WATER_HEIGHT);
     assert(DioramaTerrain_NormalizeElevation(3, MB_BRIDGE_OVER_POND_MED) == 1.75f);
     assert(DioramaTerrain_NormalizeElevation(3, MB_BRIDGE_OVER_POND_HIGH) == 2.75f);
+    assert(DioramaTerrain_GetElevationSemantics(0) == DIORAMA_ELEVATION_WILDCARD);
+    assert(DioramaTerrain_GetElevationSemantics(3) == DIORAMA_ELEVATION_CONCRETE);
+    assert(DioramaTerrain_GetElevationSemantics(15) == DIORAMA_ELEVATION_RETAIN);
 }
 
 static void TestFlatChunk(void)
@@ -79,17 +85,38 @@ static void TestFlatChunk(void)
 
     InitInput(&input, 3, MB_NORMAL);
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.usedCompressedOccupancy);
     assert(mesh.topFaceCount == 64);
+    assert(mesh.bottomFaceCount == 64);
     assert(mesh.sideFaceCount == 0);
-    assert(mesh.vertexCount == 64 * 6);
+    assert(mesh.occupancySpanCount == DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE * 16 * 16);
+    assert(mesh.shellFaceCount == 2 * 8 * 8 * 16 * 16);
+    assert(mesh.vertexCount == 128 * 6);
     assert(mesh.bounds.minX == -0.5f);
     assert(mesh.bounds.maxX == 7.5f);
     assert(mesh.bounds.minZ == -7.5f);
     assert(mesh.bounds.maxZ == 0.5f);
-    assert(mesh.bounds.minY == 0.0f && mesh.bounds.maxY == 0.0f);
-    assert(sVertices[0].x == -0.5f && sVertices[0].z == 0.5f);
-    assert(sVertices[1].x == 0.5f && sVertices[1].z == 0.5f);
-    assert(sVertices[2].x == 0.5f && sVertices[2].z == -0.5f);
+    assert(mesh.bounds.minY == -1.0f / 16.0f && mesh.bounds.maxY == 0.0f);
+}
+
+static void TestProfiledGeometryUsesPixelFallback(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *center;
+
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->shape = DIORAMA_SHAPE_ROOF;
+    center->structureId = 1;
+    center->structureX = center->mapX;
+    center->structureWidth = 1;
+    center->profile = DIORAMA_ROOF_GABLE_X;
+    center->structureBodyHeight = 0.5f;
+    center->structureRoofHeight = 0.5f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(!mesh.usedCompressedOccupancy);
 }
 
 static void TestGameplayPlanesStayFlat(void)
@@ -102,7 +129,7 @@ static void TestGameplayPlanesStayFlat(void)
     input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 5].rawElevation = 15;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(mesh.sideFaceCount == 0);
-    assert(mesh.bounds.minY == 0.0f && mesh.bounds.maxY == 0.0f);
+    assert(mesh.bounds.minY == -1.0f / 16.0f && mesh.bounds.maxY == 0.0f);
 }
 
 static void TestReflectionMask(void)
@@ -110,17 +137,19 @@ static void TestReflectionMask(void)
     struct DioramaTerrainChunkInput input;
     struct DioramaTerrainMesh mesh;
     int i;
+    int reflected = 0;
 
     InitInput(&input, 3, MB_NORMAL);
     input.cells[DIORAMA_TERRAIN_INPUT_SIZE + 1].reflective = 1;
     assert(DioramaTerrain_BuildChunk(&input, sVertices,
                                      DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    for (i = 0; i < 6; i++)
-        assert(sVertices[i].reflectionMask == 1.0f);
-    assert(sVertices[6].reflectionMask == 0.0f);
+    for (i = 0; i < (int)mesh.vertexCount; i++)
+        if (sVertices[i].reflectionMask == 1.0f)
+            reflected++;
+    assert(reflected == 6);
 }
 
-static void TestDirectionalLedgeHeightField(void)
+static void TestGameplayElevationDoesNotCreateVisualHeight(void)
 {
     struct DioramaTerrainHeightCell cells[25];
     float heights[25];
@@ -146,9 +175,7 @@ static void TestDirectionalLedgeHeightField(void)
     {
         for (x = 0; x < 5; x++)
         {
-            float expected = x >= 1 && x <= 3 && y == 2
-                           ? DIORAMA_TERRAIN_LEDGE_HEIGHT : 0.0f;
-            assert(heights[y * 5 + x] == expected);
+            assert(heights[y * 5 + x] == 0.0f);
         }
     }
 }
@@ -166,8 +193,9 @@ static void TestRaisedCellAndCapacity(void)
     center->visualHeight = 0.75f;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(mesh.topFaceCount == 64);
+    assert(mesh.bottomFaceCount == 64);
     assert(mesh.sideFaceCount == 4);
-    assert(mesh.vertexCount == 68 * 6);
+    assert(mesh.vertexCount == 132 * 6);
     assert(mesh.bounds.maxY == 0.75f);
     assert(!DioramaTerrain_BuildChunk(&input, sVertices, mesh.vertexCount - 1, &mesh));
 }
@@ -185,7 +213,8 @@ static void TestPartialChunk(void)
             input.cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x].present = false;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(mesh.topFaceCount == 32);
-    assert(mesh.sideFaceCount == 0);
+    assert(mesh.bottomFaceCount == 32);
+    assert(mesh.sideFaceCount == 8);
     assert(mesh.bounds.minX == 3.5f);
     assert(mesh.bounds.maxX == 7.5f);
 }
@@ -196,16 +225,207 @@ static void TestLedge(void)
     struct DioramaTerrainMesh mesh;
 
     InitInput(&input, 3, MB_NORMAL);
-    for (int y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
-        for (int x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
-            input.cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x].visualHeight = 0.0f;
     for (int x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
-        input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + x].visualHeight = DIORAMA_TERRAIN_LEDGE_HEIGHT;
+    {
+        struct DioramaTerrainCell *cell = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + x];
+        cell->behavior = MB_JUMP_SOUTH;
+        cell->shape = DIORAMA_SHAPE_LEDGE;
+        cell->archetype = DIORAMA_ARCHETYPE_LEDGE;
+        cell->featureHeight = DIORAMA_TERRAIN_LEDGE_HEIGHT;
+        cell->materials[DIORAMA_MATERIAL_FACE_TOP].layer = DIORAMA_MATERIAL_BASE;
+        for (int face = DIORAMA_MATERIAL_FACE_NORTH;
+             face <= DIORAMA_MATERIAL_FACE_WEST; face++)
+            cell->materials[face].layer = DIORAMA_MATERIAL_FOREGROUND;
+        for (int row = 10; row < 16; row++)
+            cell->foregroundAlpha[row] = 0xFFFF;
+    }
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.usedCompressedOccupancy);
     assert(mesh.topFaceCount == 64);
-    assert(mesh.sideFaceCount == 16);
-    assert(mesh.bounds.minY == 0.0f);
+    assert(mesh.featureFaceCount > 0);
+    assert(mesh.bounds.minY == -1.0f / 16.0f);
     assert(mesh.bounds.maxY == DIORAMA_TERRAIN_LEDGE_HEIGHT);
+    for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex++)
+        if (sVertices[vertex].y > 0.0f)
+            assert(sVertices[vertex].textureLayer == DIORAMA_MATERIAL_FOREGROUND);
+}
+
+static void TestLedgeUsesForegroundRuns(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *center;
+    bool foundTopUv = false;
+
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->behavior = MB_JUMP_SOUTH;
+    center->shape = DIORAMA_SHAPE_LEDGE;
+    center->archetype = DIORAMA_ARCHETYPE_LEDGE;
+    center->featureHeight = DIORAMA_TERRAIN_LEDGE_HEIGHT;
+    center->materials[DIORAMA_MATERIAL_FACE_TOP].layer = DIORAMA_MATERIAL_BASE;
+    for (int face = DIORAMA_MATERIAL_FACE_NORTH;
+         face <= DIORAMA_MATERIAL_FACE_WEST; face++)
+        center->materials[face].layer = DIORAMA_MATERIAL_FOREGROUND;
+    center->foregroundAlpha[10] = 0xFFFF;
+    center->foregroundAlpha[11] = 0xFFFF;
+    center->foregroundAlpha[12] = 0xFFFE;
+    center->foregroundAlpha[13] = 0xFFFE;
+    center->foregroundAlpha[14] = 0xFFFC;
+    center->foregroundAlpha[15] = 0xFFF0;
+
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.usedCompressedOccupancy);
+    assert(mesh.featureFaceCount == 4);
+    for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex++)
+        if (sVertices[vertex].textureLayer == DIORAMA_MATERIAL_FOREGROUND
+         && sVertices[vertex].y == DIORAMA_TERRAIN_LEDGE_HEIGHT)
+        {
+            assert(sVertices[vertex].v > 0.33f && sVertices[vertex].v < 0.34f);
+            foundTopUv = true;
+        }
+    assert(foundTopUv);
+}
+
+static void TestDiagonalLedgeAndOcclusion(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *center;
+    struct DioramaTerrainCell *south;
+
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->behavior = MB_JUMP_SOUTHEAST;
+    center->shape = DIORAMA_SHAPE_LEDGE;
+    center->archetype = DIORAMA_ARCHETYPE_LEDGE;
+    center->featureHeight = DIORAMA_TERRAIN_LEDGE_HEIGHT;
+    for (int row = 10; row < 16; row++)
+        center->foregroundAlpha[row] = 0xFFFF;
+    for (int face = DIORAMA_MATERIAL_FACE_NORTH;
+         face <= DIORAMA_MATERIAL_FACE_WEST; face++)
+        center->materials[face].layer = DIORAMA_MATERIAL_FOREGROUND;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.featureFaceCount == 2);
+
+    south = &input.cells[5 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    south->shape = DIORAMA_SHAPE_CLIFF;
+    south->visualHeight = 1.0f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.featureFaceCount == 1);
+}
+
+static void TestBridgeHasTwoSurfaces(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *center;
+
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->behavior = MB_BRIDGE_OVER_POND_MED;
+    center->shape = DIORAMA_SHAPE_BRIDGE;
+    center->archetype = DIORAMA_ARCHETYPE_BRIDGE;
+    center->groundHeight = 1.75f;
+    center->visualHeight = 1.75f;
+    center->surfaceCount = 2;
+    center->surfaces[0].bottomHeight = 1.6875f;
+    center->surfaces[0].topHeight = 1.75f;
+    center->surfaces[0].gameplayElevation = 3;
+    center->surfaces[1].bottomHeight = -0.1875f;
+    center->surfaces[1].topHeight = -0.125f;
+    center->surfaces[1].gameplayElevation = 1;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(!mesh.usedCompressedOccupancy);
+    assert(mesh.topFaceCount == 65);
+    assert(mesh.bottomFaceCount == 65);
+    assert(mesh.sideFaceCount == 12);
+    assert(mesh.bounds.minY == -3.0f / 16.0f);
+    assert(mesh.bounds.maxY == 1.75f);
+}
+
+static void TestStairsAndDescendingStairwell(void)
+{
+    static const uint8_t up[4] = {
+        DIORAMA_ARCHETYPE_STAIRS_N, DIORAMA_ARCHETYPE_STAIRS_S,
+        DIORAMA_ARCHETYPE_STAIRS_E, DIORAMA_ARCHETYPE_STAIRS_W
+    };
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    uint64_t hashes[4];
+
+    for (int direction = 0; direction < 4; direction++)
+    {
+        struct DioramaTerrainCell *center;
+
+        InitInput(&input, 3, MB_NORMAL);
+        center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+        center->shape = DIORAMA_SHAPE_STAIRS;
+        center->archetype = up[direction];
+        center->featureHeight = 1.0f;
+        assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                         DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+        assert(!mesh.usedCompressedOccupancy);
+        assert(mesh.bounds.maxY == 1.0f);
+        hashes[direction] = mesh.geometryHash;
+    }
+    assert(hashes[0] != hashes[1]);
+    assert(hashes[0] != hashes[2]);
+    assert(hashes[2] != hashes[3]);
+
+    InitInput(&input, 3, MB_NORMAL);
+    input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4].shape = DIORAMA_SHAPE_STAIRS;
+    input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4].archetype = DIORAMA_ARCHETYPE_STAIRS_DOWN_S;
+    input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4].featureHeight = 1.0f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.bounds.minY == -17.0f / 16.0f);
+    assert(mesh.bounds.maxY == 0.0f);
+}
+
+static void TestCliffFaceBandsAndRamp(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *center;
+    bool sawUpperBand = false;
+
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->shape = DIORAMA_SHAPE_CLIFF;
+    center->archetype = DIORAMA_ARCHETYPE_CLIFF;
+    center->featureHeight = 2.5f;
+    center->visualHeight = 2.5f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.sideFaceCount == 12);
+    assert(mesh.bounds.maxY == 2.5f);
+
+    center->visualHeight = 3.0f;
+    center->volumeMaterialCount = 3;
+    for (int face = 0; face < 4; face++)
+        for (int band = 0; band < 3; band++)
+        {
+            center->volumeMaterials[face][band] = center->materials[face + 1];
+            center->volumeMaterials[face][band].u0 = 0.1f + band * 0.3f;
+            center->volumeMaterials[face][band].u1 = 0.2f + band * 0.3f;
+        }
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.sideFaceCount == 12);
+    for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex++)
+        sawUpperBand |= sVertices[vertex].u >= 0.7f;
+    assert(sawUpperBand);
+
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->behavior = MB_BUMPY_SLOPE;
+    center->shape = DIORAMA_SHAPE_STAIRS;
+    center->archetype = DIORAMA_ARCHETYPE_STAIRS_N;
+    center->featureHeight = 1.0f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.topFaceCount == 79);
+    assert(mesh.bounds.maxY == 1.0f);
 }
 
 static void TestSignaturesAndHashes(void)
@@ -225,6 +445,9 @@ static void TestSignaturesAndHashes(void)
     input.cells[0].rawElevation = 4;
     assert(DioramaTerrain_ChunkSignature(&input) == signature);
     input.cells[0].shape = DIORAMA_SHAPE_EXTRUDED;
+    assert(DioramaTerrain_ChunkSignature(&input) != signature);
+    input.cells[0].shape = DIORAMA_SHAPE_FLAT;
+    input.cells[0].foregroundAlpha[15] = 1;
     assert(DioramaTerrain_ChunkSignature(&input) != signature);
 }
 
@@ -248,7 +471,7 @@ static void TestDirtyChunkCoverage(void)
     assert(!DioramaTerrain_ShouldInvalidateAll(10, 12, 5, 5, 0, false));
 }
 
-static void TestCutoutAndHiddenShapes(void)
+static void TestHiddenShape(void)
 {
     struct DioramaTerrainChunkInput input;
     struct DioramaTerrainMesh mesh;
@@ -256,127 +479,42 @@ static void TestCutoutAndHiddenShapes(void)
 
     InitInput(&input, 3, MB_NORMAL);
     center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
-    center->shape = DIORAMA_SHAPE_CUTOUT;
-    center->featureHeight = 0.75f;
-    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    assert(mesh.topFaceCount == 64);
-    assert(mesh.sideFaceCount == 0);
-    assert(mesh.featureFaceCount == 1);
-    assert(mesh.vertexCount == 65 * 6);
-    assert(mesh.bounds.maxY == 0.75f);
-
     center->shape = DIORAMA_SHAPE_HIDDEN;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(mesh.topFaceCount == 63);
+    assert(mesh.bottomFaceCount == 63);
+    assert(mesh.sideFaceCount == 4);
     assert(mesh.featureFaceCount == 0);
 }
 
-static void TestStructureFacesAndRoofSlope(void)
+static void TestSpanShellIntervalsAndOwnership(void)
 {
-    struct DioramaTerrainChunkInput input;
-    struct DioramaTerrainMesh mesh;
-    struct DioramaTerrainCell *west;
-    struct DioramaTerrainCell *east;
+    struct DioramaOccupancySpan spans[2] = {
+        {.x = 127, .z = 0, .yMin = 0, .yMax = 4, .sourceCellX = 7},
+        {.x = 128, .z = 0, .yMin = 2, .yMax = 6, .sourceCellX = 8},
+    };
+    struct DioramaShellFace faces[16];
+    uint32_t spanCount = 2;
+    uint32_t faceCount;
+    bool foundLower = false;
 
-    InitInput(&input, 3, MB_NORMAL);
-    west = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
-    east = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 5];
-    west->shape = DIORAMA_SHAPE_ROOF;
-    east->shape = DIORAMA_SHAPE_ROOF;
-    west->profile = east->profile = DIORAMA_ROOF_GABLE_X;
-    west->structureId = east->structureId = 1;
-    west->structureX = east->structureX = 3;
-    west->structureWidth = east->structureWidth = 3;
-    west->structureBodyHeight = east->structureBodyHeight = 1.0f;
-    west->structureRoofHeight = east->structureRoofHeight = 0.6f;
-    west->visualHeight = 1.3f;
-    east->visualHeight = 1.6f;
-    west->materials[DIORAMA_MATERIAL_FACE_WEST].layer = DIORAMA_MATERIAL_NONE;
-
-    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    assert(mesh.sideFaceCount == 5);
-    assert(mesh.bounds.maxY >= 1.3f);
-    assert(sVertices[(3 * 8 + 3) * 6 + 1].y
-         > sVertices[(3 * 8 + 3) * 6].y);
-}
-
-static void TestStackedSouthFacadeAndCrop(void)
-{
-    struct DioramaTerrainChunkInput input;
-    struct DioramaTerrainMesh mesh;
-    struct DioramaTerrainCell *cell;
-    uint64_t signature;
-    bool foundCroppedTop = false;
-    bool foundCroppedBottom = false;
-
-    InitInput(&input, 3, MB_NORMAL);
-    cell = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
-    cell->shape = DIORAMA_SHAPE_BUILDING_PART;
-    cell->structureId = 1;
-    cell->structureTemplateId = 2;
-    cell->structureHeight = 5;
-    cell->structureLocalY = 4;
-    cell->groundHeight = 0.0f;
-    cell->visualHeight = 1.2f;
-    cell->structureBodyHeight = 1.2f;
-    cell->southFacadeCount = 2;
-    cell->southFacadeUnitHeight = 1.0f;
-    cell->southFacadeMaterials[0] = cell->materials[DIORAMA_MATERIAL_FACE_SOUTH];
-    cell->southFacadeMaterials[1] = cell->materials[DIORAMA_MATERIAL_FACE_SOUTH];
-    cell->southFacadeMaterials[1].metatileId = 2;
-
-    signature = DioramaTerrain_ChunkSignature(&input);
-    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    assert(mesh.sideFaceCount == 5);
-    assert(mesh.vertexCount == (64 + 5) * 6);
-    for (uint32_t i = 0; i < mesh.vertexCount; i++)
+    for (int face = 0; face < DIORAMA_OCCUPANCY_FACE_COUNT; face++)
     {
-        if (sVertices[i].z != -3.5f)
-            continue;
-        if (sVertices[i].y > 1.19f && sVertices[i].y < 1.21f
-         && sVertices[i].v > 0.35f && sVertices[i].v < 0.37f)
-            foundCroppedTop = true;
-        if (sVertices[i].y == 1.0f && sVertices[i].v == 0.4f)
-            foundCroppedBottom = true;
+        spans[0].material[face] = face + 1;
+        spans[1].material[face] = face + 1;
     }
-    assert(foundCroppedTop && foundCroppedBottom);
-    cell->southFacadeMaterials[1].metatileId = 3;
-    assert(DioramaTerrain_ChunkSignature(&input) != signature);
-}
-
-static void TestPixelProfiledRoofShell(void)
-{
-    struct DioramaTerrainChunkInput input;
-    struct DioramaTerrainMesh mesh;
-    struct DioramaTerrainCell *cell;
-
-    InitInput(&input, 3, MB_NORMAL);
-    cell = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
-    cell->shape = DIORAMA_SHAPE_ROOF;
-    cell->structureId = 1;
-    cell->structureTemplateId = 2;
-    cell->structureX = 3;
-    cell->structureWidth = 5;
-    cell->structureRoofRows = 3;
-    cell->structureLocalX = 0;
-    cell->structureLocalY = 0;
-    cell->structureBodyHeight = 1.2f;
-    cell->visualHeight = 1.2f;
-    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    assert(mesh.topFaceCount == 63 + 16);
-    assert(mesh.featureFaceCount == 33);
-    assert(mesh.bounds.maxY > 3.0f);
-
-    cell->structureLocalY = 2;
-    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    assert(mesh.featureFaceCount == 65);
-    {
-        bool foundEave = false;
-        for (uint32_t i = 0; i < mesh.vertexCount; i++)
-            if (sVertices[i].z == -3.625f)
-                foundEave = true;
-        assert(foundEave);
-    }
+    assert(DioramaOccupancy_Canonicalize(spans, &spanCount));
+    assert(DioramaOccupancy_BuildShell(spans, spanCount, 0, 0, 128, 128,
+                                       faces, 16, &faceCount));
+    for (uint32_t i = 0; i < faceCount; i++)
+        if (faces[i].axis == 0 && faces[i].sign == 1
+         && faces[i].plane == 128 && faces[i].vMin == 0 && faces[i].vMax == 2)
+            foundLower = true;
+    assert(foundLower);
+    assert(DioramaOccupancy_BuildShell(spans, spanCount, 128, 0, 256, 128,
+                                       faces, 16, &faceCount));
+    for (uint32_t i = 0; i < faceCount; i++)
+        assert(faces[i].sourceCellX == 8);
 }
 
 static void TestChunkSeamAndHaloInvalidation(void)
@@ -445,18 +583,22 @@ int main(void)
     TestFloorDiv();
     TestElevationNormalization();
     TestFlatChunk();
+    TestProfiledGeometryUsesPixelFallback();
     TestGameplayPlanesStayFlat();
     TestReflectionMask();
-    TestDirectionalLedgeHeightField();
+    TestGameplayElevationDoesNotCreateVisualHeight();
     TestRaisedCellAndCapacity();
     TestPartialChunk();
     TestLedge();
+    TestLedgeUsesForegroundRuns();
+    TestDiagonalLedgeAndOcclusion();
+    TestBridgeHasTwoSurfaces();
+    TestStairsAndDescendingStairwell();
+    TestCliffFaceBandsAndRamp();
     TestSignaturesAndHashes();
     TestDirtyChunkCoverage();
-    TestCutoutAndHiddenShapes();
-    TestStructureFacesAndRoofSlope();
-    TestStackedSouthFacadeAndCrop();
-    TestPixelProfiledRoofShell();
+    TestHiddenShape();
+    TestSpanShellIntervalsAndOwnership();
     TestChunkSeamAndHaloInvalidation();
     TestFrustum();
     puts("terrain mesh tests passed");

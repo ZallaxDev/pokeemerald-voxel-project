@@ -1,8 +1,11 @@
 {
-  "version": 1,
+  "schemaVersion": 2,
+  "kind": "map",
   "map": "MAP_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB",
   "layout": "LAYOUT_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB",
-  "supported": true,
+  "status": { "supported": true },
   "camera": { "profile": "interior" },
-  "overrides": []
+  "groundPolicy": { "mode": "automatic" },
+  "contextualRules": [],
+  "exactPatterns": []
 }

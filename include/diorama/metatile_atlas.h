@@ -34,6 +34,8 @@ void DioramaMetatile_Compose(const uint8_t *tileGraphics, const uint16_t *tileEn
 void DioramaMetatile_ComposeLayer(const uint8_t *tileGraphics, const uint16_t *tileEntries,
                                   const uint16_t *palette, uint8_t layer,
                                   uint32_t *pixels);
+void DioramaMetatile_BuildAlphaMask(const uint32_t *pixels,
+                                    uint16_t rows[DIORAMA_METATILE_SIZE]);
 void DioramaAtlas_Clear(uint32_t *atlasPixels, uint8_t *presentMetatiles);
 bool DioramaAtlas_Update(const struct DioramaSceneSnapshot *snapshot,
                          const uint16_t *cutoutBaseMetatileIds,
@@ -47,5 +49,7 @@ bool DioramaAtlas_UpdateDirty(const struct DioramaSceneSnapshot *snapshot,
                               uint32_t *foregroundAtlasPixels, uint8_t *presentMetatiles,
                               uint8_t *updatedMetatiles);
 struct DioramaAtlasUv DioramaAtlas_GetUv(uint16_t metatileId);
+void DioramaAtlas_GetForegroundAlphaMask(uint16_t metatileId,
+                                         uint16_t rows[DIORAMA_METATILE_SIZE]);
 
 #endif

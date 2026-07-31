@@ -22,6 +22,63 @@ enum DioramaShape
     DIORAMA_SHAPE_HIDDEN
 };
 
+/* These values are part of the generated schema-v2 ABI. */
+enum DioramaArchetype
+{
+    DIORAMA_ARCHETYPE_NONE,
+    DIORAMA_ARCHETYPE_GROUND,
+    DIORAMA_ARCHETYPE_VOID,
+    DIORAMA_ARCHETYPE_WATER,
+    DIORAMA_ARCHETYPE_SHALLOW_WATER,
+    DIORAMA_ARCHETYPE_WATERFALL,
+    DIORAMA_ARCHETYPE_CURRENT,
+    DIORAMA_ARCHETYPE_HOT_SPRING,
+    DIORAMA_ARCHETYPE_LEDGE,
+    DIORAMA_ARCHETYPE_CLIFF,
+    DIORAMA_ARCHETYPE_MOUND,
+    DIORAMA_ARCHETYPE_WALL_VOLUME,
+    DIORAMA_ARCHETYPE_BRIDGE,
+    DIORAMA_ARCHETYPE_DECK,
+    DIORAMA_ARCHETYPE_RAIL,
+    DIORAMA_ARCHETYPE_SUPPORT,
+    DIORAMA_ARCHETYPE_STAIRS_N,
+    DIORAMA_ARCHETYPE_STAIRS_S,
+    DIORAMA_ARCHETYPE_STAIRS_E,
+    DIORAMA_ARCHETYPE_STAIRS_W,
+    DIORAMA_ARCHETYPE_STAIRS_DOWN_N,
+    DIORAMA_ARCHETYPE_STAIRS_DOWN_S,
+    DIORAMA_ARCHETYPE_STAIRS_DOWN_E,
+    DIORAMA_ARCHETYPE_STAIRS_DOWN_W,
+    DIORAMA_ARCHETYPE_ROOF,
+    DIORAMA_ARCHETYPE_TOP_SLAB,
+    DIORAMA_ARCHETYPE_AWNING,
+    DIORAMA_ARCHETYPE_BUILDING,
+    DIORAMA_ARCHETYPE_CLAIM_ONLY,
+    DIORAMA_ARCHETYPE_BILLBOARD,
+    DIORAMA_ARCHETYPE_CUTOUT,
+    DIORAMA_ARCHETYPE_CONSOLE,
+    DIORAMA_ARCHETYPE_SIGNPOST,
+    DIORAMA_ARCHETYPE_POST,
+    DIORAMA_ARCHETYPE_COUNTER,
+    DIORAMA_ARCHETYPE_TABLE,
+    DIORAMA_ARCHETYPE_DESK,
+    DIORAMA_ARCHETYPE_BED,
+    DIORAMA_ARCHETYPE_BOOKCASE,
+    DIORAMA_ARCHETYPE_RELIEF,
+    DIORAMA_ARCHETYPE_ROUND_HULL,
+    DIORAMA_ARCHETYPE_GROUPED_HULL,
+    DIORAMA_ARCHETYPE_STUMP,
+    DIORAMA_ARCHETYPE_TREE,
+    DIORAMA_ARCHETYPE_FOREST_WALL,
+    DIORAMA_ARCHETYPE_SHRUB,
+    DIORAMA_ARCHETYPE_HEDGE,
+    DIORAMA_ARCHETYPE_ROCK,
+    DIORAMA_ARCHETYPE_BOULDER,
+    DIORAMA_ARCHETYPE_GRASS,
+    DIORAMA_ARCHETYPE_FLOWER,
+    DIORAMA_ARCHETYPE_ANIMATED_CUTOUT
+};
+
 enum DioramaRoofProfile
 {
     DIORAMA_ROOF_NONE,
@@ -36,6 +93,21 @@ enum DioramaMaterialLayer
     DIORAMA_MATERIAL_BASE,
     DIORAMA_MATERIAL_FOREGROUND,
     DIORAMA_MATERIAL_NONE = 0xFF
+};
+
+enum DioramaTerrainClass
+{
+    DIORAMA_TERRAIN_CLASS_NONE,
+    DIORAMA_TERRAIN_CLASS_GROUND,
+    DIORAMA_TERRAIN_CLASS_PATH,
+    DIORAMA_TERRAIN_CLASS_SAND,
+    DIORAMA_TERRAIN_CLASS_ASH,
+    DIORAMA_TERRAIN_CLASS_ROCK,
+    DIORAMA_TERRAIN_CLASS_PAVEMENT,
+    DIORAMA_TERRAIN_CLASS_WOOD,
+    DIORAMA_TERRAIN_CLASS_CARPET,
+    DIORAMA_TERRAIN_CLASS_VOID,
+    DIORAMA_TERRAIN_CLASS_WATER
 };
 
 enum DioramaMaterialFace
@@ -57,7 +129,9 @@ enum DioramaPlaneAxis
 };
 
 #define DIORAMA_MATERIAL_METATILE_SELF UINT16_C(0xFFFF)
+#define DIORAMA_MAX_VISUAL_SURFACES 3
 #define DIORAMA_BUILDING_MAX_FACADE_ROWS 4
+#define DIORAMA_VOLUME_MAX_ROWS 3
 #define DIORAMA_BUILDING_PIXELS_PER_CELL 16
 #define DIORAMA_BUILDING_MAX_PROFILE_COLUMNS (32 * DIORAMA_BUILDING_PIXELS_PER_CELL + 1)
 
@@ -73,6 +147,13 @@ struct DioramaFaceMaterial
     uint8_t layer;
 };
 
+struct DioramaResolvedSurface
+{
+    float bottomHeight;
+    float topHeight;
+    uint8_t gameplayElevation;
+};
+
 enum DioramaRuleSource
 {
     DIORAMA_RULE_SOURCE_MAP,
@@ -81,17 +162,10 @@ enum DioramaRuleSource
     DIORAMA_RULE_SOURCE_BEHAVIOR,
     DIORAMA_RULE_SOURCE_COLLISION_ELEVATION,
     DIORAMA_RULE_SOURCE_HEURISTIC,
-    DIORAMA_RULE_SOURCE_FALLBACK
-};
-
-enum DioramaTilesetId
-{
-    DIORAMA_TILESET_UNKNOWN,
-    DIORAMA_TILESET_GENERAL,
-    DIORAMA_TILESET_PETALBURG,
-    DIORAMA_TILESET_BUILDING,
-    DIORAMA_TILESET_BRENDANS_MAYS_HOUSE,
-    DIORAMA_TILESET_LAB
+    DIORAMA_RULE_SOURCE_FALLBACK,
+    DIORAMA_RULE_SOURCE_PATTERN,
+    DIORAMA_RULE_SOURCE_CONTEXT,
+    DIORAMA_RULE_SOURCE_EVENT
 };
 
 enum DioramaCameraProfile
@@ -124,7 +198,16 @@ struct DioramaResolvedCell
     uint8_t profile;
     uint8_t source;
     uint8_t planeAxis;
+    uint8_t archetype;
+    uint8_t semanticPool;
+    uint8_t semanticProfile;
+    uint8_t terrainClass;
+    uint8_t groundMode;
+    uint8_t effectiveElevation;
+    uint8_t surfaceCount;
     uint16_t baseMetatileId;
+    uint16_t claimOwner;
+    int16_t rulePriority;
     uint16_t structureId;
     uint16_t structureTemplateId;
     int16_t structureX;
@@ -135,12 +218,16 @@ struct DioramaResolvedCell
     uint8_t structureLocalX;
     uint8_t structureLocalY;
     uint8_t structureSouthFacadeRows;
+    uint8_t volumeRunRows;
+    int16_t volumeNorthY;
+    int16_t volumeSouthY;
     float groundHeight;
     float topHeight;
     float featureHeight;
     float structureBodyHeight;
     float structureRoofHeight;
     float structureSouthFacadeUnitHeight;
+    struct DioramaResolvedSurface surfaces[DIORAMA_MAX_VISUAL_SURFACES];
     struct DioramaFaceMaterial materials[DIORAMA_MATERIAL_FACE_COUNT];
 };
 
@@ -210,8 +297,11 @@ struct DioramaGeneratedBuildingPlacement
 };
 
 uint32_t DioramaRules_GetGeneration(void);
+const char *DioramaRules_GetSha256(void);
 const struct DioramaGeneratedBuildingTemplate *DioramaRules_GetBuildingTemplate(uint16_t id);
 bool DioramaRules_IsMapSupported(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId);
+const char *DioramaRules_GetUnsupportedReason(uint8_t mapGroup, uint8_t mapNum,
+                                              uint16_t layoutId);
 bool DioramaRules_GetMapProfile(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId,
                                 struct DioramaMapProfile *profile);
 bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
@@ -219,6 +309,15 @@ bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
                               struct DioramaResolvedCell *resolved);
 void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
                               struct DioramaResolvedCell *resolvedCells);
+bool DioramaRules_ProfileOccupies(uint8_t profileId, uint8_t x, uint8_t y);
+bool DioramaRules_ProfileIsFullCell(uint8_t profileId);
 float DioramaRules_DefaultGroundHeight(uint8_t behavior);
+float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
+                                 float groundHeight, float featureHeight,
+                                 uint8_t pixelX, uint8_t pixelY);
+float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved,
+                                       uint8_t cellElevation, uint8_t objectElevation,
+                                       uint8_t behavior,
+                                       uint8_t pixelX, uint8_t pixelY);
 
 #endif

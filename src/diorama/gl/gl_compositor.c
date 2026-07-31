@@ -848,12 +848,14 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
      && sTerrainAvailable
      && sObjectsAvailable
      && sHasSceneSnapshot
+     && DioramaRules_IsMapSupported(sSceneSnapshot.mapGroup, sSceneSnapshot.mapNum,
+                                    sSceneSnapshot.mapLayoutId)
      && DioramaSnapshot_CanRenderFlatMap(&sSceneSnapshot))
     {
         if (!sCurrent3DReady)
         {
             EnsureAtlas(&sSceneSnapshot);
-            sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot)
+            sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells)
                            && DioramaGLObjects_Sync(&sSceneSnapshot);
         }
         current3D = sCurrent3DReady;

@@ -5,12 +5,14 @@
 #include <stdint.h>
 
 #include "diorama/rules.h"
+#include "diorama/occupancy.h"
 
 #define DIORAMA_TERRAIN_CHUNK_SIZE 8
 #define DIORAMA_TERRAIN_HALO 1
 #define DIORAMA_TERRAIN_INPUT_SIZE (DIORAMA_TERRAIN_CHUNK_SIZE + 2 * DIORAMA_TERRAIN_HALO)
-#define DIORAMA_TERRAIN_MAX_PROFILED_ROOF_FACES_PER_CELL 90
-#define DIORAMA_TERRAIN_MAX_FACES (DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_TERRAIN_MAX_PROFILED_ROOF_FACES_PER_CELL)
+#define DIORAMA_TERRAIN_MAX_SURFACES DIORAMA_MAX_VISUAL_SURFACES
+#define DIORAMA_TERRAIN_PIXEL_COLUMNS (DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL * DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL)
+#define DIORAMA_TERRAIN_MAX_FACES (DIORAMA_TERRAIN_PIXEL_COLUMNS * DIORAMA_OCCUPANCY_FACE_COUNT * DIORAMA_TERRAIN_MAX_SURFACES)
 #define DIORAMA_TERRAIN_MAX_VERTICES (DIORAMA_TERRAIN_MAX_FACES * 6)
 #define DIORAMA_TERRAIN_LEDGE_HEIGHT 0.375f
 #define DIORAMA_TERRAIN_WATER_HEIGHT -0.125f
@@ -27,6 +29,13 @@ enum DioramaTerrainFace
     DIORAMA_TERRAIN_FACE_WEST,
 };
 
+enum DioramaElevationSemantics
+{
+    DIORAMA_ELEVATION_WILDCARD,
+    DIORAMA_ELEVATION_CONCRETE,
+    DIORAMA_ELEVATION_RETAIN
+};
+
 struct DioramaTerrainMaterial
 {
     uint16_t metatileId;
@@ -35,6 +44,13 @@ struct DioramaTerrainMaterial
     float v0;
     float u1;
     float v1;
+};
+
+struct DioramaTerrainSurface
+{
+    float bottomHeight;
+    float topHeight;
+    uint8_t gameplayElevation;
 };
 
 struct DioramaTerrainCell
@@ -49,9 +65,15 @@ struct DioramaTerrainCell
     uint8_t rawElevation;
     uint8_t reflective;
     uint8_t shape;
+    uint8_t archetype;
+    uint8_t terrainClass;
+    uint8_t semanticProfile;
     uint8_t profile;
     uint8_t planeAxis;
+    uint8_t effectiveElevation;
+    uint8_t surfaceCount;
     uint16_t structureId;
+    int16_t rulePriority;
     uint16_t structureTemplateId;
     int16_t structureX;
     int16_t structureY;
@@ -61,14 +83,19 @@ struct DioramaTerrainCell
     uint8_t structureLocalX;
     uint8_t structureLocalY;
     uint8_t southFacadeCount;
+    uint8_t volumeMaterialCount;
     float groundHeight;
     float visualHeight;
     float featureHeight;
     float structureBodyHeight;
     float structureRoofHeight;
     float southFacadeUnitHeight;
+    struct DioramaTerrainSurface surfaces[DIORAMA_TERRAIN_MAX_SURFACES];
     struct DioramaTerrainMaterial materials[DIORAMA_MATERIAL_FACE_COUNT];
+    struct DioramaTerrainMaterial underlayMaterials[DIORAMA_MATERIAL_FACE_COUNT];
+    uint16_t foregroundAlpha[DIORAMA_VOXELS_PER_CELL];
     struct DioramaTerrainMaterial southFacadeMaterials[DIORAMA_BUILDING_MAX_FACADE_ROWS];
+    struct DioramaTerrainMaterial volumeMaterials[4][DIORAMA_VOLUME_MAX_ROWS];
 };
 
 struct DioramaTerrainHeightCell
@@ -114,9 +141,13 @@ struct DioramaTerrainMesh
 {
     uint32_t vertexCount;
     uint32_t faceCount;
+    uint32_t occupancySpanCount;
+    uint32_t shellFaceCount;
     uint32_t topFaceCount;
+    uint32_t bottomFaceCount;
     uint32_t sideFaceCount;
     uint32_t featureFaceCount;
+    uint8_t usedCompressedOccupancy;
     uint64_t geometryHash;
     struct DioramaTerrainBounds bounds;
 };
@@ -131,6 +162,7 @@ bool DioramaTerrain_ShouldInvalidateAll(uint64_t previousSequence,
                                        uint8_t dirtyCellCount,
                                        bool dirtyOverflow);
 float DioramaTerrain_NormalizeElevation(uint8_t rawElevation, uint8_t behavior);
+enum DioramaElevationSemantics DioramaTerrain_GetElevationSemantics(uint8_t rawElevation);
 void DioramaTerrain_BuildHeightField(const struct DioramaTerrainHeightCell *cells,
                                      uint16_t width, uint16_t height,
                                      float *visualHeights);

@@ -156,11 +156,17 @@ bool DioramaSprite_BuildPose(const struct DioramaSceneSnapshot *snapshot,
         return false;
     if (!DioramaRules_ResolveCell(snapshot, currentCell, &currentRule))
         return false;
-    currentHeight = currentRule.groundHeight;
+    currentHeight = DioramaRules_ObjectGroundHeight(&currentRule, currentCell->elevation,
+        object->elevation, currentCell->behavior, DIORAMA_BUILDING_PIXELS_PER_CELL / 2,
+        DIORAMA_BUILDING_PIXELS_PER_CELL / 2);
     previousHeight = currentHeight;
     if (previousCell != NULL
      && DioramaRules_ResolveCell(snapshot, previousCell, &previousRule))
-        previousHeight = previousRule.groundHeight;
+        previousHeight = DioramaRules_ObjectGroundHeight(&previousRule,
+            previousCell->elevation, object->previousElevation,
+            previousCell->behavior,
+            DIORAMA_BUILDING_PIXELS_PER_CELL / 2,
+            DIORAMA_BUILDING_PIXELS_PER_CELL / 2);
     deltaX = object->currentMapX - object->previousMapX;
     deltaY = object->currentMapY - object->previousMapY;
     if (deltaX != 0)

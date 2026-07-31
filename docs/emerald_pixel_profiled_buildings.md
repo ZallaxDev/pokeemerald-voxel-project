@@ -1,5 +1,10 @@
 # Edificios perfilados por pixel para Pokemon Emerald
 
+> **Estado:** prototipo schema v1 retirado en G0. Este documento conserva el
+> analisis historico, pero sus cajas por celda, perfiles unidimensionales y
+> culling por `structureId` no son una base aprobada. G11-G12 los sustituiran por
+> patrones exactos, mascaras de ocupacion y un shell volumetrico comun.
+
 ## Objetivo
 
 Portar a Pokemon Emerald los conceptos del sistema de edificios perfilados de

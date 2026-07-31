@@ -3,26 +3,11 @@
 #include <string.h>
 
 #include "constants/metatile_behaviors.h"
+#include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 
 static struct DioramaSceneSnapshot sSnapshot;
-
-#define FNV_OFFSET UINT64_C(1469598103934665603)
-#define FNV_PRIME UINT64_C(1099511628211)
-
-static uint64_t HashByte(uint64_t hash, uint8_t value)
-{
-    return (hash ^ value) * FNV_PRIME;
-}
-
-static uint16_t ReadU16(FILE *file)
-{
-    int low = fgetc(file);
-    int high = fgetc(file);
-
-    assert(low != EOF && high != EOF);
-    return low | (high << 8);
-}
+static struct DioramaResolvedCell sResolvedGrid[DIORAMA_MAX_VISIBLE_CELLS];
 
 static struct DioramaCellSnapshot MakeCell(int x, int y, uint16_t metatileId,
                                            uint8_t behavior)
@@ -52,6 +37,8 @@ static void InitLittleroot(void)
     sSnapshot.mapWidth = 20;
     sSnapshot.mapHeight = 20;
     sSnapshot.mapCoordinateOffset = 7;
+    sSnapshot.gridOriginX = 7;
+    sSnapshot.gridOriginY = 7;
 }
 
 static void TestMapSupport(void)
@@ -60,52 +47,76 @@ static void TestMapSupport(void)
 
     assert(DioramaRules_IsMapSupported(0, 9, 10));
     assert(DioramaRules_IsMapSupported(0, 16, 17));
-    assert(!DioramaRules_IsMapSupported(0, 10, 11));
-    assert(!DioramaRules_IsMapSupported(0, 9, 17));
+    assert(DioramaRules_IsMapSupported(0, 10, 11));
+    assert(DioramaRules_IsMapSupported(0, 9, 17));
+    assert(!DioramaRules_IsMapSupported(0, 9, 999));
     assert(DioramaRules_GetGeneration() != 0);
+    assert(strlen(DioramaRules_GetSha256()) == 64);
+    assert(gDioramaTilesetV2Count == 75);
+    assert(gDioramaLayoutV2Count == 441);
+    assert(gDioramaMapV2Count == 518);
     assert(DioramaRules_GetMapProfile(0, 9, 10, &profile));
     assert(profile.cameraProfile == DIORAMA_CAMERA_EXTERIOR);
     assert(profile.cameraFocalLength == 130.0f);
-    assert(!DioramaRules_GetMapProfile(0, 10, 11, &profile));
+    assert(DioramaRules_GetMapProfile(0, 10, 11, &profile));
+    assert(DioramaRules_GetUnsupportedReason(0, 10, 11) == NULL);
+    assert(DioramaRules_GetUnsupportedReason(0, 9, 10) == NULL);
 }
 
-static void TestPriority(void)
+static void TestRetiredPrototypesStayDisabled(void)
 {
     struct DioramaResolvedCell resolved;
     struct DioramaCellSnapshot cell;
 
     cell = MakeCell(7, 8, 0x003, MB_NORMAL);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
-    assert(resolved.source == DIORAMA_RULE_SOURCE_MAP);
-    assert(resolved.shape == DIORAMA_SHAPE_CUTOUT);
-    assert(resolved.baseMetatileId == 1);
-    assert(resolved.planeAxis == DIORAMA_PLANE_AXIS_X);
-    assert(resolved.featureHeight == 0.85f);
+    assert(resolved.source != DIORAMA_RULE_SOURCE_MAP);
+    assert(resolved.shape == DIORAMA_SHAPE_FLAT);
+    assert(resolved.structureId == 0);
 
     cell = MakeCell(2, 4, 0x208, MB_NORMAL);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
-    assert(resolved.source == DIORAMA_RULE_SOURCE_MAP);
-    assert(resolved.structureId != 0);
-    assert(resolved.structureTemplateId == 2);
+    assert(resolved.source != DIORAMA_RULE_SOURCE_MAP);
+    assert(resolved.source != DIORAMA_RULE_SOURCE_BUILDING);
+    assert(resolved.structureId == 0);
 
     cell = MakeCell(10, 10, 0x1CE, MB_TALL_GRASS);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
-    assert(resolved.source == DIORAMA_RULE_SOURCE_TILESET);
-    assert(resolved.shape == DIORAMA_SHAPE_CUTOUT);
-    assert(resolved.topHeight == 0.0f);
-    assert(resolved.groundHeight == 0.0f);
-    assert(resolved.materials[DIORAMA_MATERIAL_FACE_TOP].layer == DIORAMA_MATERIAL_BASE);
+    assert(resolved.source != DIORAMA_RULE_SOURCE_TILESET);
+    assert(resolved.shape == DIORAMA_SHAPE_FLAT);
+    assert(resolved.structureId == 0);
 
     cell = MakeCell(16, 8, 0x248, MB_NORMAL);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
-    assert(resolved.source == DIORAMA_RULE_SOURCE_BUILDING);
-    assert(resolved.shape == DIORAMA_SHAPE_BUILDING_PART);
-    assert(resolved.structureId != 0);
+    assert(resolved.source != DIORAMA_RULE_SOURCE_BUILDING);
+    assert(resolved.shape == DIORAMA_SHAPE_FLAT);
+    assert(resolved.structureId == 0);
+}
 
-    cell = MakeCell(10, 10, 1, MB_TALL_GRASS);
+static void TestReusableAndGenericRules(void)
+{
+    struct DioramaResolvedCell resolved;
+    struct DioramaCellSnapshot cell;
+
+    cell = MakeCell(10, 10, 1, MB_JUMP_SOUTH);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
     assert(resolved.source == DIORAMA_RULE_SOURCE_BEHAVIOR);
-    assert(resolved.shape == DIORAMA_SHAPE_CUTOUT);
+    assert(resolved.shape == DIORAMA_SHAPE_LEDGE);
+    assert(resolved.archetype == DIORAMA_ARCHETYPE_LEDGE);
+    assert(resolved.semanticPool != 0);
+    assert(resolved.groundHeight == 0.0f);
+    assert(resolved.featureHeight == 0.375f);
+
+    cell = MakeCell(10, 10, 1, MB_STAIRS_OUTSIDE_ABANDONED_SHIP);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_STAIRS);
+    assert(resolved.archetype == DIORAMA_ARCHETYPE_STAIRS_N);
+    assert(resolved.featureHeight == 1.0f);
+
+    cell = MakeCell(10, 10, 1, MB_DOWN_ESCALATOR);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_STAIRS);
+    assert(resolved.archetype == DIORAMA_ARCHETYPE_STAIRS_DOWN_S);
 
     cell = MakeCell(10, 10, 1, MB_NORMAL);
     cell.collision = 1;
@@ -121,34 +132,11 @@ static void TestPriority(void)
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
     assert(resolved.source == DIORAMA_RULE_SOURCE_FALLBACK);
     assert(resolved.shape == DIORAMA_SHAPE_FLAT);
-}
+    assert(resolved.terrainClass == DIORAMA_TERRAIN_CLASS_GROUND);
 
-static void TestBuildingProfile(void)
-{
-    struct DioramaResolvedCell edge;
-    struct DioramaResolvedCell center;
-    struct DioramaResolvedCell body;
-    struct DioramaCellSnapshot cell = MakeCell(13, 4, 1, MB_NORMAL);
-
-    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &edge));
-    cell = MakeCell(15, 4, 1, MB_NORMAL);
-    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &center));
-    cell = MakeCell(15, 7, 1, MB_NORMAL);
-    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &body));
-    assert(edge.shape == DIORAMA_SHAPE_ROOF);
-    assert(center.shape == DIORAMA_SHAPE_ROOF);
-    assert(center.topHeight > edge.topHeight);
-    assert(body.shape == DIORAMA_SHAPE_BUILDING_PART);
-    assert(body.topHeight == 1.2f);
-    assert(body.groundHeight == 0.0f);
-    assert(edge.structureId == center.structureId);
-    assert(body.structureId == center.structureId);
-    assert(center.structureWidth == 5 && center.structureHeight == 5);
-    assert(center.structureTemplateId == 2);
-    assert(center.structureSouthFacadeRows == 2);
-    assert(center.structureSouthFacadeUnitHeight == 1.0f);
-    assert(center.structureLocalX == 2 && center.structureLocalY == 0);
-    assert(body.materials[DIORAMA_MATERIAL_FACE_EAST].metatileId == 0x212);
+    cell = MakeCell(10, 10, 1, MB_SAND);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.terrainClass == DIORAMA_TERRAIN_CLASS_SAND);
 }
 
 static void TestGridAndConnectedCoordinates(void)
@@ -165,118 +153,170 @@ static void TestGridAndConnectedCoordinates(void)
     sSnapshot.cells[1].sourceLayoutId = 10;
     sSnapshot.cells[1].flags = DIORAMA_CELL_SOURCE_VALID | DIORAMA_CELL_CONNECTED;
     DioramaRules_ResolveGrid(&sSnapshot, resolved);
-    assert(resolved[0].source == DIORAMA_RULE_SOURCE_MAP);
-    assert(resolved[1].source == DIORAMA_RULE_SOURCE_BUILDING);
-    assert(resolved[1].structureX == 2 + sSnapshot.mapCoordinateOffset);
-    assert(resolved[1].structureY == -5 + sSnapshot.mapCoordinateOffset);
+    assert(resolved[0].source != DIORAMA_RULE_SOURCE_MAP);
+    assert(resolved[1].source != DIORAMA_RULE_SOURCE_BUILDING);
+    assert(resolved[0].structureId == 0 && resolved[1].structureId == 0);
 }
 
-static uint64_t ResolveMapGolden(const char *mapPath, uint8_t mapNum, uint16_t layoutId)
+static void TestContextualGameplayPlanes(void)
 {
-    struct DioramaSceneSnapshot snapshot;
-    struct DioramaResolvedCell resolved[400];
-    uint16_t primaryAttributes[512];
-    uint16_t secondaryAttributes[144];
-    FILE *map = fopen(mapPath, "rb");
-    FILE *primary = fopen("data/tilesets/primary/general/metatile_attributes.bin", "rb");
-    FILE *secondary = fopen("data/tilesets/secondary/petalburg/metatile_attributes.bin", "rb");
-    uint64_t hash = FNV_OFFSET;
-    int i;
+    struct DioramaResolvedCell resolved[3];
 
-    assert(map != NULL && primary != NULL && secondary != NULL);
-    for (i = 0; i < 512; i++) primaryAttributes[i] = ReadU16(primary);
-    for (i = 0; i < 144; i++) secondaryAttributes[i] = ReadU16(secondary);
-    fclose(primary);
-    fclose(secondary);
+    sSnapshot.visibleCellCount = 3;
+    sSnapshot.cells[0] = MakeCell(0, 0, 1, MB_NORMAL);
+    sSnapshot.cells[0].elevation = 3;
+    sSnapshot.cells[1] = MakeCell(1, 0, 1, MB_NORMAL);
+    sSnapshot.cells[1].elevation = 0;
+    sSnapshot.cells[2] = MakeCell(2, 0, 1, MB_NORMAL);
+    sSnapshot.cells[2].elevation = 15;
+    DioramaRules_ResolveGrid(&sSnapshot, resolved);
+    assert(resolved[0].effectiveElevation == 3);
+    assert(resolved[1].effectiveElevation == 3);
+    assert(resolved[2].effectiveElevation == 3);
+    assert(resolved[1].surfaceCount == 1);
+    assert(resolved[1].surfaces[0].gameplayElevation == 3);
+}
 
-    memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.mapNum = mapNum;
-    snapshot.mapLayoutId = layoutId;
-    snapshot.mapWidth = 20;
-    snapshot.mapHeight = 20;
-    snapshot.mapCoordinateOffset = 7;
-    snapshot.visibleCellCount = 400;
-    for (i = 0; i < 400; i++)
-    {
-        uint16_t entry = ReadU16(map);
-        uint16_t metatileId = entry & 0x3FF;
-        uint16_t attributes = metatileId < 512
-                            ? primaryAttributes[metatileId]
-                            : secondaryAttributes[metatileId - 512];
+static void TestG5SurfaceProfiles(void)
+{
+    struct DioramaResolvedCell bridge;
+    float northHigh = DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_NORMAL, 0.0f, 1.0f, 8, 0);
+    float northLow = DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_NORMAL, 0.0f, 1.0f, 8, 15);
 
-        snapshot.cells[i].mapX = i % 20 + snapshot.mapCoordinateOffset;
-        snapshot.cells[i].mapY = i / 20 + snapshot.mapCoordinateOffset;
-        snapshot.cells[i].sourceMapX = i % 20;
-        snapshot.cells[i].sourceMapY = i / 20;
-        snapshot.cells[i].sourceMapGroup = 0;
-        snapshot.cells[i].sourceMapNum = mapNum;
-        snapshot.cells[i].sourceLayoutId = layoutId;
-        snapshot.cells[i].flags = DIORAMA_CELL_SOURCE_VALID;
-        snapshot.cells[i].metatileId = metatileId;
-        snapshot.cells[i].behavior = attributes & 0xFF;
-        snapshot.cells[i].layerType = attributes >> 12;
-        snapshot.cells[i].collision = (entry >> 10) & 3;
-        snapshot.cells[i].elevation = entry >> 12;
-    }
-    assert(fgetc(map) == EOF);
-    fclose(map);
-    DioramaRules_ResolveGrid(&snapshot, resolved);
-    for (i = 0; i < 400; i++)
-    {
-        uint32_t bits;
+    assert(northHigh == 1.0f);
+    assert(northLow == 0.25f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_S,
+        MB_NORMAL, 0.0f, 1.0f, 8, 15) == 1.0f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_E,
+        MB_NORMAL, 0.0f, 1.0f, 0, 8) == 1.0f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_W,
+        MB_NORMAL, 0.0f, 1.0f, 15, 8) == 1.0f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_DOWN_N,
+        MB_NORMAL, 0.0f, 1.0f, 8, 0) == -1.0f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_BUMPY_SLOPE, 0.0f, 1.0f, 8, 8) == 0.5f);
+    memset(&bridge, 0, sizeof(bridge));
+    bridge.archetype = DIORAMA_ARCHETYPE_STAIRS_N;
+    bridge.featureHeight = 1.0f;
+    assert(DioramaRules_ObjectGroundHeight(&bridge, 3, 3, MB_BUMPY_SLOPE,
+                                           8, 8) == 0.5f);
 
-        hash = HashByte(hash, resolved[i].shape);
-        hash = HashByte(hash, resolved[i].profile);
-        hash = HashByte(hash, resolved[i].source);
-        hash = HashByte(hash, resolved[i].planeAxis);
-        hash = HashByte(hash, resolved[i].baseMetatileId);
-        hash = HashByte(hash, resolved[i].baseMetatileId >> 8);
-        memcpy(&bits, &resolved[i].groundHeight, sizeof(bits));
-        hash = HashByte(hash, bits);
-        hash = HashByte(hash, bits >> 8);
-        hash = HashByte(hash, bits >> 16);
-        hash = HashByte(hash, bits >> 24);
-        memcpy(&bits, &resolved[i].topHeight, sizeof(bits));
-        hash = HashByte(hash, bits);
-        hash = HashByte(hash, bits >> 8);
-        hash = HashByte(hash, bits >> 16);
-        hash = HashByte(hash, bits >> 24);
-        memcpy(&bits, &resolved[i].featureHeight, sizeof(bits));
-        hash = HashByte(hash, bits);
-        hash = HashByte(hash, bits >> 8);
-        hash = HashByte(hash, bits >> 16);
-        hash = HashByte(hash, bits >> 24);
-        hash = HashByte(hash, resolved[i].structureId);
-        hash = HashByte(hash, resolved[i].structureId >> 8);
-        hash = HashByte(hash, resolved[i].structureLocalX);
-        hash = HashByte(hash, resolved[i].structureLocalY);
-        for (int face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
+    memset(&bridge, 0, sizeof(bridge));
+    bridge.shape = DIORAMA_SHAPE_BRIDGE;
+    bridge.groundHeight = 1.75f;
+    bridge.surfaceCount = 2;
+    bridge.surfaces[0].gameplayElevation = 3;
+    bridge.surfaces[0].topHeight = 1.75f;
+    bridge.surfaces[1].gameplayElevation = 1;
+    bridge.surfaces[1].topHeight = -0.125f;
+    assert(DioramaRules_ObjectGroundHeight(&bridge, 15, 1, MB_NORMAL, 8, 8) == -0.125f);
+    assert(DioramaRules_ObjectGroundHeight(&bridge, 15, 3, MB_NORMAL, 8, 8) == 1.75f);
+}
+
+static void TestFullGridPlaneResolution(void)
+{
+    InitLittleroot();
+    sSnapshot.visibleCellCount = DIORAMA_MAX_VISIBLE_CELLS;
+    for (int y = 0; y < DIORAMA_GRID_HEIGHT; y++)
+        for (int x = 0; x < DIORAMA_GRID_WIDTH; x++)
         {
-            hash = HashByte(hash, resolved[i].materials[face].metatileId);
-            hash = HashByte(hash, resolved[i].materials[face].metatileId >> 8);
-            hash = HashByte(hash, resolved[i].materials[face].layer);
+            int index = y * DIORAMA_GRID_WIDTH + x;
+            sSnapshot.cells[index] = MakeCell(x, y, 1, MB_NORMAL);
+            sSnapshot.cells[index].elevation = 0;
         }
-    }
-    return hash;
+    sSnapshot.cells[DIORAMA_MAX_VISIBLE_CELLS - 1].elevation = 3;
+    DioramaRules_ResolveGrid(&sSnapshot, sResolvedGrid);
+    for (int i = 0; i < DIORAMA_MAX_VISIBLE_CELLS; i++)
+        assert(sResolvedGrid[i].effectiveElevation == 3);
 }
 
-static void TestMapGoldens(void)
+static void FillPassableGrid(void)
 {
-    uint64_t littleroot = ResolveMapGolden("data/layouts/LittlerootTown/map.bin", 9, 10);
-    uint64_t route101 = ResolveMapGolden("data/layouts/Route101/map.bin", 16, 17);
+    sSnapshot.visibleCellCount = DIORAMA_MAX_VISIBLE_CELLS;
+    for (int y = 0; y < DIORAMA_GRID_HEIGHT; y++)
+        for (int x = 0; x < DIORAMA_GRID_WIDTH; x++)
+        {
+            int index = y * DIORAMA_GRID_WIDTH + x;
 
-    assert(littleroot == UINT64_C(0x74B4761964A0CBD0));
-    assert(route101 == UINT64_C(0xE57FFED9A2F4A6D1));
+            sSnapshot.cells[index] = MakeCell(x, y, 1, MB_NORMAL);
+            sSnapshot.cells[index].collision = 0;
+        }
+}
+
+static void TestAutomaticBlockedVolumes(void)
+{
+    static const uint16_t repeating[] = {10, 11, 20, 12, 20};
+    static const uint16_t unique[] = {30, 31, 32};
+
+    InitLittleroot();
+    FillPassableGrid();
+    for (int y = 0; y < 5; y++)
+    {
+        int index = (y + 10) * DIORAMA_GRID_WIDTH + 10;
+
+        sSnapshot.cells[index].metatileId = repeating[y];
+        sSnapshot.cells[index].collision = 1;
+    }
+    for (int y = 0; y < 3; y++)
+    {
+        int index = (y + 10) * DIORAMA_GRID_WIDTH + 12;
+
+        sSnapshot.cells[index].metatileId = unique[y];
+        sSnapshot.cells[index].collision = 1;
+    }
+    for (int y = 0; y < 4; y++)
+    {
+        int index = y * DIORAMA_GRID_WIDTH + 14;
+
+        sSnapshot.cells[index].metatileId = 40 + y;
+        sSnapshot.cells[index].collision = 1;
+    }
+    for (int y = 0; y < 3; y++)
+    {
+        int index = (y + 10) * DIORAMA_GRID_WIDTH + 18;
+
+        sSnapshot.cells[index].metatileId = 50;
+        sSnapshot.cells[index].collision = 1;
+    }
+    sSnapshot.cells[10 * DIORAMA_GRID_WIDTH + 16].behavior = MB_POND_WATER;
+    sSnapshot.cells[10 * DIORAMA_GRID_WIDTH + 16].collision = 1;
+
+    DioramaRules_ResolveGrid(&sSnapshot, sResolvedGrid);
+    for (int y = 0; y < 5; y++)
+    {
+        const struct DioramaResolvedCell *resolved =
+            &sResolvedGrid[(y + 10) * DIORAMA_GRID_WIDTH + 10];
+
+        assert(resolved->shape == DIORAMA_SHAPE_CLIFF);
+        assert(resolved->archetype == DIORAMA_ARCHETYPE_WALL_VOLUME);
+        assert(resolved->topHeight == 2.0f);
+        assert(resolved->volumeRunRows == 2);
+        assert(resolved->volumeNorthY == 17);
+        assert(resolved->volumeSouthY == 21);
+    }
+    for (int y = 0; y < 3; y++)
+        assert(sResolvedGrid[(y + 10) * DIORAMA_GRID_WIDTH + 12].topHeight == 3.0f);
+    assert(sResolvedGrid[10 * DIORAMA_GRID_WIDTH + 11].shape == DIORAMA_SHAPE_FLAT);
+    assert(sResolvedGrid[10 * DIORAMA_GRID_WIDTH + 16].shape == DIORAMA_SHAPE_WATER);
+    for (int y = 0; y < 4; y++)
+        assert(sResolvedGrid[y * DIORAMA_GRID_WIDTH + 14].shape == DIORAMA_SHAPE_FLAT);
+    for (int y = 0; y < 3; y++)
+        assert(sResolvedGrid[(y + 10) * DIORAMA_GRID_WIDTH + 18].topHeight == 1.0f);
 }
 
 int main(void)
 {
     InitLittleroot();
     TestMapSupport();
-    TestPriority();
-    TestBuildingProfile();
+    TestRetiredPrototypesStayDisabled();
+    TestReusableAndGenericRules();
     TestGridAndConnectedCoordinates();
-    TestMapGoldens();
+    TestContextualGameplayPlanes();
+    TestG5SurfaceProfiles();
+    TestAutomaticBlockedVolumes();
+    TestFullGridPlaneResolution();
     puts("diorama rule tests passed");
     return 0;
 }

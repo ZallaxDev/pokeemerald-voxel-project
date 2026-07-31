@@ -6,6 +6,7 @@
 #include <SDL2/SDL_opengl.h>
 
 #include "diorama/scene_snapshot.h"
+#include "diorama/rules.h"
 
 struct DioramaTerrainMetrics
 {
@@ -21,7 +22,8 @@ struct DioramaTerrainMetrics
 
 bool DioramaGLTerrain_Init(void);
 void DioramaGLTerrain_Reset(void);
-bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot);
+bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
+                           const struct DioramaResolvedCell *resolvedCells);
 void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                            GLuint foregroundAtlasTexture, float cameraX, float cameraZ,
                            float cameraPitch, float focalLength, bool debug);

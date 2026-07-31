@@ -65,9 +65,7 @@ async function openMap() {
     }));
     $("#map-title").textContent = document.map.symbol.replace(/^MAP_/, "").replaceAll("_", " ");
     $("#map-size").textContent = `${document.map.width} x ${document.map.height}`;
-    $("#rule-path").textContent = document.ruleSource;
-    const templates = Object.keys(document.editor.templates);
-    $("#building-template").replaceChildren(...templates.map((name) => new Option(name.replaceAll("_", " "), name)));
+    $("#rule-path").textContent = document.ruleSource || "Generated global G5 baseline";
     resetCamera(); updateAll(); status("Map ready");
   } catch (error) { status(error.message, true); }
 }
@@ -82,11 +80,8 @@ function bindControls() {
   $("#apply-geometry").addEventListener("click", applyGeometry);
   $("#remove-overrides").addEventListener("click", removeOverrides);
   $("#clear-faces").addEventListener("click", clearFaces);
-  $("#place-building").addEventListener("click", placeBuilding);
-  $("#remove-building").addEventListener("click", removeBuilding);
-  $("#apply-sign-preset").addEventListener("click", applySignPreset);
   $("#reset-camera").addEventListener("click", resetCamera);
-  ["#shape", "#ground-height", "#height", "#axis", "#profile", "#base-metatile"].forEach((id) => {
+  ["#shape", "#ground-height", "#height"].forEach((id) => {
     $(id).addEventListener("input", updateDraftPreview);
     $(id).addEventListener("change", updateDraftPreview);
   });
@@ -189,17 +184,15 @@ function cellById(id) {
   return state.document.cells[y * state.document.map.width + x];
 }
 
-function overrideAt(cell) { return state.rules.overrides.find((item) => item.x === cell.x && item.y === cell.y); }
+function overrideAt(cell) { return (state.rules.overrides || []).find((item) => item.x === cell.x && item.y === cell.y); }
 
 function effectiveAt(cell) {
   if (state.draftRule && state.selection.has(cell.id)) return { source: "inspector draft", rule: state.draftRule };
   const override = overrideAt(cell);
   if (override) return { source: "map override", rule: normalizeClientRule(override) };
-  const sign = state.document.events.background.some((event) => event.type === "sign" && event.x === cell.x && event.y === cell.y);
-  if (sign && state.rules.eventRules?.sign) return { source: "event sign", rule: normalizeClientRule(state.rules.eventRules.sign) };
   const inherited = state.document.editor.resolved[state.document.cells.indexOf(cell)];
   if (inherited.source === "tileset") return inherited;
-  const building = state.rules.buildings.find((item) => {
+  const building = (state.rules.buildings || []).find((item) => {
     const template = state.document.editor.templates[item.template];
     return cell.x >= item.x && cell.x < item.x + template.width && cell.y >= item.y && cell.y < item.y + template.height;
   });
@@ -266,7 +259,7 @@ function updateInspector() {
   $("#cell-heading").textContent=cells.length===1?`Cell ${first.id}`:`${cells.length} cells`;
   $("#rule-source").textContent=effective.source;
   $("#cell-facts").innerHTML=[["Metatile",`0x${first.metatile.toString(16).toUpperCase()}`],["Local ID",`0x${first.localMetatile.toString(16).toUpperCase()}`],["Behavior",state.document.editor.behaviorNames[first.behavior]||first.behavior],["Layer / collision",`${first.layerType} / ${first.collision}`]].map(([key,value])=>`<div class="fact"><small>${key}</small><strong>${value}</strong></div>`).join("");
-  $("#shape").value=rule.shape; $("#ground-height").value=rule.groundHeight; $("#height").value=rule.height; $("#axis").value=rule.axis; $("#profile").value=rule.profile; $("#base-metatile").value=rule.baseMetatile === "self" ? "" : rule.baseMetatile;
+  $("#shape").value=rule.shape; $("#ground-height").value=rule.groundHeight; $("#height").value=rule.height;
   state.faceMaterials=clone(rule.faces); renderFaces(first);
   state.draftRule=captureDraftRule();
 }
@@ -313,32 +306,26 @@ function undo(){if(!state.history.length)return;state.future.push(clone(state.ru
 function redo(){if(!state.future.length)return;state.history.push(clone(state.rules));state.rules=state.future.pop();state.draftRule=null;state.dirty=true;updateAll();status("Redid change")}
 
 function ruleFromInspector() {
-  const shape=$("#shape").value, height=Number($("#height").value), groundHeight=Number($("#ground-height").value), base=$("#base-metatile").value;
-  if((shape==="extruded"||shape==="cutout")&&height<=0)throw new Error(`${shape} requires a positive height`);
-  if(shape==="cutout"&&base==="")throw new Error("Cutout requires a base metatile");
-  const rule={shape,groundHeight,height,axis:$("#axis").value,profile:$("#profile").value,faces:clone(state.faceMaterials)};
-  if(shape==="cutout")rule.baseMetatile=Number(base);
+  const shape=$("#shape").value, height=Number($("#height").value), groundHeight=Number($("#ground-height").value);
+  if(shape==="extruded"&&height<=0)throw new Error("extruded requires a positive height");
+  const rule={shape,groundHeight,height,faces:clone(state.faceMaterials)};
   return rule;
 }
 
-function captureDraftRule(){const base=$("#base-metatile").value;const rule={shape:$("#shape").value,groundHeight:Number($("#ground-height").value)||0,height:Math.max(0,Number($("#height").value)||0),axis:$("#axis").value,profile:$("#profile").value,faces:clone(state.faceMaterials)};if(base!=="")rule.baseMetatile=Number(base);return rule}
+function captureDraftRule(){return {shape:$("#shape").value,groundHeight:Number($("#ground-height").value)||0,height:Math.max(0,Number($("#height").value)||0),faces:clone(state.faceMaterials)}}
 function updateDraftPreview(){if(!state.selection.size)return;state.draftRule=captureDraftRule();renderPreview();status("Previewing unsaved inspector changes")}
 
 function applyGeometry(){if(!state.selection.size)return;try{const definition=ruleFromInspector();mutateRules("Applied map overrides",()=>{for(const id of state.selection){const cell=cellById(id),existing=overrideAt(cell),next={x:cell.x,y:cell.y,...clone(definition)};if(existing)Object.assign(existing,next);else state.rules.overrides.push(next)}state.rules.overrides.sort((a,b)=>a.y-b.y||a.x-b.x)})}catch(error){status(error.message,true)}}
 function removeOverrides(){if(!state.selection.size)return;mutateRules("Removed selected overrides",()=>{state.rules.overrides=state.rules.overrides.filter((item)=>!state.selection.has(`${item.x},${item.y}`))})}
 
-function selectionOrigin(){const cells=[...state.selection].map(cellById);return cells.length?{x:Math.min(...cells.map(c=>c.x)),y:Math.min(...cells.map(c=>c.y))}:null}
-function placeBuilding(){const origin=selectionOrigin(),name=$("#building-template").value;if(!origin||!name)return;const template=state.document.editor.templates[name];if(origin.x+template.width>state.document.map.width||origin.y+template.height>state.document.map.height){status("Building does not fit in the map",true);return}const overlap=state.rules.buildings.some((item)=>{const other=state.document.editor.templates[item.template];return origin.x<item.x+other.width&&origin.x+template.width>item.x&&origin.y<item.y+other.height&&origin.y+template.height>item.y});if(overlap){status("Building overlaps another building",true);return}mutateRules("Placed building template",()=>state.rules.buildings.push({template:name,x:origin.x,y:origin.y}))}
-function removeBuilding(){if(!state.selection.size)return;mutateRules("Removed building",()=>{state.rules.buildings=state.rules.buildings.filter((item)=>{const t=state.document.editor.templates[item.template];return ![...state.selection].some((id)=>{const c=cellById(id);return c.x>=item.x&&c.x<item.x+t.width&&c.y>=item.y&&c.y<item.y+t.height})})})}
-function applySignPreset(){mutateRules("Applied reusable panel rule to signs",()=>{state.rules.eventRules=state.rules.eventRules||{};state.rules.eventRules.sign={shape:"cutout",axis:"cross",height:.85,baseMetatile:1,faces:{top:{metatile:"self",layer:"base"},plane:{metatile:"self",layer:"foreground"}}};const signs=new Set(state.document.events.background.filter(e=>e.type==="sign").map(e=>`${e.x},${e.y}`));state.rules.overrides=state.rules.overrides.filter(item=>!signs.has(`${item.x},${item.y}`))})}
 
 function payload(){return{symbol:state.document.map.symbol,revision:state.revision,rules:state.rules}}
 async function validateRules(){if(!state.document)return;status("Validating candidate...");try{const result=await request("/api/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload())});status(result.message)}catch(error){status(error.message,true)}}
 async function regenerateRules(){status("Regenerating rule tables...");try{const result=await request("/api/regenerate",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});status(result.message)}catch(error){status(error.message,true)}}
-async function saveRules(){if(!state.document)return;status("Validating and regenerating...");try{const result=await request("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload())});state.revision=result.revision;state.dirty=false;state.history=[];state.future=[];updateAll();status(result.message)}catch(error){status(error.message,true)}}
+async function saveRules(){if(!state.document)return;if(state.document.editor.readOnly){status("This map uses the generated global baseline and is read-only",true);return}status("Validating and regenerating...");try{const result=await request("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload())});state.revision=result.revision;state.dirty=false;state.history=[];state.future=[];updateAll();status(result.message)}catch(error){status(error.message,true)}}
 
-function updateAll(){if(!state.document)return;drawMap();updateInspector();renderPreview();$("#undo").disabled=!state.history.length;$("#redo").disabled=!state.future.length;$("#dirty-badge").textContent=state.dirty?"Unsaved":"Clean";$("#dirty-badge").classList.toggle("dirty",state.dirty);$("#rule-counts").textContent=`${state.rules.overrides.length} overrides · ${state.rules.buildings.length} structures`;updateWarnings()}
-function updateWarnings(){const groups={};state.rules.overrides.forEach(({x,y,...rule})=>{const key=JSON.stringify(rule);groups[key]=(groups[key]||0)+1});const repeated=Object.values(groups).filter(count=>count>=4).length;$("#warning-count").textContent=repeated?`${repeated} repeated rule${repeated>1?"s":""}; consider a tileset rule`:"No warnings"}
+function updateAll(){if(!state.document)return;drawMap();updateInspector();renderPreview();const readOnly=state.document.editor.readOnly;$("#undo").disabled=readOnly||!state.history.length;$("#redo").disabled=readOnly||!state.future.length;$("#save").disabled=readOnly;$("#apply-geometry").disabled=readOnly;$("#remove-overrides").disabled=readOnly;$("#dirty-badge").textContent=readOnly?"Global baseline":state.dirty?"Unsaved":"Clean";$("#dirty-badge").classList.toggle("dirty",state.dirty);$("#rule-counts").textContent=`${(state.rules.overrides||[]).length} overrides · ${(state.rules.buildings||[]).length} structures`;updateWarnings()}
+function updateWarnings(){const groups={};(state.rules.overrides||[]).forEach(({x,y,...rule})=>{const key=JSON.stringify(rule);groups[key]=(groups[key]||0)+1});const repeated=Object.values(groups).filter(count=>count>=4).length;$("#warning-count").textContent=repeated?`${repeated} repeated rule${repeated>1?"s":""}; consider a tileset rule`:"No warnings"}
 
 // Minimal WebGL terrain preview. The game renderer remains authoritative.
 const preview={gl:null,program:null,buffers:{},yaw:-.72,pitch:.76,distance:24,viewProjection:null,drag:null};
@@ -351,7 +338,7 @@ function atlasUV(id,role){const local=id-(role==="secondary"?512:0),rows=Math.ce
 function previewMaterial(material,cell){if(material==="none"||material?.layer==="none")return null;const raw=material?.metatile??"self";return{id:raw==="self"?cell.metatile:Number(raw),layer:material?.layer||"full"}}
 function addFace(batch,corners,material,shade,selected,vTop=0,vBottom=1,uLeft=0,uRight=1){if(material===null)return;const role=material.id>=512?"secondary":"primary",uv=atlasUV(material.id,role),base=batch[`${role}:${material.layer}`],start=base.vertices.length/7;[[uLeft,vTop],[uRight,vTop],[uRight,vBottom],[uLeft,vBottom]].forEach(([u,v],i)=>base.vertices.push(...corners[i],uv[0]+u*uv[2],uv[1]+v*uv[3],shade,selected?1:0));base.indices.push(start,start+1,start+2,start,start+2,start+3)}
 function buildingAtCell(cell) {
-  const placement=state.rules.buildings.find((item)=>{
+  const placement=(state.rules.buildings||[]).find((item)=>{
     const template=state.document.editor.templates[item.template];
     return cell.x>=item.x&&cell.x<item.x+template.width&&cell.y>=item.y&&cell.y<item.y+template.height;
   });
@@ -371,11 +358,37 @@ function sameBuildingNeighbor(building,x,y) {
   return (shape==="roof"||shape==="building-part")&&buildingAtCell(neighbor)?.placement===building.placement;
 }
 
+function previewShellGeometry(batch) {
+  const units=state.document.geometry.unitsPerCell,width=state.document.map.width,height=state.document.map.height;
+  const provenance=new Map(state.document.geometry.provenance.map(item=>[item.id,item]));
+  for(const face of state.document.geometry.faces) {
+    const source=provenance.get(face.material),cell=source&&state.document.cells[source.cell];
+    if(!cell)continue;
+    const rule=normalizeClientRule(state.document.editor.resolved[source.cell].rule);
+    const material=previewMaterial(rule.faces[source.face],cell);
+    const selected=state.selection.has(cell.id),x=value=>value/units-width/2,z=value=>height/2-value/units,y=value=>value/units;
+    let corners,shade=face.axis===1?1:(face.axis===2&&face.sign<0?.82:.68);
+    if(face.axis===1) {
+      corners=[[x(face.u_min),y(face.plane),z(face.v_min)],[x(face.u_max),y(face.plane),z(face.v_min)],[x(face.u_max),y(face.plane),z(face.v_max)],[x(face.u_min),y(face.plane),z(face.v_max)]];
+      if(face.sign<0)[corners[1],corners[3]]=[corners[3],corners[1]];
+    } else if(face.axis===0) {
+      corners=[[x(face.plane),y(face.v_max),z(face.u_max)],[x(face.plane),y(face.v_max),z(face.u_min)],[x(face.plane),y(face.v_min),z(face.u_min)],[x(face.plane),y(face.v_min),z(face.u_max)]];
+      if(face.sign<0)corners.reverse();
+    } else {
+      corners=[[x(face.u_min),y(face.v_max),z(face.plane)],[x(face.u_max),y(face.v_max),z(face.plane)],[x(face.u_max),y(face.v_min),z(face.plane)],[x(face.u_min),y(face.v_min),z(face.plane)]];
+      if(face.sign<0)corners.reverse();
+    }
+    addFace(batch,corners,material,shade,selected);
+  }
+  return batch;
+}
+
 function previewGeometry() {
   const batch={};
   for(const role of ["primary","secondary"])
     for(const layer of ["full","base","foreground"])
       batch[`${role}:${layer}`]={vertices:[],indices:[]};
+  if(state.document.geometry?.modelVersion===1)return previewShellGeometry(batch);
 
   state.document.cells.forEach((cell)=>{
     const effective=effectiveAt(cell),r=normalizeClientRule(effective.rule);

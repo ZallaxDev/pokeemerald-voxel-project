@@ -9,7 +9,8 @@ import struct
 import sys
 from pathlib import Path
 
-from compile_rules import RuleError, TILESETS, compile_data, load_json
+from catalog import load_tilesets
+from compile_rules import RuleError, compile_data, load_json
 
 
 def find_map(root: Path, symbol: str) -> tuple[Path, dict]:
@@ -37,10 +38,11 @@ def find_rule_source(root: Path, symbol: str) -> tuple[Path | None, dict | None]
 
 
 def read_attributes(root: Path, tileset: str) -> tuple[str, list[int]]:
-    if tileset not in TILESETS:
+    tilesets = load_tilesets(root)
+    if tileset not in tilesets:
         raise RuleError(f"tileset {tileset} is not registered for diorama editing")
-    relative = TILESETS[tileset][1]
-    path = root / "data/tilesets" / relative / "metatile_attributes.bin"
+    relative = tilesets[tileset].metatiles_root
+    path = root / relative / "metatile_attributes.bin"
     raw = path.read_bytes()
     if len(raw) % 2:
         raise RuleError(f"{path}: invalid attribute table size")
@@ -82,7 +84,7 @@ def build_editor_document(root: Path, symbol: str) -> dict:
         return path.relative_to(root).as_posix()
 
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "map": {
             "symbol": symbol,
             "source": relative(map_path),

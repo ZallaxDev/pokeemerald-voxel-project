@@ -33,7 +33,6 @@ struct GLTerrainChunk
 static struct GLTerrainChunk sChunks[TERRAIN_CHUNK_CACHE_SIZE];
 static struct DioramaTerrainVertex sScratchVertices[DIORAMA_TERRAIN_MAX_VERTICES];
 static struct DioramaTerrainVertex sDebugVertices[TERRAIN_DEBUG_MAX_VERTICES];
-static struct DioramaResolvedCell sResolvedCells[DIORAMA_MAX_VISIBLE_CELLS];
 static struct DioramaTerrainMetrics sMetrics;
 static GLuint sProgram;
 static GLuint sDebugVertexArray;
@@ -225,12 +224,17 @@ static struct GLTerrainChunk *AllocateChunk(void)
 static const struct DioramaCellSnapshot *FindSnapshotCell(
     const struct DioramaSceneSnapshot *snapshot, int mapX, int mapY)
 {
-    uint16_t i;
+    int gridX = mapX - snapshot->gridOriginX;
+    int gridY = mapY - snapshot->gridOriginY;
+    int index;
 
-    for (i = 0; i < snapshot->visibleCellCount; i++)
-        if (snapshot->cells[i].mapX == mapX && snapshot->cells[i].mapY == mapY)
-            return &snapshot->cells[i];
-    return NULL;
+    if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT)
+        return NULL;
+    index = gridY * DIORAMA_GRID_WIDTH + gridX;
+    if (index >= snapshot->visibleCellCount
+     || snapshot->cells[index].mapX != mapX || snapshot->cells[index].mapY != mapY)
+        return NULL;
+    return &snapshot->cells[index];
 }
 
 static void SetTerrainMaterial(struct DioramaTerrainMaterial *material,
@@ -296,9 +300,15 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->rawElevation = source->elevation;
             cell->reflective = MetatileBehavior_IsReflective(source->behavior);
             cell->shape = resolvedCells[gridIndex].shape;
+            cell->archetype = resolvedCells[gridIndex].archetype;
+            cell->terrainClass = resolvedCells[gridIndex].terrainClass;
+            cell->semanticProfile = resolvedCells[gridIndex].semanticProfile;
             cell->profile = resolvedCells[gridIndex].profile;
             cell->planeAxis = resolvedCells[gridIndex].planeAxis;
+            cell->effectiveElevation = resolvedCells[gridIndex].effectiveElevation;
+            cell->surfaceCount = resolvedCells[gridIndex].surfaceCount;
             cell->structureId = resolvedCells[gridIndex].structureId;
+            cell->rulePriority = resolvedCells[gridIndex].rulePriority;
             cell->structureTemplateId = resolvedCells[gridIndex].structureTemplateId;
             cell->structureX = resolvedCells[gridIndex].structureX;
             cell->structureY = resolvedCells[gridIndex].structureY;
@@ -307,12 +317,19 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->structureRoofRows = resolvedCells[gridIndex].structureRoofRows;
             cell->structureLocalX = resolvedCells[gridIndex].structureLocalX;
             cell->structureLocalY = resolvedCells[gridIndex].structureLocalY;
+            cell->volumeMaterialCount = resolvedCells[gridIndex].volumeRunRows;
             cell->groundHeight = resolvedCells[gridIndex].groundHeight;
             cell->visualHeight = resolvedCells[gridIndex].topHeight;
             cell->featureHeight = resolvedCells[gridIndex].featureHeight;
             cell->structureBodyHeight = resolvedCells[gridIndex].structureBodyHeight;
             cell->structureRoofHeight = resolvedCells[gridIndex].structureRoofHeight;
             cell->southFacadeUnitHeight = resolvedCells[gridIndex].structureSouthFacadeUnitHeight;
+            for (face = 0; face < cell->surfaceCount; face++)
+            {
+                cell->surfaces[face].bottomHeight = resolvedCells[gridIndex].surfaces[face].bottomHeight;
+                cell->surfaces[face].topHeight = resolvedCells[gridIndex].surfaces[face].topHeight;
+                cell->surfaces[face].gameplayElevation = resolvedCells[gridIndex].surfaces[face].gameplayElevation;
+            }
             for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
             {
                 uint16_t materialId = resolvedCells[gridIndex].materials[face].metatileId;
@@ -320,6 +337,71 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                     materialId = source->metatileId;
                 SetTerrainMaterial(&cell->materials[face], materialId,
                                    resolvedCells[gridIndex].materials[face].layer);
+                SetTerrainMaterial(&cell->underlayMaterials[face], source->metatileId,
+                                   DIORAMA_MATERIAL_BASE);
+            }
+            if (cell->shape == DIORAMA_SHAPE_LEDGE)
+            {
+                DioramaAtlas_GetForegroundAlphaMask(source->metatileId,
+                                                    cell->foregroundAlpha);
+                SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
+                                   source->metatileId, DIORAMA_MATERIAL_BASE);
+                for (face = DIORAMA_MATERIAL_FACE_NORTH;
+                     face <= DIORAMA_MATERIAL_FACE_WEST; face++)
+                    SetTerrainMaterial(&cell->materials[face], source->metatileId,
+                                        DIORAMA_MATERIAL_FOREGROUND);
+            }
+            else if (cell->shape == DIORAMA_SHAPE_CLIFF && cell->volumeMaterialCount != 0)
+            {
+                const struct DioramaResolvedCell *resolved = &resolvedCells[gridIndex];
+                int extent = resolved->volumeSouthY - resolved->volumeNorthY + 1;
+                int topY = resolved->volumeNorthY
+                         + (source->mapY - resolved->volumeNorthY) % (extent < 2 ? extent : 2);
+                const struct DioramaCellSnapshot *topSource = FindSnapshotCell(
+                    snapshot, source->mapX, topY);
+                uint8_t band;
+
+                if (topSource != NULL)
+                    SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
+                                       topSource->metatileId, DIORAMA_MATERIAL_FULL);
+                for (band = 0; band < cell->volumeMaterialCount; band++)
+                {
+                    int frontY = resolved->volumeSouthY - band;
+                    int backY = resolved->volumeNorthY + band;
+                    const struct DioramaCellSnapshot *frontSource;
+                    const struct DioramaCellSnapshot *backSource;
+
+                    if (frontY < resolved->volumeNorthY)
+                        frontY = resolved->volumeNorthY;
+                    if (backY > resolved->volumeSouthY)
+                        backY = resolved->volumeSouthY;
+                    frontSource = FindSnapshotCell(snapshot, source->mapX, frontY);
+                    backSource = FindSnapshotCell(snapshot, source->mapX, backY);
+                    if (frontSource == NULL || backSource == NULL)
+                        break;
+                    SetTerrainMaterial(&cell->volumeMaterials[0][band],
+                                       backSource->metatileId, DIORAMA_MATERIAL_FULL);
+                    for (face = 1; face < 4; face++)
+                        SetTerrainMaterial(&cell->volumeMaterials[face][band],
+                                           frontSource->metatileId, DIORAMA_MATERIAL_FULL);
+                }
+                cell->volumeMaterialCount = band;
+            }
+            else if (cell->shape == DIORAMA_SHAPE_CLIFF)
+            {
+                uint16_t alpha[DIORAMA_VOXELS_PER_CELL];
+                bool hasForeground = false;
+
+                DioramaAtlas_GetForegroundAlphaMask(source->metatileId, alpha);
+                for (face = 0; face < DIORAMA_VOXELS_PER_CELL; face++)
+                    hasForeground |= alpha[face] != 0;
+                SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
+                                   source->metatileId, DIORAMA_MATERIAL_BASE);
+                if (hasForeground)
+                    for (face = DIORAMA_MATERIAL_FACE_NORTH;
+                         face <= DIORAMA_MATERIAL_FACE_WEST; face++)
+                        SetTerrainMaterial(&cell->materials[face], source->metatileId,
+                                           DIORAMA_MATERIAL_FOREGROUND);
             }
             if (resolvedCells[gridIndex].structureSouthFacadeRows != 0
              && cell->structureLocalY == cell->structureHeight - 1)
@@ -412,7 +494,8 @@ void DioramaGLTerrain_Reset(void)
     memset(&sMetrics, 0, sizeof(sMetrics));
 }
 
-bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
+bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
+                           const struct DioramaResolvedCell *resolvedCells)
 {
     struct DioramaTerrainChunkInput input;
     int minChunkX;
@@ -437,8 +520,6 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
     }
     for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
         sChunks[i].active = false;
-    DioramaRules_ResolveGrid(snapshot, sResolvedCells);
-
     minChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX, DIORAMA_TERRAIN_CHUNK_SIZE);
     maxChunkX = DioramaTerrain_FloorDiv(snapshot->gridOriginX + DIORAMA_GRID_WIDTH - 1,
                                        DIORAMA_TERRAIN_CHUNK_SIZE);
@@ -455,7 +536,7 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot)
             bool forceDirty = forceAllDirty;
             uint8_t dirtyIndex;
 
-            if (!BuildInput(snapshot, sResolvedCells, chunkX, chunkY, &input))
+            if (!BuildInput(snapshot, resolvedCells, chunkX, chunkY, &input))
                 continue;
             signature = DioramaTerrain_ChunkSignature(&input);
             for (dirtyIndex = 0; !forceDirty && dirtyIndex < snapshot->dirtyCellCount; dirtyIndex++)

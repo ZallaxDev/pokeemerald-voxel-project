@@ -14,7 +14,6 @@ import sys
 import tempfile
 import threading
 import webbrowser
-import zlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,12 +26,16 @@ sys.path.insert(0, str(TOOLS_ROOT))
 
 from compile_rules import (  # noqa: E402
     RuleError,
-    TILESETS,
     compile_data,
     load_json,
     parse_behaviors,
 )
 from export_editor_map import build_editor_document  # noqa: E402
+from catalog import CatalogError, load_tilesets, load_world  # noqa: E402
+from emerald_compositor import (EmeraldCompositorError, METATILE_SIZE,  # noqa: E402
+                                 TilesetComposer, encode_rgba_png)
+from occupancy_model import editor_geometry  # noqa: E402
+from terrain_volumes import resolve_volumes  # noqa: E402
 
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -62,19 +65,36 @@ def map_sources() -> dict[str, Path]:
 
 
 def map_listing() -> list[dict]:
+    sources = map_sources()
+    maps, _ = load_world(REPO_ROOT)
     result = []
-    for symbol, path in map_sources().items():
-        data = load_json(path)
+    for item in maps:
+        path = sources.get(item["symbol"])
+        data = load_json(path) if path else None
+        interior = item["mapType"] in ("MAP_TYPE_INDOOR", "MAP_TYPE_SECRET_BASE")
         result.append({
-            "symbol": symbol,
-            "layout": data.get("layout"),
-            "file": path.relative_to(REPO_ROOT).as_posix(),
-            "camera": data.get("camera", {"profile": "exterior"}),
+            "symbol": item["symbol"],
+            "layout": item["layout"],
+            "file": path.relative_to(REPO_ROOT).as_posix() if path else None,
+            "camera": data.get("camera") if data else {
+                "profile": "interior" if interior else "exterior"},
         })
-    return result
+    return sorted(result, key=lambda item: item["symbol"])
 
 
 def normalize_rule(rule: dict) -> dict:
+    archetype = rule.get("archetype")
+    shape = {
+        "ground": "flat", "void": "hidden", "ledge": "ledge",
+        "water": "water", "shallow-water": "water", "waterfall": "water",
+        "current": "water", "hot-spring": "water",
+        "cliff": "cliff", "mound": "cliff", "wall-volume": "cliff",
+        "bridge": "bridge", "deck": "bridge", "rail": "bridge", "support": "bridge",
+        "stairs-n": "stairs", "stairs-s": "stairs", "stairs-e": "stairs",
+        "stairs-w": "stairs", "stairs-down-n": "stairs",
+        "stairs-down-s": "stairs", "stairs-down-e": "stairs",
+        "stairs-down-w": "stairs",
+    }.get(archetype, "cutout" if archetype else rule.get("shape", "flat"))
     faces = {
         face: {"metatile": "self", "layer": "foreground" if face == "plane" else "full"}
         for face in ("top", "north", "east", "south", "west", "plane")
@@ -82,11 +102,13 @@ def normalize_rule(rule: dict) -> dict:
     for face, material in rule.get("faces", {}).items():
         faces[face] = material
     return {
-        "shape": rule.get("shape", "flat"),
+        "shape": shape,
+        "archetype": archetype,
         "profile": rule.get("profile", "none"),
+        "semanticProfile": rule.get("profile"),
         "axis": rule.get("axis", "x"),
         "baseMetatile": rule.get("baseMetatile", "self"),
-        "groundHeight": rule.get("groundHeight", 0),
+        "groundHeight": rule.get("groundOffset", rule.get("groundHeight", 0)),
         "height": rule.get("height", 0),
         "faces": faces,
     }
@@ -109,7 +131,7 @@ def tileset_rule_document(symbol: str) -> dict:
         data = load_json(path)
         if data.get("tileset") == symbol:
             return data
-    return {"metatiles": {}}
+    return {"pins": []}
 
 
 def enrich_document(document: dict) -> dict:
@@ -117,66 +139,72 @@ def enrich_document(document: dict) -> dict:
     behavior_ids = parse_behaviors(REPO_ROOT / "include/constants/metatile_behaviors.h")
     behavior_names = {value: key for key, value in behavior_ids.items()}
     templates = load_templates()
+    if document["rules"] is None:
+        interior = document["map"]["mapType"] in ("MAP_TYPE_INDOOR", "MAP_TYPE_SECRET_BASE")
+        document["rules"] = {
+            "schemaVersion": 2,
+            "kind": "map",
+            "map": document["map"]["symbol"],
+            "layout": document["map"]["layout"],
+            "status": {"supported": True},
+            "camera": {"profile": "interior" if interior else "exterior"},
+            "groundPolicy": {"mode": "automatic"},
+            "contextualRules": [],
+            "exactPatterns": [],
+        }
     rules = document["rules"]
-    overrides = {(item["x"], item["y"]): item for item in rules.get("overrides", [])}
-    sign_coordinates = {
-        (item["x"], item["y"])
-        for item in document["events"]["background"]
-        if item.get("type") == "sign"
-    }
+    behavior_rules = {item["behavior"]: item["action"]
+                      for item in defaults.get("behaviorRules", [])}
     tileset_docs = {
         role: tileset_rule_document(info["symbol"])
         for role, info in document["tilesets"].items()
     }
     resolved = []
     for cell in document["cells"]:
-        coordinate = (cell["x"], cell["y"])
         source = "fallback"
         rule = defaults["default"]
-        if coordinate in overrides:
-            source, rule = "map override", overrides[coordinate]
-        elif coordinate in sign_coordinates and "sign" in rules.get("eventRules", {}):
-            source, rule = "event sign", rules["eventRules"]["sign"]
+        pin = next((item for item in tileset_docs[cell["tilesetRole"]].get("pins", [])
+                    if item["metatile"] == cell["localMetatile"]), None)
+        if pin is not None:
+            source, rule = "tileset pin", pin["action"]
         else:
-            local_rules = tileset_docs[cell["tilesetRole"]].get("metatiles", {})
-            tileset_rule = next(
-                (value for key, value in local_rules.items() if int(key, 0) == cell["localMetatile"]),
-                None,
-            )
-            if tileset_rule is not None:
-                source, rule = "tileset", tileset_rule
-            else:
-                placement = next((item for item in rules.get("buildings", [])
-                    if item["x"] <= cell["x"] < item["x"] + templates[item["template"]]["width"]
-                    and item["y"] <= cell["y"] < item["y"] + templates[item["template"]]["height"]), None)
-                if placement:
-                    template = templates[placement["template"]]
-                    local_y = cell["y"] - placement["y"]
-                    shape = "roof" if local_y < template["roofRows"] else "building-part"
-                    rule = {
-                        "shape": shape,
-                        "profile": template["profile"],
-                        "height": template["bodyHeight"] + (template["roofHeight"] if shape == "roof" else 0),
-                        "faces": template.get("faces", {}),
-                    }
-                    source = f"building:{placement['template']}"
-                else:
-                    behavior = behavior_names.get(cell["behavior"])
-                    if behavior in defaults.get("behaviors", {}):
-                        source, rule = f"behavior:{behavior}", defaults["behaviors"][behavior]
-                    elif cell["collision"] or cell["elevation"] not in (0, 3, 15):
-                        source = "collision/elevation"
-                    elif cell["layerType"]:
-                        source = "visual heuristic"
+            behavior = behavior_names.get(cell["behavior"])
+            if behavior in behavior_rules:
+                source, rule = f"behavior:{behavior}", behavior_rules[behavior]
+            elif cell["collision"] or cell["elevation"] not in (0, 3, 15):
+                source = "collision/elevation"
+            elif cell["layerType"]:
+                source = "visual heuristic"
         resolved.append({"source": source, "rule": normalize_rule(rule)})
 
+    resolve_volumes(document["cells"], resolved,
+                    document["map"]["width"], document["map"]["height"])
+
+    tilesets = load_tilesets(REPO_ROOT)
+    primary_info = tilesets[document["tilesets"]["primary"]["symbol"]]
+    composers = {}
     for role, info in document["tilesets"].items():
-        relative = TILESETS[info["symbol"]][1]
-        count = (REPO_ROOT / "data/tilesets" / relative / "metatile_attributes.bin").stat().st_size // 2
+        selected = tilesets[info["symbol"]]
+        composers[role] = TilesetComposer(
+            REPO_ROOT / primary_info.root, REPO_ROOT / selected.root,
+            REPO_ROOT / primary_info.metatiles_root,
+            REPO_ROOT / selected.metatiles_root)
+    alpha_masks = {}
+    for cell in document["cells"]:
+        key = (cell["tilesetRole"], cell["metatile"])
+        if key not in alpha_masks:
+            foreground = composers[cell["tilesetRole"]].compose_metatile(cell["metatile"])[1]
+            alpha_masks[key] = [sum((1 << x) for x in range(16)
+                                    if foreground[y * 16 + x].rgba[3])
+                                for y in range(16)]
+        cell["foregroundAlpha"] = alpha_masks[key]
+    for role, info in document["tilesets"].items():
+        relative = tilesets[info["symbol"]].metatiles_root
+        count = (REPO_ROOT / relative / "metatile_attributes.bin").stat().st_size // 2
         info["count"] = count
         attributes = struct.unpack(
             f"<{count}H",
-            (REPO_ROOT / "data/tilesets" / relative / "metatile_attributes.bin").read_bytes(),
+            (REPO_ROOT / relative / "metatile_attributes.bin").read_bytes(),
         )
         info["catalog"] = [
             {
@@ -194,156 +222,57 @@ def enrich_document(document: dict) -> dict:
             for layer in ("base", "foreground")
         }
     document["editor"] = {
-        "revision": digest((REPO_ROOT / document["ruleSource"]).read_bytes()),
+        "revision": digest((REPO_ROOT / document["ruleSource"]).read_bytes())
+                    if document["ruleSource"] else digest(json_bytes(rules)),
+        "readOnly": document["ruleSource"] is None,
         "behaviorNames": {str(key): value for key, value in behavior_names.items()},
         "templates": templates,
         "resolved": resolved,
     }
+    document["geometry"] = editor_geometry(document["cells"], resolved,
+                                           defaults.get("profiles", []))
     return document
 
 
-def decode_indexed_png(path: Path) -> tuple[int, int, list[int]]:
-    raw = path.read_bytes()
-    if raw[:8] != b"\x89PNG\r\n\x1a\n":
-        raise RuleError(f"{path}: not a PNG")
-    offset, width, height, depth, color_type = 8, 0, 0, 0, 0
-    compressed = bytearray()
-    while offset < len(raw):
-        size = struct.unpack_from(">I", raw, offset)[0]
-        kind = raw[offset + 4:offset + 8]
-        chunk = raw[offset + 8:offset + 8 + size]
-        offset += size + 12
-        if kind == b"IHDR":
-            width, height, depth, color_type, _, _, interlace = struct.unpack(">IIBBBBB", chunk)
-            if color_type != 3 or depth not in (4, 8) or interlace:
-                raise RuleError(f"{path}: unsupported tiles PNG format")
-        elif kind == b"IDAT":
-            compressed.extend(chunk)
-        elif kind == b"IEND":
-            break
-    packed = zlib.decompress(bytes(compressed))
-    row_bytes = (width * depth + 7) // 8
-    stride = row_bytes + 1
-    rows: list[bytearray] = []
-    previous = bytearray(row_bytes)
-    for y in range(height):
-        mode = packed[y * stride]
-        source = packed[y * stride + 1:(y + 1) * stride]
-        row = bytearray(row_bytes)
-        for x, value in enumerate(source):
-            left = row[x - 1] if x else 0
-            up = previous[x]
-            upper_left = previous[x - 1] if x else 0
-            if mode == 0:
-                prediction = 0
-            elif mode == 1:
-                prediction = left
-            elif mode == 2:
-                prediction = up
-            elif mode == 3:
-                prediction = (left + up) // 2
-            elif mode == 4:
-                p = left + up - upper_left
-                distances = (abs(p - left), abs(p - up), abs(p - upper_left))
-                prediction = (left, up, upper_left)[distances.index(min(distances))]
-            else:
-                raise RuleError(f"{path}: unsupported PNG filter")
-            row[x] = (value + prediction) & 0xFF
-        rows.append(row)
-        previous = row
-    pixels = []
-    for row in rows:
-        if depth == 8:
-            pixels.extend(row[:width])
-        else:
-            expanded = []
-            for value in row:
-                expanded.extend((value >> 4, value & 15))
-            pixels.extend(expanded[:width])
-    return width, height, pixels
-
-
-def read_palettes(path: Path) -> list[list[tuple[int, int, int]]]:
-    palettes = []
-    for index in range(16):
-        raw = (path / f"{index:02}.gbapal").read_bytes()
-        colors = []
-        for value, in struct.iter_unpack("<H", raw[:32]):
-            colors.append(((value & 31) * 255 // 31, ((value >> 5) & 31) * 255 // 31,
-                           ((value >> 10) & 31) * 255 // 31))
-        palettes.append(colors)
-    return palettes
-
-
-def png_rgba(width: int, height: int, pixels: bytes) -> bytes:
-    def chunk(kind: bytes, data: bytes) -> bytes:
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
-    rows = b"".join(b"\0" + pixels[y * width * 4:(y + 1) * width * 4] for y in range(height))
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
-
-
 def build_atlas(symbol: str, primary_symbol: str | None = None, layer_name: str = "full") -> bytes:
-    if symbol not in TILESETS:
+    tilesets = load_tilesets(REPO_ROOT)
+    if symbol not in tilesets:
         raise RuleError("unknown tileset")
     if layer_name not in ("full", "base", "foreground"):
         raise RuleError("unknown atlas layer")
-    relative = TILESETS[symbol][1]
-    root = REPO_ROOT / "data/tilesets" / relative
-    tile_width, _, tile_pixels = decode_indexed_png(root / "tiles.png")
-    palettes = read_palettes(root / "palettes")
-    primary_pixels = tile_pixels
-    primary_palettes = palettes
-    if relative.startswith("secondary/"):
-        if primary_symbol not in TILESETS or not TILESETS[primary_symbol][1].startswith("primary/"):
+    info = tilesets[symbol]
+    if info.role == "secondary":
+        if primary_symbol not in tilesets or tilesets[primary_symbol].role != "primary":
             raise RuleError("secondary atlas requires its primary tileset")
-        primary_root = REPO_ROOT / "data/tilesets" / TILESETS[primary_symbol][1]
-        primary_width, _, primary_pixels = decode_indexed_png(primary_root / "tiles.png")
-        if primary_width != tile_width:
-            raise RuleError("tilesets use incompatible tile widths")
-        primary_palettes = read_palettes(primary_root / "palettes")
-    entries = list(struct.iter_unpack("<8H", (root / "metatiles.bin").read_bytes()))
-    columns, size = 16, 16
+        primary_info = tilesets[primary_symbol]
+    else:
+        primary_info = info
+    primary_root = REPO_ROOT / primary_info.root
+    selected_root = REPO_ROOT / info.root
+    try:
+        composer = TilesetComposer(
+            primary_root, selected_root,
+            REPO_ROOT / primary_info.metatiles_root,
+            REPO_ROOT / info.metatiles_root)
+    except EmeraldCompositorError as error:
+        raise RuleError(str(error)) from error
+    secondary = info.role == "secondary"
+    count = composer.metatile_count(secondary)
+    columns, size = 16, METATILE_SIZE
     width = columns * size
-    height = ((len(entries) + columns - 1) // columns) * size
+    height = ((count + columns - 1) // columns) * size
     output = bytearray(width * height * 4)
-    tiles_per_row = tile_width // 8
-    for metatile, parts in enumerate(entries):
+    layer_index = {"base": 0, "foreground": 1, "full": 2}[layer_name]
+    for metatile in range(count):
         origin_x = (metatile % columns) * size
         origin_y = (metatile // columns) * size
-        layers = {"full": range(2), "base": (0,), "foreground": (1,)}[layer_name]
-        for layer in layers:
-            for quadrant in range(4):
-                value = parts[layer * 4 + quadrant]
-                tile, hflip, vflip, palette = value & 0x3FF, value & 0x400, value & 0x800, value >> 12
-                for py in range(8):
-                    for px in range(8):
-                        source_tile = tile
-                        source_pixels = primary_pixels
-                        if relative.startswith("secondary/") and tile >= 512:
-                            source_tile = tile - 512
-                            source_pixels = tile_pixels
-                        source_x = (source_tile % tiles_per_row) * 8
-                        source_y = (source_tile // tiles_per_row) * 8
-                        sx = source_x + (7 - px if hflip else px)
-                        sy = source_y + (7 - py if vflip else py)
-                        source_index = sy * tile_width + sx
-                        if source_index >= len(source_pixels):
-                            # Animated VRAM slots are not present in the static tiles.png.
-                            red, green, blue = ((72, 58, 78) if (px + py) % 2 else (43, 35, 48))
-                            color_index = None
-                        else:
-                            color_index = source_pixels[source_index]
-                        if color_index == 0:
-                            continue
-                        if color_index is not None:
-                            selected_palettes = primary_palettes if palette < 6 else palettes
-                            red, green, blue = selected_palettes[palette][color_index]
-                        dx = origin_x + (quadrant % 2) * 8 + px
-                        dy = origin_y + (quadrant // 2) * 8 + py
-                        target = (dy * width + dx) * 4
-                        output[target:target + 4] = bytes((red, green, blue, 255))
-    return png_rgba(width, height, bytes(output))
+        global_id = metatile + (0x200 if secondary else 0)
+        layer = composer.compose_metatile(global_id)[layer_index]
+        for py in range(size):
+            for px in range(size):
+                target = ((origin_y + py) * width + origin_x + px) * 4
+                output[target:target + 4] = bytes(layer[py * size + px].rgba)
+    return encode_rgba_png(width, height, bytes(output))
 
 
 def validate_candidate(destination: Path, candidate: bytes) -> None:
@@ -353,6 +282,7 @@ def validate_candidate(destination: Path, candidate: bytes) -> None:
         shutil.copytree(REPO_ROOT / "data/diorama", root / "data/diorama")
         for name in ("maps", "layouts", "tilesets"):
             os.symlink(REPO_ROOT / "data" / name, root / "data" / name, target_is_directory=True)
+        os.symlink(REPO_ROOT / "src", root / "src", target_is_directory=True)
         (root / "include").mkdir()
         os.symlink(REPO_ROOT / "include/constants", root / "include/constants", target_is_directory=True)
         relative = destination.relative_to(REPO_ROOT / "data/diorama")
@@ -417,21 +347,22 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"maps": map_listing()})
             elif parsed.path == "/api/map":
                 symbol = parse_qs(parsed.query).get("symbol", [None])[0]
-                if symbol not in map_sources():
-                    raise RuleError("unknown or non-editable map")
+                if symbol not in {item["symbol"] for item in map_listing()}:
+                    raise RuleError("unknown map")
                 self.send_json(HTTPStatus.OK, enrich_document(build_editor_document(REPO_ROOT, symbol)))
             elif parsed.path == "/api/atlas":
                 query = parse_qs(parsed.query)
                 symbol = query.get("symbol", [None])[0]
                 role = query.get("role", [None])[0]
-                if symbol not in TILESETS or role not in ("primary", "secondary") or not TILESETS[symbol][1].startswith(role + "/"):
+                tilesets = load_tilesets(REPO_ROOT)
+                if symbol not in tilesets or role not in ("primary", "secondary") or tilesets[symbol].role != role:
                     raise RuleError("invalid tileset atlas request")
                 primary = query.get("primary", [None])[0]
                 layer = query.get("layer", ["full"])[0]
                 self.send_bytes(HTTPStatus.OK, build_atlas(symbol, primary, layer), "image/png")
             else:
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
-        except (RuleError, OSError, KeyError, IndexError, struct.error, zlib.error) as error:
+        except (RuleError, CatalogError, OSError, KeyError, IndexError, struct.error) as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
     def do_POST(self) -> None:  # noqa: N802
