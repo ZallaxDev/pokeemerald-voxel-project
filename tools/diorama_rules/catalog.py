@@ -147,6 +147,7 @@ def load_world(root: Path) -> tuple[list[dict], list[dict]]:
                 "groupName": group_name, "layout": source["layout"],
                 "mapType": source.get("map_type"), "weather": source.get("weather"),
                 "sharedEventsMap": source.get("shared_events_map"),
+                "connections": source.get("connections", []),
                 "events": events,
             }
             maps.append(entry)
@@ -230,6 +231,13 @@ def _behavior_families(name: str) -> list[str]:
         families.append("bridge")
     if any(token in name for token in ("STAIRS", "LADDER", "ESCALATOR")):
         families.append("stairs")
+    if "HOLE" in name:
+        families.append("hole")
+    if (name.startswith("MB_WALK_") or name.startswith("MB_SLIDE_")
+            or "CURRENT" in name or "ARROW_WARP" in name
+            or name in {"MB_ICE", "MB_TRICK_HOUSE_SLIPPERY_FLOOR", "MB_MUDDY_SLOPE",
+                        "MB_BUMPY_SLOPE", "MB_CRACKED_FLOOR"}):
+        families.append("movement")
     if any(token in name for token in ("WARP", "DOOR", "LADDER", "ESCALATOR", "HOLE")):
         families.append("warp")
     if any(token in name for token in ("ICE", "SAND", "SLOPE", "RAIL", "COUNTER",
@@ -255,13 +263,68 @@ def _cell_context(layout: dict, cells: tuple[tuple[int, int, int], ...], x: int,
     metatile, collision, elevation = cells[y * layout["width"] + x]
     symbol = layout["primary_tileset"] if metatile < 0x200 else layout["secondary_tileset"]
     local_id = metatile if metatile < 0x200 else metatile - 0x200
-    behavior = layer_type = None
-    if symbol in attributes and local_id < len(attributes[symbol]):
-        behavior, layer_type = attributes[symbol][local_id]
+    if symbol not in attributes or local_id >= len(attributes[symbol]):
+        return None
+    behavior, layer_type = attributes[symbol][local_id]
     return {"metatile": metatile, "localId": local_id, "tileset": symbol,
             "behavior": behavior_names.get(behavior, f"UNKNOWN_{behavior}") if behavior is not None else None,
             "behaviorId": behavior, "layerType": LAYER_TYPES.get(layer_type, f"unknown-{layer_type}"),
-            "collision": collision, "elevation": elevation}
+             "collision": collision, "elevation": elevation}
+
+
+def _cell_catalog(layouts: list[dict],
+                  cells_by_layout: dict[str, tuple[tuple[int, int, int], ...]],
+                  attributes: dict[str, tuple[tuple[int, int], ...]],
+                  behavior_names: dict[int, str]) -> dict[str, list[dict]]:
+    result = {}
+    for layout in layouts:
+        pair = None
+        if layout["primary_tileset"] != "0" and layout["secondary_tileset"] != "0":
+            pair = f"{layout['primary_tileset']}__{layout['secondary_tileset']}"
+        cells = []
+        for offset, (metatile, collision, elevation) in enumerate(cells_by_layout[layout["id"]]):
+            x = offset % layout["width"]
+            y = offset // layout["width"]
+            context = _cell_context(layout, cells_by_layout[layout["id"]], x, y,
+                                    attributes, behavior_names)
+            behavior = context["behavior"] if context else None
+            families = _behavior_families(behavior) if behavior else []
+            uncertain = []
+            if context is None:
+                uncertain.append("dynamic-tileset")
+            if families:
+                uncertain.append("behavior-requires-runtime-semantics")
+            if elevation in (0, 15):
+                uncertain.append("non-concrete-elevation")
+            cells.append({
+                "offset": offset, "x": x, "y": y,
+                "source": {"layout": layout["id"], "x": x, "y": y},
+                "metatile": metatile,
+                "localId": context["localId"] if context else None,
+                "tileset": context["tileset"] if context else None,
+                "collision": collision, "elevation": elevation,
+                "behaviorId": context["behaviorId"] if context else None,
+                "behavior": behavior,
+                "behaviorFamilies": families,
+                "layerType": context["layerType"] if context else None,
+                "composition": ({
+                    "key": f"{pair}:{metatile}",
+                    "base": {"pair": pair, "globalId": metatile, "layer": "base"},
+                    "foreground": {"pair": pair, "globalId": metatile,
+                                   "layer": "foreground"},
+                    "full": {"pair": pair, "globalId": metatile, "layer": "full"},
+                    "provenance": {"pair": pair, "globalId": metatile,
+                                   "source": "metatiles.json"},
+                } if pair else None),
+                "movementEvidence": {
+                    "candidateWalkable": collision == 0,
+                    "candidateBlocked": collision != 0,
+                    "authoritative": False,
+                    "uncertainReasons": uncertain,
+                },
+            })
+        result[layout["id"]] = cells
+    return result
 
 
 def _classify_object(event: dict) -> list[str]:
@@ -289,20 +352,32 @@ def _event_inventory(root: Path, maps: list[dict], layouts: list[dict],
     layout_by_id = {layout["id"]: layout for layout in layouts}
     events = []
     counts = Counter()
+    maps_by_symbol = {item["symbol"]: item for item in maps}
+    maps_by_directory = {item["directory"]: item for item in maps}
     for map_row in maps:
         source = _json(root / "data/maps" / map_row["directory"] / "map.json")
+        event_source = source
+        event_source_map = map_row["symbol"]
+        if map_row["sharedEventsMap"]:
+            shared = (maps_by_symbol.get(map_row["sharedEventsMap"])
+                      or maps_by_directory.get(map_row["sharedEventsMap"]))
+            if shared is None:
+                raise CatalogError(f"{map_row['symbol']}: unknown shared events map "
+                                   f"{map_row['sharedEventsMap']}")
+            event_source = _json(root / "data/maps" / shared["directory"] / "map.json")
+            event_source_map = shared["symbol"]
         layout = layout_by_id[map_row["layout"]]
         cells = cells_by_layout[layout["id"]]
-        groups = (("object", source.get("object_events", [])),
-                  ("warp", source.get("warp_events", [])),
-                  ("coordinate", source.get("coord_events", [])),
-                  ("background", source.get("bg_events", [])))
+        groups = (("object", event_source.get("object_events", [])),
+                  ("warp", event_source.get("warp_events", [])),
+                  ("coordinate", event_source.get("coord_events", [])),
+                  ("background", event_source.get("bg_events", [])))
         for kind, records in groups:
             for index, record in enumerate(records):
                 item = {"id": f"{map_row['symbol']}:{kind}:{index + 1}", "map": map_row["symbol"],
                         "layout": layout["id"], "kind": kind, "x": record.get("x"),
                         "y": record.get("y"), "elevation": record.get("elevation"),
-                        "source": record}
+                        "eventSourceMap": event_source_map, "source": record}
                 if kind == "object":
                     item["classes"] = _classify_object(record)
                 elif kind == "background":
@@ -341,16 +416,18 @@ def _runtime_changes(root: Path, maps: list[dict], layouts: list[dict]) -> dict:
     map_by_directory = {item["directory"]: item["symbol"] for item in maps}
     layout_targets: dict[str, set[str]] = defaultdict(set)
     metatile_changes = []
-    for path in sorted((root / "data/maps").glob("*/scripts.inc")):
+    for path in sorted((root / "data").glob("**/*.inc")):
         text = path.read_text(encoding="utf-8")
-        map_symbol = map_by_directory.get(path.parent.name)
+        map_symbol = map_by_directory.get(path.parent.name) if path.parent.parent.name == "maps" else None
         for target in re.findall(r"\bsetmaplayoutindex\s+(LAYOUT_[A-Z0-9_]+)", text):
             if map_symbol:
                 layout_targets[target].add(map_symbol)
-        for line, match in enumerate(re.finditer(
-                r"\bsetmetatile\s+([^,\n]+),\s*([^,\n]+),\s*([^,\n]+),\s*([^\s\n]+)", text), 1):
+        for match in re.finditer(
+                r"\bsetmetatile\s+([^,\n]+),\s*([^,\n]+),\s*([^,\n]+),\s*([^\s\n]+)", text):
+            line = text.count("\n", 0, match.start()) + 1
             metatile_changes.append({"map": map_symbol, "file": path.relative_to(root).as_posix(),
-                                     "ordinal": line, "x": match.group(1).strip(),
+                                     "line": line, "sourceType": "map-script" if map_symbol else "global-script",
+                                     "x": match.group(1).strip(),
                                      "y": match.group(2).strip(), "metatile": match.group(3).strip(),
                                      "collision": match.group(4).strip()})
     rows = []
@@ -670,6 +747,7 @@ def build_catalog(root: Path) -> dict[str, object]:
     attributes = _attributes(root, tilesets)
     runtime = _runtime_changes(root, maps, layouts)
     behavior_rows = _behavior_inventory(layouts, maps, usage, attributes, behavior_names)
+    cells = _cell_catalog(layouts, cells_by_layout, attributes, behavior_names)
     animations = _animation_inventory(root, tilesets)
     events = _event_inventory(root, maps, layouts, cells_by_layout, attributes, behavior_names)
     structures = _structure_candidates(layouts, cells_by_layout)
@@ -687,6 +765,7 @@ def build_catalog(root: Path) -> dict[str, object]:
         "layouts": layouts,
         "tilesets": tileset_rows,
         "usage": usage,
+        "cells": cells,
         "behaviors": behavior_rows,
         "events": events,
         "animations": animations,
@@ -704,6 +783,7 @@ def build_catalog(root: Path) -> dict[str, object]:
             "primaryTilesets": sum(item.role == "primary" for item in tilesets.values()),
             "secondaryTilesets": sum(item.role == "secondary" for item in tilesets.values()),
             "blocks": sum(layout["blockCount"] for layout in layouts),
+            "logicalMetatiles": sum(info.metatile_count for info in tilesets.values()),
             "signEvents": sum(item["events"]["signs"] for item in maps),
             "usedBehaviors": len(behavior_rows),
             "events": len(events["events"]),
@@ -727,6 +807,9 @@ def write_catalog(root: Path, output: Path, contact_sheets: bool = False,
     (output / "metatile_usage.json").write_text(
         json.dumps({"schemaVersion": 1, "layouts": catalog["usage"]}, separators=(",", ":")) + "\n",
         encoding="utf-8")
+    (output / "layout_cells.json").write_text(
+        json.dumps({"schemaVersion": 1, "layouts": catalog["cells"]},
+                   separators=(",", ":")) + "\n", encoding="utf-8")
     for filename, key in (("metatiles.json", "metatiles"), ("behaviors.json", "behaviors"),
                           ("events.json", "events"), ("animations.json", "animations"),
                           ("structures.json", "structures"), ("ambiguities.json", "ambiguities"),

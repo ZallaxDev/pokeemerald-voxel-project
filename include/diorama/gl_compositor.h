@@ -13,6 +13,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
 void DioramaGL_SetVSync(bool enabled);
 void DioramaGL_ToggleTerrainDebug(void);
 void DioramaGL_ToggleEnabled(void);
+void DioramaGL_CycleSurveyView(void);
+void DioramaGL_EndSurvey(void);
+void DioramaGL_RequestSurveyCapture(void);
 void DioramaGL_AdjustCameraZoom(int steps);
 void DioramaGL_AdjustCameraPitch(int steps);
 void DioramaGL_Shutdown(void);

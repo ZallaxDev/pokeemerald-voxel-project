@@ -90,6 +90,34 @@
       "setup": "Arranca el binario classic sin NVDA, carga una partida en Villa Raiz y prueba movimiento, menu de inicio, un combate, guardado y carga.",
       "expected": "El render software, movimiento, menus, combate, audio, guardado/carga y la ausencia segura de NVDA funcionan sin cambios.",
       "roundTrip": "Vuelve del combate y del menu al overworld y confirma que el movimiento sigue funcionando."
+    },
+    {
+      "id": "R1-LITTLEROOT-SURVEY",
+      "phase": "R1",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_LITTLEROOT_TOWN",
+      "layout": "LAYOUT_LITTLEROOT_TOWN",
+      "position": { "x": 10, "y": 10 },
+      "facing": "sur",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Ve a Villa Raiz, situate en (10,10), mira al sur y observa flat, v15, v35, v50 y v75 sin postprocesado.",
+      "expected": "Las cinco vistas corresponden al mismo lugar; flat conserva la autoridad 2D y las cuatro vistas Diorama no cambian posicion ni contenido entre repeticiones.",
+      "roundTrip": "Sal a Ruta 101, vuelve al mismo punto y repite las cinco vistas."
+    },
+    {
+      "id": "R1-ROUTE115-SURVEY",
+      "phase": "R1",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_ROUTE115",
+      "layout": "LAYOUT_ROUTE115",
+      "position": { "x": 18, "y": 41 },
+      "facing": "norte",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Ve a Ruta 115, situate en (18,41), mira al norte y observa flat, v15, v35, v50 y v75 sin postprocesado.",
+      "expected": "Las cinco vistas corresponden al mismo lugar; los datos de mapa, layout, posicion, facing y pitch coinciden con el escenario y no derivan al repetirlo.",
+      "roundTrip": "Sal por una conexion, vuelve al mismo punto y repite las cinco vistas."
     }
   ]
 }

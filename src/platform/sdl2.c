@@ -1144,6 +1144,10 @@ void ProcessEvents(void)
                 if (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL))
                 {
                     paused = !paused;
+#ifdef ENABLE_DIORAMA
+                    if (!paused)
+                        DioramaGL_EndSurvey();
+#endif
                 }
                 break;
             case SDLK_SPACE:
@@ -1162,6 +1166,17 @@ void ProcessEvents(void)
             case SDLK_F4:
                 if (event.key.repeat == 0)
                     DioramaGL_ToggleEnabled();
+                break;
+            case SDLK_F5:
+                if (event.key.repeat == 0)
+                {
+                    paused = true;
+                    DioramaGL_CycleSurveyView();
+                }
+                break;
+            case SDLK_F6:
+                if (event.key.repeat == 0)
+                    DioramaGL_RequestSurveyCapture();
                 break;
             case SDLK_COMMA:
                 DioramaGL_AdjustCameraPitch(-1);

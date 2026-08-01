@@ -23,6 +23,9 @@ class RedParityGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "R0 is not approved"):
                 validate(ROOT, "R1", True)
 
+    def test_r1_global_survey_contract_is_valid(self) -> None:
+        validate(ROOT, "R1", True)
+
 
 if __name__ == "__main__":
     unittest.main()

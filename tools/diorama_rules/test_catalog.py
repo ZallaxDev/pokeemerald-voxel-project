@@ -24,6 +24,7 @@ class DioramaCatalogTests(unittest.TestCase):
             "referencedLayouts": 406,
             "unreferencedLayouts": 35,
             "tilesets": 75,
+            "logicalMetatiles": 18318,
             "primaryTilesets": 3,
             "secondaryTilesets": 72,
             "blocks": 324579,
@@ -61,6 +62,15 @@ class DioramaCatalogTests(unittest.TestCase):
                             for item in usage.values()))
         layout = next(item for item in self.catalog["layouts"] if item["id"] == "LAYOUT_ROUTE103")
         self.assertEqual(sum(item["count"] for item in usage.values()), layout["blockCount"])
+        cells = self.catalog["cells"]["LAYOUT_ROUTE103"]
+        self.assertEqual(len(cells), layout["blockCount"])
+        self.assertEqual([(cell["x"], cell["y"]) for cell in cells[:3]],
+                         [(0, 0), (1, 0), (2, 0)])
+        self.assertTrue(all({"metatile", "collision", "elevation", "behavior",
+                             "layerType", "tileset", "source", "composition",
+                             "movementEvidence"} <= set(cell) for cell in cells))
+        self.assertTrue(all(cell["movementEvidence"]["authoritative"] is False
+                            for cell in cells))
 
     def test_events_behaviors_animations_and_runtime_changes_are_inventoried(self):
         events = self.catalog["events"]
@@ -73,6 +83,9 @@ class DioramaCatalogTests(unittest.TestCase):
         self.assertIn("water", behaviors["MB_OCEAN_WATER"]["families"])
         self.assertIn("ledge", behaviors["MB_JUMP_EAST"]["families"])
         self.assertIn("bridge", behaviors["MB_BRIDGE_OVER_OCEAN"]["families"])
+        families = {family for item in behaviors.values() for family in item["families"]}
+        self.assertTrue({"water", "ledge", "stairs", "bridge", "hole", "movement"}
+                        <= families)
         slots = self.catalog["animations"]["tileSlots"]
         self.assertEqual(len(slots), 75)
         self.assertEqual(sum(len(slot["absentStaticTiles"]) for slot in slots), 20)
@@ -83,6 +96,14 @@ class DioramaCatalogTests(unittest.TestCase):
                          {"gTilesetAnims_MauvilleGym_ElectricGates"})
         self.assertEqual(len(self.catalog["animations"]["paletteSlots"]), 1)
         self.assertGreater(len(self.catalog["runtime"]["metatileChanges"]), 0)
+        self.assertTrue(any(item["sourceType"] == "global-script"
+                            for item in self.catalog["runtime"]["metatileChanges"]))
+        littleroot = next(item for item in self.catalog["maps"]
+                          if item["symbol"] == "MAP_LITTLEROOT_TOWN")
+        self.assertEqual(littleroot["connections"][0]["map"], "MAP_ROUTE101")
+        self.assertTrue(any(item["map"] == "MAP_CONTEST_HALL_TOUGH"
+                            and item["eventSourceMap"] == "MAP_CONTEST_HALL"
+                            for item in events["events"]))
 
     def test_metatile_metadata_exposes_subtile_provenance(self):
         pair = next(item for item in self.catalog["metatiles"]
@@ -110,7 +131,7 @@ class DioramaCatalogTests(unittest.TestCase):
             output = Path(temporary)
             write_catalog(ROOT, output, catalog=self.catalog)
             for name in ("maps.json", "layouts.json", "tilesets.json",
-                          "metatile_usage.json", "metatiles.json", "events.json",
+                          "metatile_usage.json", "layout_cells.json", "metatiles.json", "events.json",
                           "behaviors.json", "animations.json", "structures.json",
                           "ambiguities.json", "runtime_layouts.json", "coverage.json",
                           "index.html"):

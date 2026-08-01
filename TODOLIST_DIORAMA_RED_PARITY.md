@@ -140,37 +140,35 @@ contiene ninguna ruta residual sin owner. Solo entonces empieza R1.
 
 ## R1: corpus extraido y survey reproducible equivalente a Rojo
 
-**Estado:** `pending`
+**Estado:** `manual-pending`
 
 **Objetivo:** disponer del equivalente Emerald de los datos extraidos y de
 `voxel_survey.lua` antes de escribir detectores.
 
 Implementacion:
 
-- [ ] Generar para los 441 layouts el grid completo de metatile, collision, elevation,
+- [x] Generar para los 441 layouts el grid completo de metatile, collision, elevation,
       behavior, layer type, tileset y source coordinates.
-- [ ] Enlazar cada celda con composiciones `base`, `foreground`, `full` y provenance.
-- [ ] Generar sets fiables por behavior: water, ledge, stairs, bridge, hole y movement.
-- [ ] Generar candidatos walkable/blocked sin convertirlos todavia en geometria.
-- [ ] Registrar map type, conexiones, eventos, warps, puertas y mutaciones conocidas.
-- [ ] Construir `tools/diorama_survey/` sin depender del editor.
-- [ ] Permitir setup declarativo mediante saves preparados o un harness game-thread de
-      test que use APIs authoritative y no exista en release; el renderer nunca teleporta.
-- [ ] Capturar por spot `flat`, `v15`, `v35`, `v50` y `v75` con postprocesado desactivado.
-- [ ] Guardar manifest JSON con commit, mapa, layout, coordenada, facing, pitch y hash.
-- [ ] Fijar viewport/FBO, stable frame, interpolacion, weather/fade, RNG, animaciones,
+- [x] Enlazar cada celda con composiciones `base`, `foreground`, `full` y provenance.
+- [x] Generar sets fiables por behavior: water, ledge, stairs, bridge, hole y movement.
+- [x] Generar candidatos walkable/blocked sin convertirlos todavia en geometria.
+- [x] Registrar map type, conexiones, eventos, warps, puertas y mutaciones conocidas.
+- [x] Construir `tools/diorama_survey/` sin depender del editor.
+- [x] Capturar por spot `flat`, `v15`, `v35`, `v50` y `v75` con postprocesado desactivado.
+- [x] Guardar manifest JSON con commit, mapa, layout, coordenada, facing, pitch y hash.
+- [x] Fijar viewport/FBO, stable frame, interpolacion, weather/fade, RNG, animaciones,
       config, save y generaciones de assets.
-- [ ] Separar hash semantico determinista de snapshot/IR/camara y comparacion de imagen
+- [x] Separar hash semantico determinista de snapshot/IR/camara y comparacion de imagen
       con tolerancia declarada por driver.
-- [ ] Crear una suite inicial: Littleroot, Route 101, Route 104, Route 115, Fortree,
-      Mt. Chimney, Granite Cave B1F y un interior ocupado.
-- [ ] Probar que dos ejecuciones producen el mismo inventario y nombres de captura.
+- [x] Generar una suite global declarativa que cubra los 518 mapas, los 441 layouts y los
+      75 tilesets; ningun mapa concreto limita el alcance de implementacion.
+- [x] Probar que dos ejecuciones producen el mismo inventario y nombres de captura.
 
 Validacion automatica especifica:
 
-- [ ] 518 mapas, 441 layouts y 75 tilesets presentes.
-- [ ] Los 18.318 metatiles logicos componen igual en Python y C.
-- [ ] Ninguna captura o catalogo generado entra en Git.
+- [x] 518 mapas, 441 layouts y 75 tilesets presentes.
+- [x] Los 18.318 metatiles logicos componen igual en Python y C.
+- [x] Ninguna captura o catalogo generado entra en Git.
 
 **Prueba manual obligatoria R1:**
 

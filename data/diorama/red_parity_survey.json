@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "scope": {
+    "maps": 518,
+    "layouts": 441,
+    "tilesets": 75,
+    "policy": "El plan se genera para el catalogo completo. Los mapas concretos usados en un gate manual son muestras y no limitan el corpus."
+  },
+  "framebuffer": { "width": 960, "height": 640 },
+  "views": [
+    { "id": "flat", "renderer": "classic", "pitch": 0 },
+    { "id": "v15", "renderer": "diorama", "pitch": 15 },
+    { "id": "v35", "renderer": "diorama", "pitch": 35 },
+    { "id": "v50", "renderer": "diorama", "pitch": 50 },
+    { "id": "v75", "renderer": "diorama", "pitch": 75 }
+  ],
+  "capturePolicy": {
+    "postprocessing": false,
+    "interpolation": "stable-frame-only",
+    "fade": "inactive",
+    "weather": "preserved-in-flat-and-disabled-in-diorama-survey-views",
+    "animations": "frozen-with-the-published-snapshot",
+    "rng": "never-modified-by-survey",
+    "save": "record-sha256-when-provided",
+    "config": "record-sha256-when-provided",
+    "assets": "record-corpus-and-rules-sha256"
+  },
+  "driverTolerance": {
+    "semanticHashes": "exact",
+    "sameDriverImage": { "maxChangedPixelRatio": 0.0, "maxChannelDelta": 0 },
+    "crossDriverImage": { "maxChangedPixelRatio": 0.001, "maxChannelDelta": 2 }
+  }
+}

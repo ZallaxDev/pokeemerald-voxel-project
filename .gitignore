@@ -51,6 +51,7 @@ __pycache__/
 *.pyc
 /pokeemerald-*.png
 /pokeemerald_modern-*.png
+/pokeemerald-survey-*
 /pc-border-template-1280x720.png
 /pokeemerald.cfg
 

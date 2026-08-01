@@ -208,9 +208,17 @@ def run(driver: Path) -> None:
                                 raise AssertionError(
                                     f"{symbol} metatile 0x{metatile_id:X} layer {layer_index} "
                                     f"pixel {pixel_index}: C provenance {actual}, Python {wanted}")
+                    actual_full = struct.unpack("<256I", source.read(256 * 4))
+                    expected_full = tuple(_argb(pixel.rgba) if pixel.visible else 0
+                                          for pixel in layers[2])
+                    if actual_full != expected_full:
+                        raise AssertionError(
+                            f"{symbol} metatile 0x{metatile_id:X}: C/Python full composition differs")
                     compared += 1
             if source.read(1):
                 raise AssertionError("trailing C golden output")
+    if compared != 18318:
+        raise AssertionError(f"expected 18318 logical metatiles, compared {compared}")
     compressed = sum(info.compressed for info in tilesets.values())
     print(f"compositor goldens passed: {compared} metatiles, 75 tilesets, "
           f"{compressed} compressed and {75 - compressed} uncompressed")

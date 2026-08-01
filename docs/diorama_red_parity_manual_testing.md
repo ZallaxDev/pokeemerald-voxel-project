@@ -15,3 +15,17 @@ comprobaciones. No se piden capturas, hashes, comandos auxiliares ni manifests l
    carga.
 
 Si algo falla, indica el mapa y lo observado. Si todo pasa, aprueba R0 explicitamente.
+
+## R1
+
+1. Ve a Villa Raiz, ponte en (10,10) mirando al sur y pulsa F5 para recorrer `flat`,
+   `v15`, `v35`, `v50` y `v75`; pulsa F6 en cada vista.
+2. Ve a Ruta 115, ponte en (18,41) mirando al norte y recorre las mismas cinco vistas.
+3. En ambos lugares, comprueba que la vista plana coincide con el renderer classic y que
+   mapa, posicion, direccion y contenido no cambian entre vistas.
+4. Sal y vuelve a cada mapa, repite las cinco vistas y confirma que no hay deriva.
+5. F5 congela el frame y fija la ventana a 960x640; pulsa Ctrl+P al terminar para reanudar
+   el juego y restaurar la ventana y el renderer anteriores.
+
+Si algo falla, indica el mapa, la vista y lo observado. Si todo pasa, aprueba R1
+explicitamente.

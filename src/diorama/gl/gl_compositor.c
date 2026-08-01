@@ -1,6 +1,9 @@
 #ifdef ENABLE_DIORAMA
 
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <SDL2/SDL.h>
 #ifdef NATIVE_LINUX
 #include <SDL2/SDL_image.h>
@@ -19,8 +22,8 @@
 
 #define MAX_BORDER_BACKGROUNDS 15
 #define CAMERA_DEFAULT_PITCH 0.70758444f
-#define CAMERA_MIN_PITCH 0.34906585f
-#define CAMERA_MAX_PITCH 1.22173048f
+#define CAMERA_MIN_PITCH 0.26179939f
+#define CAMERA_MAX_PITCH 1.30899694f
 #define CAMERA_PITCH_STEP 0.08726646f
 #define CAMERA_DEFAULT_FOCAL_LENGTH 130.0f
 #define CAMERA_MIN_FOCAL_LENGTH 80.0f
@@ -87,12 +90,151 @@ static bool sObjectsAvailable;
 static bool sTerrainDebug;
 static float sCameraPitchOffset;
 static float sCameraFocalLengthOffset;
+static int sSurveyView = -1;
+static bool sSurveyCaptureRequested;
+static bool sSurveySavedFullscreen;
+static bool sSurveySavedTerrainDebug;
+static int sSurveySavedWindowWidth;
+static int sSurveySavedWindowHeight;
+static int sSurveySavedWindowX;
+static int sSurveySavedWindowY;
+static unsigned sSurveyRun;
+static float sSurveySavedFocalLengthOffset;
+static enum DioramaRenderMode sSurveySavedRenderMode;
 static enum DioramaRenderMode sRenderMode = DIORAMA_RENDER_AUTO;
 static uint64_t sProcessedSequence;
 static uint64_t sFadeStartCounter;
 static float sTwoDOpacity = 1.0f;
 static float sFadeStartOpacity = 1.0f;
 static float sFadeTargetOpacity = 1.0f;
+
+static const char *SurveyFacingName(uint8_t direction)
+{
+    switch (direction)
+    {
+    case 1: return "south";
+    case 2: return "north";
+    case 3: return "west";
+    case 4: return "east";
+    default: return "unknown";
+    }
+}
+
+static void SurveyImagePath(char *path, size_t size,
+                            const struct DioramaSceneSnapshot *snapshot,
+                            unsigned run, const char *view)
+{
+    snprintf(path, size, "pokeemerald-survey-%u-%u_%d_%d_%s_run-%u_%s.bmp",
+             snapshot->mapGroup, snapshot->mapNum, snapshot->playerMapX,
+             snapshot->playerMapY, SurveyFacingName(snapshot->playerFacingDirection),
+             run, view);
+}
+
+static unsigned NextSurveyRun(const struct DioramaSceneSnapshot *snapshot)
+{
+    static const char *const sNames[] = {"flat", "v15", "v35", "v50", "v75"};
+    unsigned run = 1;
+
+    for (;; run++)
+    {
+        int view;
+        bool available = true;
+
+        for (view = 0; view < 5; view++)
+        {
+            char path[256];
+            FILE *file;
+
+            SurveyImagePath(path, sizeof(path), snapshot, run, sNames[view]);
+            file = fopen(path, "rb");
+            if (file != NULL)
+            {
+                fclose(file);
+                available = false;
+                break;
+            }
+        }
+        if (available)
+            return run;
+    }
+}
+
+static void CaptureSurveyFrame(int width, int height,
+                               const struct DioramaSceneSnapshot *snapshot,
+                               bool stateMatchesPixels)
+{
+    static const char *const sNames[] = {"flat", "v15", "v35", "v50", "v75"};
+    const char *facing;
+    char imagePath[256];
+    char metadataPath[272];
+    uint8_t *pixels;
+    uint8_t *flipped;
+    SDL_Surface *surface;
+    FILE *metadata;
+    size_t stride;
+    int y;
+
+    sSurveyCaptureRequested = false;
+    if (sSurveyView < 0 || !sHasSceneSnapshot || !stateMatchesPixels
+     || snapshot->sceneKind != DIORAMA_SCENE_OVERWORLD_FREE
+     || snapshot->fallbackReasons != 0 || width != 960 || height != 640)
+    {
+        SDL_Log("Diorama survey capture rejected: state or framebuffer is not stable");
+        return;
+    }
+    facing = SurveyFacingName(snapshot->playerFacingDirection);
+    SurveyImagePath(imagePath, sizeof(imagePath), snapshot, sSurveyRun, sNames[sSurveyView]);
+    snprintf(metadataPath, sizeof(metadataPath), "%s.json", imagePath);
+    stride = (size_t)width * 4;
+    pixels = malloc(stride * height);
+    flipped = malloc(stride * height);
+    if (pixels == NULL || flipped == NULL)
+    {
+        SDL_Log("Diorama survey capture: out of memory");
+        free(pixels);
+        free(flipped);
+        return;
+    }
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    for (y = 0; y < height; y++)
+        memcpy(flipped + (size_t)y * stride,
+               pixels + (size_t)(height - 1 - y) * stride, stride);
+    surface = SDL_CreateRGBSurfaceFrom(flipped, width, height, 32, (int)stride,
+                                       0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+    if (surface == NULL || SDL_SaveBMP(surface, imagePath) != 0)
+        SDL_Log("Diorama survey capture failed: %s", SDL_GetError());
+    else
+    {
+        metadata = fopen(metadataPath, "w");
+        if (metadata != NULL)
+        {
+            fprintf(metadata,
+                    "{\"schemaVersion\":1,\"mapGroup\":%u,\"mapNum\":%u,"
+                    "\"layoutId\":%u,\"x\":%d,\"y\":%d,\"facing\":\"%s\","
+                    "\"view\":\"%s\",\"width\":%d,\"height\":%d,"
+                    "\"captureRun\":%u,\"sceneKind\":%u,\"fallbackReasons\":%u,"
+                    "\"snapshotSequence\":%llu,\"mapGeneration\":%u,"
+                    "\"mapEditGeneration\":%u,\"paletteGeneration\":%u,"
+                    "\"objPaletteGeneration\":%u,\"animationGeneration\":%u}\n",
+                    snapshot->mapGroup, snapshot->mapNum, snapshot->mapLayoutId,
+                    snapshot->playerMapX, snapshot->playerMapY, facing, sNames[sSurveyView],
+                    width, height, sSurveyRun, snapshot->sceneKind, snapshot->fallbackReasons,
+                    (unsigned long long)snapshot->sequence,
+                    snapshot->mapGeneration, snapshot->mapEditGeneration,
+                    snapshot->paletteGeneration, snapshot->objPaletteGeneration,
+                    snapshot->tilesetAnimationGeneration);
+            fclose(metadata);
+            SDL_Log("Diorama survey capture: %s", imagePath);
+        }
+        else
+            SDL_Log("Diorama survey metadata could not be written");
+    }
+    if (surface != NULL)
+        SDL_FreeSurface(surface);
+    free(pixels);
+    free(flipped);
+}
 static u8 sUiTransientHoldFrames;
 
 #define RGB(r, g, b) (0xFF000000u | ((u32)(r) << 16) | ((u32)(g) << 8) | (u32)(b))
@@ -629,7 +771,16 @@ static void GetCameraSettings(const struct DioramaSceneSnapshot *snapshot,
                               float *pitch, float *focalLength)
 {
     GetCameraBase(snapshot, pitch, focalLength);
-    *pitch += sCameraPitchOffset;
+    if (sSurveyView > 0)
+    {
+        static const float sSurveyPitches[] = {
+            0.0f, 0.26179939f, 0.61086524f, 0.87266463f, 1.30899694f,
+        };
+
+        *pitch = sSurveyPitches[sSurveyView];
+    }
+    else
+        *pitch += sCameraPitchOffset;
     *focalLength += sCameraFocalLengthOffset;
     if (*pitch < CAMERA_MIN_PITCH) *pitch = CAMERA_MIN_PITCH;
     if (*pitch > CAMERA_MAX_PITCH) *pitch = CAMERA_MAX_PITCH;
@@ -844,6 +995,9 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     float cameraX;
     float cameraZ;
 
+    if (sSurveyView >= 0)
+        frameAlpha = 1.0f;
+
     if (sRenderMode == DIORAMA_RENDER_AUTO
      && sTerrainAvailable
      && sObjectsAvailable
@@ -924,6 +1078,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     }
     if (newSequence)
         sProcessedSequence = sSceneSnapshot.sequence;
+    if (sSurveyView >= 0)
+        SnapOpacity(sSurveyView == 0 ? 1.0f : 0.0f);
     UpdateOpacity();
     if (softFallback && sTwoDOpacity < 1.0f)
         drawTerrain = true;
@@ -937,7 +1093,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     dglUseProgram(sProgram);
     dglBindVertexArray(sVertexArray);
 
-    if (background < sBackgroundCount && sBackgroundTextures[background].id != 0)
+    if (sSurveyView < 0 && background < sBackgroundCount
+     && sBackgroundTextures[background].id != 0)
         DrawTexture(&sBackgroundTextures[background], outputWidth, outputHeight,
                     0, 0, outputWidth, outputHeight,
                      0, 0, sBackgroundTextures[background].width,
@@ -958,8 +1115,18 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         gameHeight = outputHeight * 8 / 9;
         gameWidth = gameHeight * 3 / 2;
     }
-    gameX = (outputWidth - gameWidth) / 2;
-    gameY = (outputHeight - gameHeight) / 2;
+    if (sSurveyView >= 0)
+    {
+        gameWidth = outputWidth;
+        gameHeight = outputHeight;
+        gameX = 0;
+        gameY = 0;
+    }
+    else
+    {
+        gameX = (outputWidth - gameWidth) / 2;
+        gameY = (outputHeight - gameHeight) / 2;
+    }
     if (drawTerrain)
     {
         float cameraPitch;
@@ -988,7 +1155,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
         dglBindVertexArray(sVertexArray);
-        if (BuildWeatherImage(&sRenderedSceneSnapshot))
+        if (sSurveyView < 0 && BuildWeatherImage(&sRenderedSceneSnapshot))
             DrawTexture(&sWeatherTexture, outputWidth, outputHeight,
                         0, 0, outputWidth, outputHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
@@ -1013,7 +1180,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                     gameX, gameY, gameWidth, gameHeight,
                     0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, false, 1.0f);
 
-    if (!drawTerrain && border && sBorderTexture.id != 0)
+    if (sSurveyView < 0 && !drawTerrain && border && sBorderTexture.id != 0)
     {
         int innerWidth = gameWidth - 2;
         int innerHeight = gameHeight - 2;
@@ -1023,6 +1190,18 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                      innerWidth * 1000 / 961,
                      innerHeight * 683 / 643,
                      141, 18, 1000, 683, true, 1.0f);
+    }
+    if (sSurveyCaptureRequested)
+    {
+        const struct DioramaSceneSnapshot *captureSnapshot = sSurveyView == 0
+                                                           ? &sSceneSnapshot
+                                                           : &sRenderedSceneSnapshot;
+        bool stateMatchesPixels = sSurveyView == 0
+                               || (presentationDecision == DIORAMA_PRESENT_3D
+                                && sHasRenderedSceneSnapshot
+                                && sRenderedSceneSnapshot.sequence == sSceneSnapshot.sequence);
+
+        CaptureSurveyFrame(outputWidth, outputHeight, captureSnapshot, stateMatchesPixels);
     }
     SDL_GL_SwapWindow(sWindow);
 }
@@ -1040,9 +1219,63 @@ void DioramaGL_ToggleTerrainDebug(void)
 
 void DioramaGL_ToggleEnabled(void)
 {
+    if (sSurveyView >= 0)
+    {
+        DioramaGL_EndSurvey();
+        return;
+    }
     sRenderMode = sRenderMode == DIORAMA_RENDER_CLASSIC_2D
                 ? DIORAMA_RENDER_AUTO
                 : DIORAMA_RENDER_CLASSIC_2D;
+}
+
+void DioramaGL_CycleSurveyView(void)
+{
+    static const char *const sNames[] = {"flat", "v15", "v35", "v50", "v75"};
+
+    if (sSurveyView < 0)
+    {
+        Uint32 flags = SDL_GetWindowFlags(sWindow);
+
+        sSurveySavedRenderMode = sRenderMode;
+        sSurveySavedFocalLengthOffset = sCameraFocalLengthOffset;
+        sSurveySavedTerrainDebug = sTerrainDebug;
+        sSurveySavedFullscreen = (flags & (SDL_WINDOW_FULLSCREEN
+                                         | SDL_WINDOW_FULLSCREEN_DESKTOP)) != 0;
+        if (sSurveySavedFullscreen)
+            SDL_SetWindowFullscreen(sWindow, 0);
+        SDL_GetWindowSize(sWindow, &sSurveySavedWindowWidth, &sSurveySavedWindowHeight);
+        SDL_GetWindowPosition(sWindow, &sSurveySavedWindowX, &sSurveySavedWindowY);
+        sSurveyRun = sHasSceneSnapshot ? NextSurveyRun(&sSceneSnapshot) : 1;
+    }
+    sSurveyView = (sSurveyView + 1) % 5;
+    sRenderMode = sSurveyView == 0 ? DIORAMA_RENDER_CLASSIC_2D : DIORAMA_RENDER_AUTO;
+    sCameraFocalLengthOffset = 0.0f;
+    sTerrainDebug = false;
+    SDL_SetWindowFullscreen(sWindow, 0);
+    SDL_SetWindowSize(sWindow, 960, 640);
+    SDL_Log("Diorama survey view: %s", sNames[sSurveyView]);
+}
+
+void DioramaGL_EndSurvey(void)
+{
+    if (sSurveyView < 0)
+        return;
+    sSurveyView = -1;
+    sSurveyCaptureRequested = false;
+    sRenderMode = sSurveySavedRenderMode;
+    sCameraFocalLengthOffset = sSurveySavedFocalLengthOffset;
+    sTerrainDebug = sSurveySavedTerrainDebug;
+    SDL_SetWindowSize(sWindow, sSurveySavedWindowWidth, sSurveySavedWindowHeight);
+    SDL_SetWindowPosition(sWindow, sSurveySavedWindowX, sSurveySavedWindowY);
+    if (sSurveySavedFullscreen)
+        SDL_SetWindowFullscreen(sWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
+}
+
+void DioramaGL_RequestSurveyCapture(void)
+{
+    if (sSurveyView >= 0)
+        sSurveyCaptureRequested = true;
 }
 
 void DioramaGL_AdjustCameraZoom(int steps)
@@ -1052,6 +1285,8 @@ void DioramaGL_AdjustCameraZoom(int steps)
     float current;
     float adjusted;
 
+    if (sSurveyView >= 0)
+        return;
     if (sHasRenderedSceneSnapshot)
     {
         GetCameraSettings(&sRenderedSceneSnapshot, &pitch, &current);
@@ -1075,6 +1310,8 @@ void DioramaGL_AdjustCameraPitch(int steps)
     float focalLength;
     float adjusted;
 
+    if (sSurveyView >= 0)
+        DioramaGL_EndSurvey();
     if (sHasRenderedSceneSnapshot)
     {
         GetCameraSettings(&sRenderedSceneSnapshot, &current, &focalLength);

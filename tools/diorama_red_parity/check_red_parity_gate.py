@@ -4,13 +4,23 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 STATES = {"pending", "implementation", "automatic-passed", "manual-pending", "approved"}
 ACTIVE = {"implementation", "manual-pending"}
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 R0_SCENARIOS = {
     "R0-LITTLEROOT", "R0-ROUTE101", "R0-ROUTE104", "R0-ROUTE115",
     "R0-MT-CHIMNEY", "R0-CLASSIC-SMOKE",
@@ -20,6 +30,8 @@ R0_COMMANDS = [
     "make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)",
     "make -f Makefile_pc NATIVE_LINUX=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)",
 ]
+R1_SCENARIOS = {"R1-LITTLEROOT-SURVEY", "R1-ROUTE115-SURVEY"}
+R1_COMMANDS = list(R0_COMMANDS)
 
 
 def load(path: Path) -> dict:
@@ -99,6 +111,51 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
     if r0.get("manualGuide") != "docs/diorama_red_parity_manual_testing.md" \
             or not (root / r0["manualGuide"]).is_file():
         fail("R0 Spanish manual guide is missing")
+    r1 = by_phase["R1"]
+    if r1["state"] != "pending":
+        if set(r1.get("manualScenarios", [])) != R1_SCENARIOS \
+                or r1.get("automaticCommands") != R1_COMMANDS:
+            fail("R1 gate commands or scenarios do not match the phase contract")
+        sys.path.insert(0, str(root / "tools/diorama_survey"))
+        from survey import build_plan
+        plan = build_plan(root)
+        expected_summary = {"maps": 518, "layouts": 441, "tilesets": 75,
+                            "mapSpots": 518, "layoutOnly": 35, "tilesetOnly": 2,
+                            "captureNames": 2590}
+        if plan["summary"] != expected_summary:
+            fail("R1 global survey plan is incomplete")
+        if any(len(entry["captures"]) != 5 for entry in plan["entries"]
+               if entry["kind"] == "map"):
+            fail("R1 map spots must define exactly five views")
+        plan_by_map = {entry["map"]: entry for entry in plan["entries"]
+                       if entry["kind"] == "map"}
+        facing_aliases = {"sur": "south", "norte": "north",
+                          "oeste": "west", "este": "east"}
+        for scenario_id in R1_SCENARIOS:
+            scenario = scenario_by_id[scenario_id]
+            entry = plan_by_map[scenario["map"]]
+            if entry["position"] != scenario["position"] \
+                    or entry["facing"] != facing_aliases.get(scenario["facing"],
+                                                             scenario["facing"]):
+                fail(f"{scenario_id} does not match the global survey plan")
+        tracked = subprocess.run(["git", "ls-files"], cwd=root, check=True,
+                                 text=True, stdout=subprocess.PIPE).stdout.splitlines()
+        forbidden = ("build/diorama_catalog/", "build/diorama_survey/")
+        if any(path.startswith(forbidden) for path in tracked):
+            fail("generated Diorama catalog or survey output is tracked")
+        if r1["state"] == "approved":
+            run_hashes = r1.get("manualRunSha256", [])
+            if len(run_hashes) != 2 or len(set(run_hashes)) != 2 \
+                    or any(not re.fullmatch(r"[0-9a-f]{64}", value)
+                           for value in run_hashes):
+                fail("R1 approval requires two distinct validated survey manifests")
+            manifest_dir = root / "build/diorama_survey"
+            if not manifest_dir.is_dir():
+                fail("R1 approval requires stored survey manifests")
+            digests = {_sha256_file(path) for path in manifest_dir.glob("manifest*.json")}
+            for value in run_hashes:
+                if value not in digests:
+                    fail("R1 approval hash does not match a stored survey manifest")
     ids = [entry["id"] for entry in resolvers]
     if len(ids) != len(set(ids)):
         fail("resolver responsibilities must be unique")
@@ -152,7 +209,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         validate(args.root.resolve(), args.phase, args.require_approved_previous)
-    except (OSError, json.JSONDecodeError, ValueError) as error:
+    except (OSError, json.JSONDecodeError, ValueError, subprocess.CalledProcessError) as error:
         print(f"red parity gate: {error}", file=sys.stderr)
         return 1
     return 0

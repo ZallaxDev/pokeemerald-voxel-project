@@ -203,6 +203,9 @@ struct DioramaSceneSnapshot
     uint8_t uiBgTileGraphics[DIORAMA_UI_BG_TILE_BYTES];
     uint16_t uiBgTilemap[DIORAMA_UI_BG_MAP_BYTES / sizeof(uint16_t)];
     uint8_t playerAvatarFlags;
+    int16_t playerMapX;
+    int16_t playerMapY;
+    uint8_t playerFacingDirection;
     uint8_t surfBlobValid;
     int16_t surfBlobOffsetX;
     int16_t surfBlobOffsetY;

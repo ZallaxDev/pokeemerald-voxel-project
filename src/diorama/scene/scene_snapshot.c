@@ -749,6 +749,15 @@ void DioramaScene_PublishOverworld(void)
         if (!sDraft.tilesetResourcesValid)
             sDraft.fallbackReasons |= DIORAMA_FALLBACK_TILESET_UNAVAILABLE;
         CopyObjects(&sDraft);
+        if (gPlayerAvatar.objectEventId < OBJECT_EVENTS_COUNT
+         && gObjectEvents[gPlayerAvatar.objectEventId].active)
+        {
+            const struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
+
+            sDraft.playerMapX = player->currentCoords.x - MAP_OFFSET;
+            sDraft.playerMapY = player->currentCoords.y - MAP_OFFSET;
+            sDraft.playerFacingDirection = player->facingDirection;
+        }
         CopyUiProfile(&sDraft);
     }
     DioramaSnapshotExchange_Publish(&sDraft);

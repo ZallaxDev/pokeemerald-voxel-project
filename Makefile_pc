@@ -170,13 +170,16 @@ MAKEFLAGS += --no-print-directory
 # Secondary expansion is required for dependency variables in object rules.
 .SECONDEXPANSION:
 
-.PHONY: all rom linux clean compare tidy mostlyclean libagbsyscall modern tidymodern tidynonmodern diorama-catalog test-diorama test-diorama-red-parity test-diorama-snapshot test-diorama-connection test-diorama-transition test-diorama-metatile test-diorama-metatile-golden test-diorama-terrain test-diorama-sprite test-diorama-weather test-diorama-ui test-diorama-rules
+.PHONY: all rom linux clean compare tidy mostlyclean libagbsyscall modern tidymodern tidynonmodern diorama-catalog diorama-survey test-diorama test-diorama-red-parity test-diorama-survey test-diorama-snapshot test-diorama-connection test-diorama-transition test-diorama-metatile test-diorama-metatile-golden test-diorama-terrain test-diorama-sprite test-diorama-weather test-diorama-ui test-diorama-rules
 
 linux:
 	$(MAKE) -f Makefile_pc NATIVE_LINUX=1 rom
 
 diorama-catalog:
 	python3 tools/diorama_rules/catalog.py --contact-sheets
+
+diorama-survey:
+	python3 tools/diorama_survey/survey.py plan
 
 DIORAMA_SNAPSHOT_TEST := build/tests/diorama/test_snapshot
 DIORAMA_CONNECTION_TEST := build/tests/diorama/test_map_connection
@@ -193,9 +196,12 @@ DIORAMA_TEST_PKG_CONFIG := PKG_CONFIG_LIBDIR="$(PKG_CONFIG_32_PATH)" pkg-config
 
 test-diorama: test-diorama-snapshot test-diorama-connection test-diorama-transition test-diorama-metatile test-diorama-metatile-golden test-diorama-terrain test-diorama-sprite test-diorama-weather test-diorama-ui test-diorama-rules
 
-test-diorama-red-parity: test-diorama
+test-diorama-red-parity: test-diorama test-diorama-survey
 	python3 tools/diorama_red_parity/test_gate.py
-	python3 tools/diorama_red_parity/check_red_parity_gate.py --phase R0 --require-approved-previous
+	python3 tools/diorama_red_parity/check_red_parity_gate.py --phase R1 --require-approved-previous
+
+test-diorama-survey:
+	python3 tools/diorama_survey/test_survey.py
 
 test-diorama-snapshot: tests/diorama/test_snapshot.c src/diorama/scene/snapshot_exchange.c include/diorama/scene_snapshot.h
 	mkdir -p $(dir $(DIORAMA_SNAPSHOT_TEST))

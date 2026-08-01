@@ -25,7 +25,23 @@
       "testedAtUtc": "2026-08-01T16:29:51Z",
       "approval": "Apruebo manualmente R0; he ejecutado los seis escenarios y sus pruebas de ida/vuelta. No hay ninguna estructura, absolutamente todo plano."
     },
-    { "id": "R1", "state": "pending" },
+    {
+      "id": "R1",
+      "state": "manual-pending",
+      "binarySha256": "6471beb6c22672d963a214ec49d2b797e5294c6959abfa864779cc64452c1b09",
+      "classicBinarySha256": "397453d71e4e23075e6b896eeb26cc27259d0ceecb9561a0c4e27b424c0fb12e",
+      "automaticTestedAtUtc": "2026-08-01T18:14:42Z",
+      "automaticCommands": [
+        "make -f Makefile_pc test-diorama-red-parity PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig",
+        "make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)",
+        "make -f Makefile_pc NATIVE_LINUX=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)"
+      ],
+      "manualScenarios": [
+        "R1-LITTLEROOT-SURVEY",
+        "R1-ROUTE115-SURVEY"
+      ],
+      "manualGuide": "docs/diorama_red_parity_manual_testing.md"
+    },
     { "id": "R2", "state": "pending" },
     { "id": "R3", "state": "pending" },
     { "id": "R4", "state": "pending" },

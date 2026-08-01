@@ -101,6 +101,8 @@ int main(int argc, char **argv)
                 WriteExact(output, pixels, sizeof(pixels));
                 WriteProvenance(output, graphics, entries, layer);
             }
+            DioramaMetatile_Compose(graphics, entries, palette, pixels);
+            WriteExact(output, pixels, sizeof(pixels));
         }
     }
     if (fgetc(input) != EOF)

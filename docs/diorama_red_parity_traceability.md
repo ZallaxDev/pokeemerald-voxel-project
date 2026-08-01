@@ -14,3 +14,8 @@ Reference commit: `b21fd46ea789a0b8cb99d2c7e0add5a007568a54`.
 The machine-readable owner and precedence inventory is
 `data/diorama/red_parity_resolvers.json`. A responsibility has one owner or no owner when
 the conservative R0 result is deliberately unsupported and assigned to a later phase.
+
+R1 adds the Emerald extractor equivalent before any classifier. `layout_cells.json`
+retains every layout cell and links it to canonical metatile composition metadata;
+`plan.json` deterministically covers every map plus layouts and tilesets without a map
+placement. These generated files remain under `build/` and are not rule authority.
