@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from check_red_parity_gate import validate
+from check_red_parity_gate import requires_r0_neutrality, validate
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +25,17 @@ class RedParityGateTests(unittest.TestCase):
 
     def test_r1_global_survey_contract_is_valid(self) -> None:
         validate(ROOT, "R1", True)
+
+    def test_r2_full_metadata_contract_is_valid(self) -> None:
+        validate(ROOT, "R2", True)
+
+    def test_r0_neutrality_expires_when_r2_starts(self) -> None:
+        pending = [{"state": "approved"}, {"state": "approved"},
+                   {"state": "pending"}, {"state": "pending"}]
+        implementation = [{"state": "approved"}, {"state": "approved"},
+                          {"state": "implementation"}, {"state": "pending"}]
+        self.assertTrue(requires_r0_neutrality(pending))
+        self.assertFalse(requires_r0_neutrality(implementation))
 
 
 if __name__ == "__main__":

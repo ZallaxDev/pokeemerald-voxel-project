@@ -118,6 +118,83 @@
       "setup": "Ve a Ruta 115, situate en (18,41), mira al norte y observa flat, v15, v35, v50 y v75 sin postprocesado.",
       "expected": "Las cinco vistas corresponden al mismo lugar; los datos de mapa, layout, posicion, facing y pitch coinciden con el escenario y no derivan al repetirlo.",
       "roundTrip": "Sal por una conexion, vuelve al mismo punto y repite las cinco vistas."
+    },
+    {
+      "id": "R2-ROUTE101-CLASSIFIER",
+      "phase": "R2",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_ROUTE101",
+      "layout": "LAYOUT_ROUTE101",
+      "position": { "x": 10, "y": 10 },
+      "facing": "norte",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Carga una partida normal, llega caminando desde Villa Raiz sin teletransporte, situate en (10,10), mira al norte, desactiva el postprocesado y recorre flat, v15, v35, v50 y v75 con el overlay class/source/evidence.",
+      "expected": "Ground, grass, water y ledges con metadata fiable muestran class/source/evidence estable; arboles y arte bloqueado ambiguo permanecen planos salvo pin authoritative revisado. El overlay no modifica movimiento, collision, scripts, eventos, warps, encuentros ni save.",
+      "roundTrip": "Camina hasta Villa Raiz sin teletransporte, vuelve a (10,10) en Ruta 101 y repite las cinco vistas; clasificacion y evidencia deben coincidir."
+    },
+    {
+      "id": "R2-ROUTE115-CLASSIFIER",
+      "phase": "R2",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_ROUTE115",
+      "layout": "LAYOUT_ROUTE115",
+      "position": { "x": 18, "y": 41 },
+      "facing": "norte",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Carga una partida normal con acceso a Ruta 115, llega mediante el recorrido normal sin teletransporte, situate en (18,41), mira al norte, desactiva el postprocesado y recorre flat, v15, v35, v50 y v75 con el overlay class/source/evidence.",
+      "expected": "Ground, water, ledges y stairs con evidencia fiable muestran precedencia y procedencia estables; cliffs, vegetacion y roca ambigua permanecen planos si no existe un pin authoritative. Collision nunca basta por si sola para producir wall y el juego conserva toda autoridad.",
+      "roundTrip": "Sal de Ruta 115 por una conexion mediante movimiento normal, vuelve a (18,41) sin teletransporte y repite las cinco vistas; no debe cambiar ninguna decision."
+    },
+    {
+      "id": "R2-GRANITE-CAVE-B1F-CLASSIFIER",
+      "phase": "R2",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_GRANITE_CAVE_B1F",
+      "layout": "LAYOUT_GRANITE_CAVE_B1F",
+      "position": { "x": 25, "y": 14 },
+      "facing": "norte",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Carga una partida normal con acceso a Cueva Granito, entra en B1F por el warp de (25,13) sin teletransporte, da un paso hasta (25,14), mira al norte, desactiva el postprocesado y recorre flat, v15, v35, v50 y v75 con el overlay class/source/evidence.",
+      "expected": "Suelo, escaleras y demas behaviors fiables muestran una decision estable y auditable; paredes y roca de cueva ambiguas permanecen planas sin pin authoritative. Flash, collision y elevation no transfieren autoridad geometrica ni cambian el estado del juego.",
+      "roundTrip": "Usa el warp normal de (25,13) para volver a 1F, regresa a B1F sin teletransporte, camina a (25,14) y repite las cinco vistas; decisiones y evidencia deben coincidir."
+    },
+    {
+      "id": "R2-ROUTE115-AUTHORITATIVE-PIN-BLAST-RADIUS",
+      "phase": "R2",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_ROUTE115",
+      "layout": "LAYOUT_ROUTE115",
+      "position": { "x": 21, "y": 63 },
+      "facing": "norte",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Llega a Ruta 115 mediante gameplay normal y sin teletransporte, situate en (21,63), mira al norte, desactiva el postprocesado, recorre flat, v15, v35, v50 y v75 con F3 y revisa la flor gTileset_General:4 junto con las 615 apariciones declaradas por el compilador.",
+      "expected": "La flor y sus 615 apariciones reciben class flower, height 0, artMode flower, pool vegetation, authored true, source pin y evidencia de tileset/metatile; permanecen planas hasta R6 y no modifican gameplay.",
+      "roundTrip": "Cruza una conexion y vuelve andando sin teletransporte a (21,63), repite las cinco vistas y vuelve a revisar el listado global de apariciones; hashes semanticos y blast radius deben permanecer identicos.",
+      "review": {
+        "kind": "authoritative-pin-blast-radius",
+        "authority": "human-reviewed-tileset-metatile",
+        "anchorOnly": false,
+        "scope": "all-catalog-occurrences",
+        "requiredOutputs": ["class", "height", "artMode", "pool", "authored", "source", "evidence"]
+      }
+    },
+    {
+      "id": "R2-CLASSIC-DIORAMA-REGRESSION-SMOKE",
+      "phase": "R2",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_LITTLEROOT_TOWN",
+      "layout": "LAYOUT_LITTLEROOT_TOWN",
+      "position": { "x": 10, "y": 10 },
+      "facing": "sur",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Sin NVDA y sin teletransporte, arranca primero classic y despues Diorama con la misma partida. Desde Villa Raiz (10,10), prueba movimiento, input, audio, guardado/carga, resize, fullscreen, menu y un combate.",
+      "expected": "Classic conserva el render software. Diorama conserva movimiento, input, audio y save; menus, combate y escenas no overworld usan el fallback 2D sin mezclar compositores ni alterar gameplay.",
+      "roundTrip": "Vuelve del combate y los menus al mismo punto sin teletransporte, cruza a Ruta 101 y regresa; ambos binarios mantienen input, audio, save/load y presentacion estable."
     }
   ]
 }

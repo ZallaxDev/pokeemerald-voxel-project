@@ -61,6 +61,7 @@ static struct DioramaSceneSnapshot sPreviousSceneSnapshot;
 static struct DioramaSceneSnapshot sIncomingSceneSnapshot;
 static struct DioramaSceneSnapshot sRenderedSceneSnapshot;
 static struct DioramaSceneSnapshot sPreviousRenderedSceneSnapshot;
+static struct DioramaResolvedCell sRenderedResolvedCells[DIORAMA_MAX_VISIBLE_CELLS];
 static u32 sDebugPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sWeatherPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static u32 sUiPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
@@ -256,6 +257,9 @@ static void FillRect(int x, int y, int width, int height, u32 color)
 
 static u16 GetGlyph(char character)
 {
+    if (character >= 'a' && character <= 'z')
+        character -= 'a' - 'A';
+
 #define GLYPH(a, b, c, d, e) ((a) << 12 | (b) << 9 | (c) << 6 | (d) << 3 | (e))
     switch (character)
     {
@@ -326,11 +330,15 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
 {
     const struct DioramaTerrainMetrics *metrics = DioramaGLTerrain_GetMetrics();
     const struct DioramaObjectMetrics *objectMetrics = DioramaGLObjects_GetMetrics();
+    const struct DioramaResolvedCell *targetCell = NULL;
     struct DioramaMapProfile profile;
     char text[32];
+    int targetX = snapshot->playerMapX;
+    int targetY = snapshot->playerMapY;
+    uint16_t i;
 
     memset(sDebugPixels, 0, sizeof(sDebugPixels));
-    FillRect(2, 2, 74, 120, RGBA(10, 14, 18, 220));
+    FillRect(2, 2, 94, 154, RGBA(10, 14, 18, 220));
     DrawValue(5, 5, "GEN:", snapshot->mapGeneration);
     DrawValue(5, 14, "CH:", metrics->activeChunks);
     DrawValue(5, 23, "VIS:", metrics->visibleChunks);
@@ -339,19 +347,51 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
     DrawValue(5, 50, "TRI:", metrics->triangles);
     DrawValue(5, 59, "DRA:", metrics->drawCalls);
     DrawValue(5, 68, "OBJ:", objectMetrics->visibleObjects);
-    DrawValue(5, 77, "CAC:", objectMetrics->cachedFrames);
-    DrawValue(5, 86, "UPL:", objectMetrics->uploadedFrames);
     if (DioramaRules_GetMapProfile(snapshot->mapGroup, snapshot->mapNum,
                                    snapshot->mapLayoutId, &profile))
-        DrawText(5, 95, profile.cameraProfile == DIORAMA_CAMERA_INTERIOR
-                           ? "CAM:I" : "CAM:E", RGB(220, 230, 235));
+        DrawText(5, 77, profile.cameraProfile == DIORAMA_CAMERA_INTERIOR
+                            ? "CAM:I" : "CAM:E", RGB(220, 230, 235));
     else
-        DrawText(5, 95, "CAM:-", RGB(220, 230, 235));
+        DrawText(5, 77, "CAM:-", RGB(220, 230, 235));
     SDL_snprintf(text, sizeof(text), "MAP:%u,%u", snapshot->mapGroup, snapshot->mapNum);
-    DrawText(5, 104, text, RGB(220, 230, 235));
+    DrawText(5, 86, text, RGB(220, 230, 235));
     SDL_snprintf(text, sizeof(text), "POS:%d,%d", snapshot->playerMapX,
-                 snapshot->playerMapY);
-    DrawText(5, 113, text, RGB(220, 230, 235));
+                  snapshot->playerMapY);
+    DrawText(5, 95, text, RGB(220, 230, 235));
+    switch (snapshot->playerFacingDirection)
+    {
+    case 1: targetY++; break;
+    case 2: targetY--; break;
+    case 3: targetX--; break;
+    case 4: targetX++; break;
+    }
+    SDL_snprintf(text, sizeof(text), "TGT:%d,%d", targetX, targetY);
+    DrawText(5, 104, text, RGB(220, 230, 235));
+    for (i = 0; i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)
+        if (snapshot->cells[i].sourceMapGroup == snapshot->mapGroup
+         && snapshot->cells[i].sourceMapNum == snapshot->mapNum
+         && snapshot->cells[i].sourceMapX == targetX
+         && snapshot->cells[i].sourceMapY == targetY)
+        {
+            targetCell = &sRenderedResolvedCells[i];
+            break;
+        }
+    if (targetCell != NULL)
+    {
+        const char *className = DioramaRules_ClassName(targetCell->classifierClass);
+        const char *sourceName = DioramaRules_ClassifierSourceName(targetCell->classifierSource);
+        size_t sourceLength;
+
+        SDL_snprintf(text, sizeof(text), "CLS:%s", className != NULL ? className : "ground");
+        DrawText(5, 113, text, RGB(220, 230, 235));
+        if (sourceName == NULL)
+            sourceName = "fallback";
+        sourceLength = strcspn(sourceName, ":");
+        SDL_snprintf(text, sizeof(text), "SRC:%.*s", (int)sourceLength, sourceName);
+        DrawText(5, 122, text, RGB(220, 230, 235));
+        DrawValue(5, 131, "EVI:", targetCell->evidenceFlags);
+        DrawValue(5, 140, "AMB:", targetCell->ambiguityFlags != 0);
+    }
 
     glBindTexture(GL_TEXTURE_2D, sDebugTexture.id);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
@@ -1044,6 +1084,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                 sHasPreviousRenderedSceneSnapshot = true;
             }
             sRenderedSceneSnapshot = sSceneSnapshot;
+            memcpy(sRenderedResolvedCells, sAtlasResolvedCells,
+                   sizeof(sRenderedResolvedCells));
             sHasRenderedSceneSnapshot = true;
         }
         if (newSequence)

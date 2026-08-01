@@ -23,6 +23,49 @@ R0_COMMANDS = [
 ]
 R1_SCENARIOS = {"R1-LITTLEROOT-SURVEY"}
 R1_COMMANDS = list(R0_COMMANDS)
+R2_SCENARIOS = {
+    "R2-ROUTE101-CLASSIFIER",
+    "R2-ROUTE115-CLASSIFIER",
+    "R2-GRANITE-CAVE-B1F-CLASSIFIER",
+    "R2-ROUTE115-AUTHORITATIVE-PIN-BLAST-RADIUS",
+    "R2-CLASSIC-DIORAMA-REGRESSION-SMOKE",
+}
+R2_COMMANDS = list(R0_COMMANDS)
+R2_PITCHES = [0, 15, 35, 50, 75]
+R2_LOCATIONS = {
+    "R2-ROUTE101-CLASSIFIER": (
+        "MAP_ROUTE101", "LAYOUT_ROUTE101", {"x": 10, "y": 10}, "norte"),
+    "R2-ROUTE115-CLASSIFIER": (
+        "MAP_ROUTE115", "LAYOUT_ROUTE115", {"x": 18, "y": 41}, "norte"),
+    "R2-GRANITE-CAVE-B1F-CLASSIFIER": (
+        "MAP_GRANITE_CAVE_B1F", "LAYOUT_GRANITE_CAVE_B1F",
+        {"x": 25, "y": 14}, "norte"),
+    "R2-ROUTE115-AUTHORITATIVE-PIN-BLAST-RADIUS": (
+        "MAP_ROUTE115", "LAYOUT_ROUTE115", {"x": 21, "y": 63}, "norte"),
+    "R2-CLASSIC-DIORAMA-REGRESSION-SMOKE": (
+        "MAP_LITTLEROOT_TOWN", "LAYOUT_LITTLEROOT_TOWN", {"x": 10, "y": 10}, "sur"),
+}
+R2_AI_DECISION = {
+    "status": "not-run",
+    "authoritative": False,
+    "buildDependency": False,
+    "runtimeDependency": False,
+}
+R2_CLASSIFIER_EVIDENCE = {
+    "rulesSha256": "55bfb6c93c2092d9059bdfe629212db231ce8da833f4fa019ae5073f37eed2b8",
+    "compiledRecords": 324579,
+    "ambiguityGroups": 95,
+    "fallbackPlacements": 250585,
+    "pythonCParityRecords": 324579,
+    "authoritativePin": "gTileset_General:4",
+    "authoritativePinPlacements": 615,
+    "flowerAnimationSources": 4,
+}
+
+
+def requires_r0_neutrality(gates: list[dict]) -> bool:
+    """R0's empty-rule baseline expires when classifier work starts in R2."""
+    return all(phase["state"] == "pending" for phase in gates[2:])
 
 
 def load(path: Path) -> dict:
@@ -67,8 +110,9 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
                 if not re.fullmatch(r"[0-9a-f]{64}", phase[field]):
                     fail(f"{phase['id']} {field} is invalid")
     scenario_by_id = {scenario["id"]: scenario for scenario in scenarios}
-    if len(scenario_by_id) != len(scenarios) or not R0_SCENARIOS <= set(scenario_by_id):
-        fail("R0 scenarios are missing or duplicated")
+    required_scenarios = R0_SCENARIOS | R1_SCENARIOS | R2_SCENARIOS
+    if len(scenario_by_id) != len(scenarios) or not required_scenarios <= set(scenario_by_id):
+        fail("required Red-parity scenarios are missing or duplicated")
     sys.path.insert(0, str(root / "tools/diorama_rules"))
     from catalog import load_tilesets, load_world
     catalog_maps, catalog_layouts = load_world(root)
@@ -82,8 +126,8 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
     maps_by_symbol = {row["symbol"]: row for row in catalog_maps}
     layouts_by_symbol = {row["id"]: row for row in catalog_layouts}
     for scenario in scenarios:
-        required = {"phase", "renderer", "map", "layout", "position", "facing", "pitch",
-                    "resolution", "setup", "expected", "roundTrip"}
+        required = {"id", "phase", "renderer", "map", "layout", "position", "facing", "pitch",
+                     "resolution", "setup", "expected", "roundTrip"}
         if not required <= set(scenario):
             fail(f"{scenario['id']} is not reproducible")
         if not all(isinstance(scenario["position"].get(axis), int) for axis in ("x", "y")):
@@ -95,6 +139,13 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
         if not (0 <= scenario["position"]["x"] < layout["width"]
                 and 0 <= scenario["position"]["y"] < layout["height"]):
             fail(f"{scenario['id']} position is outside its layout")
+        if not scenario["id"].startswith(f"{scenario['phase']}-"):
+            fail(f"{scenario['id']} does not match its phase")
+        resolution = scenario["resolution"]
+        if set(resolution) != {"width", "height"} \
+                or not all(isinstance(resolution[axis], int) and resolution[axis] > 0
+                           for axis in ("width", "height")):
+            fail(f"{scenario['id']} has an invalid resolution")
     r0 = by_phase["R0"]
     if set(r0["manualScenarios"]) != R0_SCENARIOS \
             or r0["automaticCommands"] != R0_COMMANDS:
@@ -160,6 +211,53 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
             if set(identity) != set(identity_fields) \
                     or not all(isinstance(identity[field], int) for field in identity_fields):
                 fail("R1 manual evidence has an invalid snapshot identity")
+    r2 = by_phase["R2"]
+    if r2["state"] != "pending":
+        if set(r2.get("manualScenarios", [])) != R2_SCENARIOS \
+                or len(r2["manualScenarios"]) != len(R2_SCENARIOS) \
+                or r2.get("automaticCommands") != R2_COMMANDS:
+            fail("R2 gate commands or scenarios do not match the phase contract")
+        if r2.get("manualGuide") != "docs/diorama_red_parity_manual_testing.md" \
+                or not (root / r2["manualGuide"]).is_file():
+            fail("R2 Spanish manual guide is missing")
+        if r2.get("gameplayAuthority") != "original-game-only-no-teleport":
+            fail("R2 must preserve original gameplay authority and forbid teleport setup")
+        if r2.get("aiDecision") != R2_AI_DECISION:
+            fail("R2 optional AI decision must be recorded as non-authoritative not-run")
+        if r2["state"] in {"automatic-passed", "manual-pending", "approved"}:
+            for field in ("binarySha256", "classicBinarySha256"):
+                if not re.fullmatch(r"[0-9a-f]{64}", r2.get(field, "")):
+                    fail(f"R2 {field} is missing after automatic validation")
+            if not r2.get("automaticTestedAtUtc"):
+                fail("R2 automatic validation timestamp is missing")
+            if r2.get("classifierEvidence") != R2_CLASSIFIER_EVIDENCE:
+                fail("R2 compiled classifier evidence does not match the validated corpus")
+        for scenario_id in R2_SCENARIOS:
+            scenario = scenario_by_id[scenario_id]
+            expected_map, expected_layout, expected_position, expected_facing = \
+                R2_LOCATIONS[scenario_id]
+            if scenario["phase"] != "R2" or scenario["renderer"] != "classic-and-diorama" \
+                    or scenario["map"] != expected_map \
+                    or scenario["layout"] != expected_layout \
+                    or scenario["position"] != expected_position \
+                    or scenario["facing"] != expected_facing \
+                    or scenario["pitch"] != R2_PITCHES \
+                    or scenario["resolution"] != {"width": 960, "height": 640}:
+                fail(f"{scenario_id} does not match the R2 capture contract")
+            if "sin teletransporte" not in scenario["setup"] \
+                    or "teletransporte" not in scenario["roundTrip"]:
+                fail(f"{scenario_id} must use normal gameplay traversal without teleport")
+        pin_review = scenario_by_id["R2-ROUTE115-AUTHORITATIVE-PIN-BLAST-RADIUS"]
+        expected_review = {
+            "kind": "authoritative-pin-blast-radius",
+            "authority": "human-reviewed-tileset-metatile",
+            "anchorOnly": False,
+            "scope": "all-catalog-occurrences",
+            "requiredOutputs": ["class", "height", "artMode", "pool", "authored",
+                                "source", "evidence"],
+        }
+        if pin_review.get("review") != expected_review:
+            fail("R2 authoritative pin review does not cover its complete blast radius")
     ids = [entry["id"] for entry in resolvers]
     if len(ids) != len(set(ids)):
         fail("resolver responsibilities must be unique")
@@ -168,20 +266,21 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
         fail("an unowned resolver has no replacement phase")
     if not (root / "docs/diorama_red_parity_traceability.md").is_file():
         fail("traceability matrix is missing")
-    defaults = load(root / "data/diorama/defaults.json")
-    neutral_sections = ("profiles", "behaviorRules", "contextualRules", "exactPatterns")
-    if any(defaults.get(section) for section in neutral_sections):
-        fail("R0 defaults contain inherited classification or geometry")
-    if any((root / "data/diorama/maps").glob("*.json")) \
-            or any((root / "data/diorama/tilesets").glob("*.json")):
-        fail("R0 contains inherited map or tileset rules")
-    generated = (root / "src/data/diorama/diorama_rules.generated.c").read_text(
-        encoding="utf-8")
-    empty_counts = ("Terrain", "BehaviorRule", "Profile", "Mask", "MaskRow", "Sample",
-                    "TilesetPin", "ContextualRule", "ExactPattern")
-    for name in empty_counts:
-        if f"const size_t gDiorama{name}V2Count = 0;" not in generated:
-            fail(f"R0 generated {name} table is not empty")
+    if requires_r0_neutrality(gates):
+        defaults = load(root / "data/diorama/defaults.json")
+        neutral_sections = ("profiles", "behaviorRules", "contextualRules", "exactPatterns")
+        if any(defaults.get(section) for section in neutral_sections):
+            fail("R0 defaults contain inherited classification or geometry")
+        if any((root / "data/diorama/maps").glob("*.json")) \
+                or any((root / "data/diorama/tilesets").glob("*.json")):
+            fail("R0 contains inherited map or tileset rules")
+        generated = (root / "src/data/diorama/diorama_rules.generated.c").read_text(
+            encoding="utf-8")
+        empty_counts = ("Terrain", "BehaviorRule", "Profile", "Mask", "MaskRow", "Sample",
+                        "TilesetPin", "ContextualRule", "ExactPattern")
+        for name in empty_counts:
+            if f"const size_t gDiorama{name}V2Count = 0;" not in generated:
+                fail(f"R0 generated {name} table is not empty")
     excluded = tuple(denylist["excludedRoots"])
     scan_roots = (root / "src/diorama", root / "src/data/diorama", root / "include/diorama",
                   root / "tools/diorama_rules", root / "data/diorama")

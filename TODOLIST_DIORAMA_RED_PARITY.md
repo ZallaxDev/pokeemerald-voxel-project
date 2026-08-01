@@ -7,8 +7,8 @@
 - Referencia Rojo congelada: `b21fd46ea789a0b8cb99d2c7e0add5a007568a54`.
 - Especificacion: `docs/diorama_red_parity.md`.
 - Editor visual: fuera de alcance hasta terminar este TODO.
-- Fase activa: ninguna; la siguiente es **R2**.
-- Ultima fase aprobada manualmente: **R1**.
+- Fase activa: **R3** (`pending`).
+- Ultima fase aprobada manualmente: **R2**.
 - El stash anterior permanece aislado y no se mezcla aqui.
 
 ## Protocolo obligatorio de fases
@@ -184,34 +184,39 @@ entonces empieza R2.
 
 ## R2: clasificador `TileShape` y perfil manual equivalente
 
-**Estado:** `pending`
+**Estado:** `approved`
 
 **Objetivo:** portar la primera etapa de Rojo con precedencia formal y una unica fuente
 manual, todavia sin detector de estructuras.
 
 Implementacion:
 
-- [ ] Crear un clasificador headless unico equivalente a `TileShape.lua`.
-- [ ] Definir salida `class`, `height`, `artMode`, `pool`, `authored`, `source` y
+- [x] Versionar los escenarios exactos del gate R2 para Route 101, Route 115,
+      Granite Cave B1F, la revision global de blast radius y el smoke de regresion.
+- [x] Preparar checker, tests, target Make, guia manual y trazabilidad del contrato R2 sin
+      presentar esta preparacion como evidencia automatica o manual.
+- [x] Crear un clasificador headless unico equivalente a `TileShape.lua`.
+- [x] Definir salida `class`, `height`, `artMode`, `pool`, `authored`, `source` y
       confidence/evidence.
-- [ ] Aplicar behaviors visualmente fiables antes del fallback conservador.
-- [ ] Mantener collision como evidencia, nunca como sinonimo de wall.
-- [ ] Implementar pins por tileset/metatile.
-- [ ] Implementar condiciones contextuales equivalentes a `when_above` y vecinos
+- [x] Aplicar behaviors visualmente fiables antes del fallback conservador.
+- [x] Mantener collision como evidencia, nunca como sinonimo de wall.
+- [x] Implementar pins por tileset/metatile.
+- [x] Implementar condiciones contextuales equivalentes a `when_above` y vecinos
       cardinales sin depender del orden JSON.
-- [ ] Implementar alturas nominales por clase.
-- [ ] Implementar pools semanticos.
-- [ ] Implementar `propGround` manual y su forma automatica pendiente.
-- [ ] Derivar grass, flowers, water y animaciones cuando la metadata sea fiable.
-- [ ] Dejar arte ambiguo plano y emitir un registro de ambiguedad.
-- [ ] Eliminar cualquier clasificador anterior sustituido y sus tests.
-- [ ] Compilar la decision final a C; runtime no reinterpreta precedencia.
-- [ ] Publicar overlay runtime `class/source/evidence` desde datos compilados y snapshot,
+- [x] Implementar alturas nominales por clase.
+- [x] Implementar pools semanticos.
+- [x] Implementar `propGround` manual y su forma automatica pendiente.
+- [x] Derivar grass, flowers, water y animaciones cuando la metadata sea fiable.
+- [x] Dejar arte ambiguo plano y emitir un registro de ambiguedad.
+- [x] Eliminar cualquier clasificador anterior sustituido y sus tests.
+- [x] Compilar la decision final a C; runtime no reinterpreta precedencia.
+- [x] Publicar overlay runtime `class/source/evidence` desde datos compilados y snapshot,
       sin leer globals mutables.
 
 Spike IA local completo opcional, no autoritativo:
 
-- [ ] Registrar decision `not-run` o `run` sin bloquear R2.
+- [x] Registrar decision `not-run` o `run` sin bloquear R2. Decision actual: `not-run`,
+      no authoritative y sin dependencia de build/runtime.
 - [ ] Si se ejecuta, definir antes benchmark, precision minima y ahorro humano minimo.
 - [ ] Evaluar solo offline/local embeddings, segmentacion y opcionalmente un VLM.
 - [ ] Registrar licencia, modelo, hash, seed, prompt, parametros, recursos y tiempos.
@@ -223,10 +228,10 @@ Spike IA local completo opcional, no autoritativo:
 
 Validacion automatica especifica:
 
-- [ ] Fixtures de precedencia: context > pin general > behavior fiable > fallback.
-- [ ] Fixtures de tile reutilizado con dos contextos.
-- [ ] Cero celda clasificada wall solamente por collision.
-- [ ] Paridad Python/C de todas las salidas del clasificador.
+- [x] Fixtures de precedencia: context > pin general > behavior fiable > fallback.
+- [x] Fixtures de tile reutilizado con dos contextos.
+- [x] Cero celda clasificada wall solamente por collision.
+- [x] Paridad Python/C de todas las salidas del clasificador.
 
 **Prueba manual obligatoria R2:**
 
@@ -239,6 +244,10 @@ Validacion automatica especifica:
 
 **Gate R2:** el usuario aprueba precedencia, fallback y formato de correccion manual.
 Solo entonces empieza R3.
+
+Resultado del usuario: **APROBADO** (2026-08-01). La validacion detecto que los cuatro
+behaviors diagonales `MB_JUMP_*` faltaban en el conjunto fiable de ledges; se corrigieron
+y se comprobo en Ruta 101 que la esquina `(6,7)` resuelve como `LEDGE/BEHAVIOR`.
 
 ## R3: reclamacion, conectividad y orden `Structures`
 

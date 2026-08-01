@@ -72,7 +72,50 @@
       "testedAtUtc": "2026-08-01T18:44:12Z",
       "approval": "Saltamos la prueba restante y doy R1 por valida porque la pasada anterior de Villa Raiz fue validada correctamente."
     },
-    { "id": "R2", "state": "pending" },
+    {
+      "id": "R2",
+      "state": "approved",
+      "binarySha256": "89b64951465357cb78374d65fbe63574c040e7fc91ea9ce8336b74d9309825c5",
+      "classicBinarySha256": "397453d71e4e23075e6b896eeb26cc27259d0ceecb9561a0c4e27b424c0fb12e",
+      "automaticTestedAtUtc": "2026-08-01T23:30:27Z",
+      "automaticCommands": [
+        "make -f Makefile_pc test-diorama-red-parity PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig",
+        "make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)",
+        "make -f Makefile_pc NATIVE_LINUX=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)"
+      ],
+      "manualScenarios": [
+        "R2-ROUTE101-CLASSIFIER",
+        "R2-ROUTE115-CLASSIFIER",
+        "R2-GRANITE-CAVE-B1F-CLASSIFIER",
+        "R2-ROUTE115-AUTHORITATIVE-PIN-BLAST-RADIUS",
+        "R2-CLASSIC-DIORAMA-REGRESSION-SMOKE"
+      ],
+      "manualGuide": "docs/diorama_red_parity_manual_testing.md",
+      "gameplayAuthority": "original-game-only-no-teleport",
+      "classifierEvidence": {
+        "rulesSha256": "55bfb6c93c2092d9059bdfe629212db231ce8da833f4fa019ae5073f37eed2b8",
+        "compiledRecords": 324579,
+        "ambiguityGroups": 95,
+        "fallbackPlacements": 250585,
+        "pythonCParityRecords": 324579,
+        "authoritativePin": "gTileset_General:4",
+        "authoritativePinPlacements": 615,
+        "flowerAnimationSources": 4
+      },
+      "aiDecision": {
+        "status": "not-run",
+        "authoritative": false,
+        "buildDependency": false,
+        "runtimeDependency": false
+      },
+      "tester": "usuario",
+      "testedAtUtc": "2026-08-01T23:30:27Z",
+      "approval": "Confirmo. Apruebo la fase.",
+      "manualFindings": [
+        "El overlay se amplio para inspeccionar la celda situada frente al jugador.",
+        "La revision de Ruta 101 detecto y corrigio los ledges diagonales MB_JUMP_NORTHEAST, MB_JUMP_NORTHWEST, MB_JUMP_SOUTHEAST y MB_JUMP_SOUTHWEST."
+      ]
+    },
     { "id": "R3", "state": "pending" },
     { "id": "R4", "state": "pending" },
     { "id": "R5", "state": "pending" },

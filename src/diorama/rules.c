@@ -7,18 +7,6 @@
 #include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 
-#define ACTION_HAS_PROFILE      (1u << 0)
-#define ACTION_HAS_AXIS         (1u << 1)
-#define ACTION_HAS_GROUND       (1u << 2)
-#define ACTION_HAS_HEIGHT       (1u << 3)
-#define ACTION_HAS_GROUND_MODE  (1u << 4)
-#define ACTION_HAS_SHAPE        (1u << 6)
-
-#define NEIGHBOR_HAS_METATILE   (1u << 0)
-#define NEIGHBOR_HAS_BEHAVIOR   (1u << 1)
-#define NEIGHBOR_HAS_LAYER      (1u << 2)
-#define NEIGHBOR_HAS_ELEVATION  (1u << 3)
-
 static int FindCell(const struct DioramaSceneSnapshot *snapshot,
                     const struct DioramaCellSnapshot *origin, int dx, int dy);
 
@@ -32,7 +20,8 @@ static const struct DioramaGeneratedLayoutV2 *FindLayout(uint16_t layoutId)
 }
 
 static const struct DioramaGeneratedTerrainV2 *FindStaticTerrain(
-    const struct DioramaGeneratedLayoutV2 *layout, uint32_t cellOffset)
+    const struct DioramaGeneratedLayoutV2 *layout, uint32_t cellOffset,
+    uint8_t mapGroup, uint8_t mapNum)
 {
     uint32_t low = 0;
     uint32_t high;
@@ -52,10 +41,40 @@ static const struct DioramaGeneratedTerrainV2 *FindStaticTerrain(
         else
             high = middle;
     }
-    if (low < layout->terrainRecordCount
-     && gDioramaTerrainV2[layout->terrainRecordOffset + low].cellOffset == cellOffset)
-        return &gDioramaTerrainV2[layout->terrainRecordOffset + low];
+    while (low < layout->terrainRecordCount)
+    {
+        const struct DioramaGeneratedTerrainV2 *record =
+            &gDioramaTerrainV2[layout->terrainRecordOffset + low++];
+
+        if (record->cellOffset != cellOffset)
+            break;
+        if (record->mapGroup == mapGroup && record->mapNumber == mapNum)
+            return record;
+        if (record->mapGroup == UINT8_MAX && record->mapNumber == UINT8_MAX)
+            return record;
+    }
     return NULL;
+}
+
+static void InitializeResolved(struct DioramaResolvedCell *resolved)
+{
+    size_t i;
+
+    memset(resolved, 0, sizeof(*resolved));
+    resolved->shape = DIORAMA_SHAPE_FLAT;
+    resolved->archetype = DIORAMA_ARCHETYPE_GROUND;
+    resolved->terrainClass = DIORAMA_TERRAIN_CLASS_GROUND;
+    resolved->classifierClass = 1;
+    resolved->artMode = DIORAMA_ART_FLAT;
+    resolved->source = DIORAMA_RULE_SOURCE_FALLBACK;
+    resolved->baseMetatileId = DIORAMA_MATERIAL_METATILE_SELF;
+    resolved->rulePriority = -32768;
+    for (i = 0; i < DIORAMA_MATERIAL_FACE_COUNT; i++)
+    {
+        resolved->materials[i].metatileId = DIORAMA_MATERIAL_METATILE_SELF;
+        resolved->materials[i].layer = i == DIORAMA_MATERIAL_FACE_PLANE
+            ? DIORAMA_MATERIAL_FOREGROUND : DIORAMA_MATERIAL_FULL;
+    }
 }
 
 static void ApplyStaticTerrain(const struct DioramaCellSnapshot *cell,
@@ -72,22 +91,33 @@ static void ApplyStaticTerrain(const struct DioramaCellSnapshot *cell,
     if (layout == NULL || cell->sourceMapX >= layout->width || cell->sourceMapY >= layout->height)
         return;
     cellOffset = (uint32_t)cell->sourceMapY * layout->width + cell->sourceMapX;
-    record = FindStaticTerrain(layout, cellOffset);
+    record = FindStaticTerrain(layout, cellOffset, cell->sourceMapGroup, cell->sourceMapNum);
     if (record == NULL || record->expectedMetatile != cell->metatileId)
-        return;
-    if (resolved->source == DIORAMA_RULE_SOURCE_MAP
-     || resolved->source == DIORAMA_RULE_SOURCE_BUILDING
-     || resolved->source == DIORAMA_RULE_SOURCE_PATTERN
-     || resolved->source == DIORAMA_RULE_SOURCE_CONTEXT
-     || resolved->source == DIORAMA_RULE_SOURCE_EVENT)
         return;
     resolved->shape = record->shape;
     resolved->archetype = record->archetype;
     resolved->terrainClass = record->terrainClass;
+    resolved->classifierClass = record->classId;
+    resolved->classifierSource = record->sourceId;
+    resolved->semanticPool = record->pool;
+    resolved->artMode = record->artMode;
+    resolved->authored = record->authored;
+    resolved->source = record->sourceKind;
+    resolved->classifierConfidence = record->confidence;
+    resolved->evidenceFlags = record->evidenceFlags;
+    resolved->ambiguityFlags = record->ambiguityFlags;
+    resolved->evidenceDetailsId = record->evidenceDetailsId;
+    resolved->ambiguityDetailsId = record->ambiguityDetailsId;
+    resolved->groundMode = record->propGroundMode;
+    resolved->baseMetatileId = record->propGroundMetatile;
     resolved->planeAxis = record->axis;
-    resolved->groundHeight = record->groundQ16 / 16.0f;
-    resolved->featureHeight = record->heightQ16 / 16.0f;
+    resolved->featureHeight = record->heightQ16 > 0 ? record->heightQ16 / 16.0f : 0.0f;
+    resolved->groundHeight = record->heightQ16 < 0 ? record->heightQ16 / 16.0f : 0.0f;
+    if (record->shape == DIORAMA_SHAPE_LEDGE)
+        resolved->groundHeight = resolved->featureHeight;
     resolved->topHeight = resolved->groundHeight + resolved->featureHeight;
+    if (record->shape == DIORAMA_SHAPE_LEDGE)
+        resolved->topHeight = resolved->groundHeight;
     resolved->cliffEdgeMask = record->cliffEdgeMask;
     resolved->cliffBaseMask = record->cliffBaseMask;
     resolved->cliffTransitionMask = record->cliffTransitionMask;
@@ -160,79 +190,6 @@ bool DioramaRules_ProfileIsFullCell(uint8_t profileId)
     return true;
 }
 
-static uint8_t ArchetypeShape(uint8_t archetype)
-{
-    if (archetype == DIORAMA_ARCHETYPE_VOID || archetype == DIORAMA_ARCHETYPE_CLAIM_ONLY)
-        return DIORAMA_SHAPE_HIDDEN;
-    if (archetype >= DIORAMA_ARCHETYPE_WATER && archetype <= DIORAMA_ARCHETYPE_HOT_SPRING)
-        return DIORAMA_SHAPE_WATER;
-    if (archetype == DIORAMA_ARCHETYPE_LEDGE)
-        return DIORAMA_SHAPE_LEDGE;
-    if (archetype == DIORAMA_ARCHETYPE_CLIFF || archetype == DIORAMA_ARCHETYPE_MOUND
-     || archetype == DIORAMA_ARCHETYPE_WALL_VOLUME)
-        return DIORAMA_SHAPE_CLIFF;
-    if (archetype == DIORAMA_ARCHETYPE_BRIDGE || archetype == DIORAMA_ARCHETYPE_DECK
-     || archetype == DIORAMA_ARCHETYPE_RAIL || archetype == DIORAMA_ARCHETYPE_SUPPORT)
-        return DIORAMA_SHAPE_BRIDGE;
-    if (archetype >= DIORAMA_ARCHETYPE_STAIRS_N && archetype <= DIORAMA_ARCHETYPE_STAIRS_DOWN_W)
-        return DIORAMA_SHAPE_STAIRS;
-    if (archetype == DIORAMA_ARCHETYPE_ROOF || archetype == DIORAMA_ARCHETYPE_TOP_SLAB
-     || archetype == DIORAMA_ARCHETYPE_AWNING)
-        return DIORAMA_SHAPE_ROOF;
-    if (archetype == DIORAMA_ARCHETYPE_BUILDING)
-        return DIORAMA_SHAPE_BUILDING_PART;
-    if (archetype == DIORAMA_ARCHETYPE_BILLBOARD || archetype == DIORAMA_ARCHETYPE_SIGNPOST
-     || archetype == DIORAMA_ARCHETYPE_POST)
-        return DIORAMA_SHAPE_BILLBOARD;
-    if (archetype >= DIORAMA_ARCHETYPE_CUTOUT)
-        return DIORAMA_SHAPE_CUTOUT;
-    return DIORAMA_SHAPE_FLAT;
-}
-
-static void ApplyAction(const struct DioramaGeneratedActionV2 *action,
-                        enum DioramaRuleSource source, int16_t priority,
-                        struct DioramaResolvedCell *resolved)
-{
-    size_t i;
-
-    memset(resolved, 0, sizeof(*resolved));
-    resolved->archetype = action->archetypeId;
-    resolved->semanticPool = action->poolId;
-    resolved->semanticProfile = action->profileId;
-    resolved->terrainClass = action->terrainClass;
-    resolved->shape = ArchetypeShape(action->archetypeId);
-    if (action->flags & ACTION_HAS_SHAPE)
-        resolved->shape = action->shape;
-    resolved->profile = DIORAMA_ROOF_NONE;
-    resolved->planeAxis = action->axis == 2 ? DIORAMA_PLANE_AXIS_Z
-                        : action->axis == 3 ? DIORAMA_PLANE_AXIS_CROSS
-                        : DIORAMA_PLANE_AXIS_X;
-    resolved->source = source;
-    resolved->rulePriority = priority;
-    resolved->groundMode = action->groundMode;
-    resolved->baseMetatileId = action->groundMode ? action->groundMetatile
-                                                   : DIORAMA_MATERIAL_METATILE_SELF;
-    resolved->groundHeight = action->groundOffset;
-    resolved->featureHeight = action->height;
-    resolved->topHeight = action->groundOffset + action->height;
-    for (i = 0; i < DIORAMA_MATERIAL_FACE_COUNT; i++)
-    {
-        resolved->materials[i].metatileId = DIORAMA_MATERIAL_METATILE_SELF;
-        resolved->materials[i].layer = i == DIORAMA_MATERIAL_FACE_PLANE
-            ? DIORAMA_MATERIAL_FOREGROUND : DIORAMA_MATERIAL_FULL;
-        resolved->materials[i].rotation = 0;
-        resolved->materials[i].flags = 0;
-    }
-    if (action->flags & 32)
-        for (i = 0; i < DIORAMA_MATERIAL_FACE_COUNT; i++)
-        {
-            resolved->materials[i].metatileId = action->faceMetatiles[i];
-            resolved->materials[i].layer = action->faceLayers[i];
-            resolved->materials[i].rotation = action->faceRotations[i];
-            resolved->materials[i].flags = action->faceFlags[i];
-        }
-}
-
 static uint8_t ResolveEffectiveElevation(const struct DioramaSceneSnapshot *snapshot,
                                          const struct DioramaCellSnapshot *cell)
 {
@@ -296,46 +253,6 @@ static void FinalizeSurfaces(const struct DioramaSceneSnapshot *snapshot,
     }
 }
 
-static uint8_t CellTileset(uint16_t layoutId, const struct DioramaCellSnapshot *cell,
-                           uint16_t *localMetatile)
-{
-    const struct DioramaGeneratedLayoutV2 *layout = FindLayout(layoutId);
-
-    if (layout == NULL)
-        return 0;
-    if (cell->metatileId < 0x200)
-    {
-        *localMetatile = cell->metatileId;
-        return layout->primaryTilesetId;
-    }
-    *localMetatile = cell->metatileId - 0x200;
-    return layout->secondaryTilesetId;
-}
-
-static bool ContainsU8(const uint8_t *values, uint32_t offset, uint16_t count, uint8_t value)
-{
-    uint16_t i;
-
-    if (count == 0)
-        return true;
-    for (i = 0; i < count; i++)
-        if (values[offset + i] == value)
-            return true;
-    return false;
-}
-
-static bool ContainsU16(const uint16_t *values, uint32_t offset, uint16_t count, uint16_t value)
-{
-    uint16_t i;
-
-    if (count == 0)
-        return true;
-    for (i = 0; i < count; i++)
-        if (values[offset + i] == value)
-            return true;
-    return false;
-}
-
 static int FindCell(const struct DioramaSceneSnapshot *snapshot,
                     const struct DioramaCellSnapshot *origin, int dx, int dy)
 {
@@ -354,157 +271,6 @@ static int FindCell(const struct DioramaSceneSnapshot *snapshot,
     return index;
 }
 
-static bool MatchNeighbor(const struct DioramaGeneratedNeighborV2 *rule,
-                          const struct DioramaCellSnapshot *cell)
-{
-    return (!(rule->flags & NEIGHBOR_HAS_METATILE) || rule->metatile == cell->metatileId)
-        && (!(rule->flags & NEIGHBOR_HAS_BEHAVIOR) || rule->behavior == cell->behavior)
-        && (!(rule->flags & NEIGHBOR_HAS_LAYER) || rule->layer == cell->layerType + 1)
-        && (!(rule->flags & NEIGHBOR_HAS_ELEVATION) || rule->elevation == cell->elevation);
-}
-
-static bool MatchSelector(const struct DioramaSceneSnapshot *snapshot,
-                          const struct DioramaCellSnapshot *cell, uint16_t layoutId,
-                          const struct DioramaGeneratedSelectorV2 *selector)
-{
-    static const int8_t sOffsets[][2] = {
-        { 0, 0 }, { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
-        { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 }
-    };
-    uint16_t localMetatile;
-    uint8_t tileset = CellTileset(layoutId, cell, &localMetatile);
-    uint16_t i;
-
-    (void)localMetatile;
-    if (!ContainsU8(gDioramaSelectorTilesetsV2, selector->tilesetOffset,
-                    selector->tilesetCount, tileset)
-     || !ContainsU16(gDioramaSelectorMetatilesV2, selector->metatileOffset,
-                     selector->metatileCount, cell->metatileId)
-     || !ContainsU8(gDioramaSelectorBehaviorsV2, selector->behaviorOffset,
-                    selector->behaviorCount, cell->behavior)
-     || !ContainsU8(gDioramaSelectorLayersV2, selector->layerOffset,
-                    selector->layerCount, cell->layerType + 1)
-     || !ContainsU8(gDioramaSelectorElevationsV2, selector->elevationOffset,
-                    selector->elevationCount, cell->elevation)
-     || !ContainsU8(gDioramaSelectorMapTypesV2, selector->mapTypeOffset,
-                    selector->mapTypeCount, snapshot->mapType))
-        return false;
-    /* Event predicates need a static event placement; they never guess from mutable globals. */
-    if (selector->eventKind != 0)
-        return false;
-    for (i = 0; i < selector->neighborCount; i++)
-    {
-        const struct DioramaGeneratedNeighborV2 *neighbor =
-            &gDioramaNeighborsV2[selector->neighborOffset + i];
-        int index = FindCell(snapshot, cell, sOffsets[neighbor->direction][0],
-                             sOffsets[neighbor->direction][1]);
-
-        if (index < 0 || !MatchNeighbor(neighbor, &snapshot->cells[index]))
-            return false;
-    }
-    return true;
-}
-
-static void ResolveBase(const struct DioramaSceneSnapshot *snapshot,
-                        const struct DioramaCellSnapshot *cell,
-                        struct DioramaResolvedCell *resolved)
-{
-    uint16_t layoutId = (cell->flags & DIORAMA_CELL_SOURCE_VALID)
-                      ? cell->sourceLayoutId : snapshot->mapLayoutId;
-    uint16_t localMetatile;
-    uint8_t tileset;
-    size_t i;
-
-    ApplyAction(&gDioramaDefaultActionV2, DIORAMA_RULE_SOURCE_FALLBACK, -32768, resolved);
-    tileset = CellTileset(layoutId, cell, &localMetatile);
-    if (tileset != 0 && tileset <= gDioramaTilesetV2Count
-     && gDioramaTilesetsV2[tileset - 1].id == tileset)
-        resolved->terrainClass = gDioramaTilesetsV2[tileset - 1].terrainClass;
-    for (i = 0; i < gDioramaTilesetPinV2Count; i++)
-        if (gDioramaTilesetPinsV2[i].tilesetId == tileset
-         && gDioramaTilesetPinsV2[i].metatile == localMetatile)
-        {
-            ApplyAction(&gDioramaTilesetPinsV2[i].action,
-                        DIORAMA_RULE_SOURCE_TILESET, 0, resolved);
-            return;
-        }
-    for (i = 0; i < gDioramaBehaviorRuleV2Count; i++)
-        if (gDioramaBehaviorRulesV2[i].behavior == cell->behavior)
-        {
-            uint8_t baseTerrainClass = resolved->terrainClass;
-
-            ApplyAction(&gDioramaBehaviorRulesV2[i].action,
-                        DIORAMA_RULE_SOURCE_BEHAVIOR, -1, resolved);
-            if (resolved->shape == DIORAMA_SHAPE_LEDGE
-             || resolved->shape == DIORAMA_SHAPE_STAIRS)
-                resolved->terrainClass = baseTerrainClass;
-            return;
-        }
-}
-
-static void ResolveContext(const struct DioramaSceneSnapshot *snapshot,
-                           const struct DioramaCellSnapshot *cell,
-                           struct DioramaResolvedCell *resolved)
-{
-    const struct DioramaGeneratedMapV2 *map;
-    uint8_t mapGroup = (cell->flags & DIORAMA_CELL_SOURCE_VALID)
-                     ? cell->sourceMapGroup : snapshot->mapGroup;
-    uint8_t mapNum = (cell->flags & DIORAMA_CELL_SOURCE_VALID)
-                   ? cell->sourceMapNum : snapshot->mapNum;
-    uint16_t layoutId = (cell->flags & DIORAMA_CELL_SOURCE_VALID)
-                      ? cell->sourceLayoutId : snapshot->mapLayoutId;
-    size_t i;
-
-    if (gDioramaContextualRuleV2Count == 0)
-        return;
-    map = FindMap(mapGroup, mapNum, layoutId);
-    for (i = 0; i < gDioramaContextualRuleV2Count; i++)
-    {
-        const struct DioramaGeneratedContextualRuleV2 *rule = &gDioramaContextualRulesV2[i];
-
-        if (rule->mapScopeId != 0 && (map == NULL || rule->mapScopeId != map->mapScopeId))
-            continue;
-        if (rule->priority <= resolved->rulePriority)
-            continue;
-        if (rule->selectorId == 0 || rule->selectorId > gDioramaSelectorV2Count)
-            continue;
-        if (MatchSelector(snapshot, cell, layoutId, &gDioramaSelectorsV2[rule->selectorId - 1]))
-            ApplyAction(&rule->action, DIORAMA_RULE_SOURCE_CONTEXT, rule->priority, resolved);
-    }
-}
-
-static bool MatchPattern(const struct DioramaSceneSnapshot *snapshot,
-                         const struct DioramaCellSnapshot *anchor,
-                         const struct DioramaGeneratedExactPatternV2 *pattern,
-                         int *indices)
-{
-    const struct DioramaGeneratedLayoutV2 *layout = FindLayout(anchor->sourceLayoutId);
-    uint16_t x;
-    uint16_t y;
-
-    if (layout == NULL || layout->primaryTilesetId != pattern->primaryTilesetId
-     || layout->secondaryTilesetId != pattern->secondaryTilesetId)
-        return false;
-    for (y = 0; y < pattern->height; y++)
-        for (x = 0; x < pattern->width; x++)
-        {
-            uint16_t offset = y * pattern->width + x;
-            int index = FindCell(snapshot, anchor, x, y);
-
-            if (index < 0
-             || snapshot->cells[index].sourceLayoutId != anchor->sourceLayoutId
-             || snapshot->cells[index].sourceMapGroup != anchor->sourceMapGroup
-             || snapshot->cells[index].sourceMapNum != anchor->sourceMapNum
-             || snapshot->cells[index].sourceMapX != anchor->sourceMapX + x
-             || snapshot->cells[index].sourceMapY != anchor->sourceMapY + y
-             || snapshot->cells[index].metatileId !=
-                 gDioramaPatternCellsV2[pattern->cellOffset + offset])
-                return false;
-            indices[offset] = index;
-        }
-    return true;
-}
-
 uint32_t DioramaRules_GetGeneration(void)
 {
     return gDioramaRulesGeneration;
@@ -513,6 +279,53 @@ uint32_t DioramaRules_GetGeneration(void)
 const char *DioramaRules_GetSha256(void)
 {
     return gDioramaRulesSha256;
+}
+
+const char *DioramaRules_ClassName(uint16_t classId)
+{
+    static const char *const sNames[] = {
+        NULL, "ground", "void", "water", "shallow-water", "waterfall", "current",
+        "hot-spring", "grass", "flower", "animated-cutout", "ledge", "mound",
+        "stairs", "stairs-n", "stairs-s", "stairs-e", "stairs-w", "stairs-down-n",
+        "stairs-down-s", "stairs-down-e", "stairs-down-w", "cliff", "wall",
+        "wall-volume", "roof", "top-slab", "bridge", "deck", "rail", "support",
+        "tree", "forest-wall", "shrub", "hedge", "rock", "boulder", "building",
+        "awning", "claim-only", "counter", "table", "desk", "bed", "bookcase",
+        "billboard", "cutout", "console", "signpost", "post", "stump", "round-hull",
+        "grouped-hull", "relief"
+    };
+
+    return classId < sizeof(sNames) / sizeof(sNames[0]) ? sNames[classId] : NULL;
+}
+
+const char *DioramaRules_ArtModeName(uint8_t artMode)
+{
+    static const char *const sNames[] = {
+        "flat", "top", "upright", "grass", "flower", "stair", "cutout"
+    };
+
+    return artMode < sizeof(sNames) / sizeof(sNames[0]) ? sNames[artMode] : NULL;
+}
+
+const char *DioramaRules_ClassifierSourceName(uint16_t sourceId)
+{
+    return sourceId != 0 && sourceId <= gDioramaClassifierSourceV2Count
+        && gDioramaClassifierSourcesV2[sourceId - 1].id == sourceId
+        ? gDioramaClassifierSourcesV2[sourceId - 1].name : NULL;
+}
+
+const char *DioramaRules_EvidenceDetails(uint16_t detailsId)
+{
+    return detailsId != 0 && detailsId <= gDioramaEvidenceDetailV2Count
+        && gDioramaEvidenceDetailsV2[detailsId - 1].id == detailsId
+        ? gDioramaEvidenceDetailsV2[detailsId - 1].details : NULL;
+}
+
+const char *DioramaRules_AmbiguityDetails(uint16_t detailsId)
+{
+    return detailsId != 0 && detailsId <= gDioramaAmbiguityV2Count
+        && gDioramaAmbiguitiesV2[detailsId - 1].id == detailsId
+        ? gDioramaAmbiguitiesV2[detailsId - 1].details : NULL;
 }
 
 const struct DioramaGeneratedBuildingTemplate *DioramaRules_GetBuildingTemplate(uint16_t id)
@@ -562,17 +375,14 @@ bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
 {
     if (snapshot == NULL || cell == NULL || resolved == NULL)
         return false;
-    ResolveBase(snapshot, cell, resolved);
-    ResolveContext(snapshot, cell, resolved);
+    InitializeResolved(resolved);
     ApplyStaticTerrain(cell, resolved);
-    if (resolved->source == DIORAMA_RULE_SOURCE_FALLBACK)
-    {
-        if (cell->collision != 0
-         || (cell->elevation != 0 && cell->elevation != 3 && cell->elevation != 15))
-            resolved->source = DIORAMA_RULE_SOURCE_COLLISION_ELEVATION;
-        else if (cell->layerType != 0)
-            resolved->source = DIORAMA_RULE_SOURCE_HEURISTIC;
-    }
+    if (cell->collision != 0)
+        resolved->evidenceFlags |= DIORAMA_EVIDENCE_COLLISION;
+    if (cell->elevation != 0)
+        resolved->evidenceFlags |= DIORAMA_EVIDENCE_ELEVATION;
+    if (cell->layerType != 0)
+        resolved->evidenceFlags |= DIORAMA_EVIDENCE_LAYER;
     FinalizeSurfaces(snapshot, cell, resolved);
     return true;
 }
@@ -582,7 +392,6 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
 {
     uint16_t count;
     uint16_t i;
-    size_t patternIndex;
 
     if (snapshot == NULL || resolvedCells == NULL)
         return;
@@ -591,36 +400,17 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
         count = DIORAMA_MAX_VISIBLE_CELLS;
     for (i = 0; i < count; i++)
     {
-        ResolveBase(snapshot, &snapshot->cells[i], &resolvedCells[i]);
-        ResolveContext(snapshot, &snapshot->cells[i], &resolvedCells[i]);
-    }
-    for (patternIndex = 0; patternIndex < gDioramaExactPatternV2Count; patternIndex++)
-    {
-        const struct DioramaGeneratedExactPatternV2 *pattern = &gDioramaExactPatternsV2[patternIndex];
-        const struct DioramaGeneratedMapV2 *map = FindMap(snapshot->mapGroup, snapshot->mapNum,
-                                                          snapshot->mapLayoutId);
-        int indices[32 * 32];
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
 
-        if (pattern->mapScopeId != 0 && (map == NULL || pattern->mapScopeId != map->mapScopeId))
-            continue;
-        for (i = 0; i < count; i++)
-        {
-            uint16_t offset;
-
-            if (!MatchPattern(snapshot, &snapshot->cells[i], pattern, indices))
-                continue;
-            for (offset = 0; offset < pattern->width * pattern->height; offset++)
-                if (gDioramaPatternClaimsV2[pattern->claimOffset + offset]
-                 && pattern->priority > resolvedCells[indices[offset]].rulePriority)
-                {
-                    ApplyAction(&pattern->action, DIORAMA_RULE_SOURCE_PATTERN,
-                                pattern->priority, &resolvedCells[indices[offset]]);
-                    resolvedCells[indices[offset]].claimOwner = pattern->id;
-                }
-        }
+        InitializeResolved(&resolvedCells[i]);
+        ApplyStaticTerrain(cell, &resolvedCells[i]);
+        if (cell->collision != 0)
+            resolvedCells[i].evidenceFlags |= DIORAMA_EVIDENCE_COLLISION;
+        if (cell->elevation != 0)
+            resolvedCells[i].evidenceFlags |= DIORAMA_EVIDENCE_ELEVATION;
+        if (cell->layerType != 0)
+            resolvedCells[i].evidenceFlags |= DIORAMA_EVIDENCE_LAYER;
     }
-    for (i = 0; i < count; i++)
-        ApplyStaticTerrain(&snapshot->cells[i], &resolvedCells[i]);
     for (i = 0; i < count; i++)
         resolvedCells[i].effectiveElevation = snapshot->cells[i].elevation > 0
                                           && snapshot->cells[i].elevation < 15
@@ -680,12 +470,8 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
 
 float DioramaRules_DefaultGroundHeight(uint8_t behavior)
 {
-    size_t i;
-
-    for (i = 0; i < gDioramaBehaviorRuleV2Count; i++)
-        if (gDioramaBehaviorRulesV2[i].behavior == behavior)
-            return gDioramaBehaviorRulesV2[i].action.groundOffset;
-    return gDioramaDefaultActionV2.groundOffset;
+    (void)behavior;
+    return 0.0f;
 }
 
 float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,

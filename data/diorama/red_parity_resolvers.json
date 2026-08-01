@@ -3,21 +3,21 @@
   "responsibilities": [
     {
       "id": "flat-fallback",
-      "disposition": "keep-neutral-consumer",
-      "owner": "src/diorama/rules.c:ResolveBase",
-      "consumer": "src/diorama/rules.c:DioramaRules_ResolveCell"
+      "disposition": "implemented-in-R2",
+      "owner": "tools/diorama_rules/tile_shape.py:TileShapeClassifier.classify_cell",
+      "consumer": "tools/diorama_rules/compile_rules.py:compile_data"
     },
     {
       "id": "base-shape",
-      "disposition": "replace-in-R2",
-      "owner": null,
-      "consumer": null
+      "disposition": "implemented-in-R2",
+      "owner": "tools/diorama_rules/tile_shape.py:TileShapeClassifier.classify_layout",
+      "consumer": "src/diorama/rules.c:ApplyStaticTerrain"
     },
     {
       "id": "base-height",
-      "disposition": "replace-in-R2",
-      "owner": null,
-      "consumer": null
+      "disposition": "implemented-in-R2",
+      "owner": "tools/diorama_rules/profiles.py:NOMINAL_HEIGHTS",
+      "consumer": "src/diorama/rules.c:ApplyStaticTerrain"
     },
     {
       "id": "manual-relative-topology",

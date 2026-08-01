@@ -55,15 +55,18 @@ static void TestMapSupport(void)
     assert(gDioramaTilesetV2Count == 75);
     assert(gDioramaLayoutV2Count == 441);
     assert(gDioramaMapV2Count == 518);
-    assert(gDioramaTerrainV2Count == 0);
+    assert(gDioramaTerrainV2Count == 324579);
+    assert(gDioramaAmbiguityV2Count == 95);
+    size_t terrainOffset = 0;
     for (size_t i = 0; i < gDioramaLayoutV2Count; i++)
     {
         const struct DioramaGeneratedLayoutV2 *layout = &gDioramaLayoutsV2[i];
 
         assert(layout->width != 0 && layout->height != 0);
-        assert(layout->terrainRecordOffset == 0);
-        assert(layout->terrainRecordCount == 0);
+        assert(layout->terrainRecordOffset == terrainOffset);
+        terrainOffset += layout->terrainRecordCount;
     }
+    assert(terrainOffset == gDioramaTerrainV2Count);
     assert(DioramaRules_GetMapProfile(0, 9, 10, &profile));
     assert(profile.cameraProfile == DIORAMA_CAMERA_EXTERIOR);
     assert(profile.cameraFocalLength == 130.0f);
@@ -72,33 +75,39 @@ static void TestMapSupport(void)
     assert(DioramaRules_GetUnsupportedReason(0, 9, 10) == NULL);
 }
 
-static void TestNoMapBuildingOrPinGeometry(void)
+static void TestCompiledPinAndGuards(void)
 {
     struct DioramaResolvedCell resolved;
     struct DioramaCellSnapshot cell;
 
-    cell = MakeCell(7, 8, 0x003, MB_NORMAL);
+    cell = MakeCell(19, 7, 4, MB_NORMAL);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
-    assert(resolved.source != DIORAMA_RULE_SOURCE_MAP);
-    assert(resolved.structureId == 0);
-
-    cell = MakeCell(2, 4, 0x208, MB_NORMAL);
-    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
-    assert(resolved.source != DIORAMA_RULE_SOURCE_MAP);
-    assert(resolved.source != DIORAMA_RULE_SOURCE_BUILDING);
-    assert(resolved.structureId == 0);
-
-    cell = MakeCell(10, 10, 0x1CE, MB_TALL_GRASS);
-    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
-    assert(resolved.source != DIORAMA_RULE_SOURCE_TILESET);
+    assert(resolved.source == DIORAMA_RULE_SOURCE_TILESET);
+    assert(strcmp(DioramaRules_ClassName(resolved.classifierClass), "flower") == 0);
+    assert(resolved.artMode == DIORAMA_ART_FLOWER);
+    assert(strcmp(DioramaRules_ArtModeName(resolved.artMode), "flower") == 0);
+    assert(strcmp(DioramaRules_ClassifierSourceName(resolved.classifierSource),
+                  "pin:gTileset_General:4") == 0);
+    assert(strstr(DioramaRules_EvidenceDetails(resolved.evidenceDetailsId),
+                  "animation:gTilesetAnims_General_Flower") != NULL);
+    assert(resolved.evidenceFlags & DIORAMA_EVIDENCE_ANIMATION);
     assert(resolved.shape == DIORAMA_SHAPE_FLAT);
-    assert(resolved.structureId == 0);
+    assert(resolved.featureHeight == 0.0f);
 
-    cell = MakeCell(16, 8, 0x248, MB_NORMAL);
+    cell = MakeCell(19, 7, 5, MB_NORMAL);
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
-    assert(resolved.source != DIORAMA_RULE_SOURCE_BUILDING);
-    assert(resolved.shape == DIORAMA_SHAPE_FLAT);
-    assert(resolved.structureId == 0);
+    assert(resolved.source == DIORAMA_RULE_SOURCE_FALLBACK);
+    assert(strcmp(DioramaRules_ClassName(resolved.classifierClass), "ground") == 0);
+
+    cell = MakeCell(19, 7, 4, MB_NORMAL);
+    cell.sourceLayoutId = 11;
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.source == DIORAMA_RULE_SOURCE_FALLBACK);
+
+    cell = MakeCell(19, 7, 4, MB_NORMAL);
+    cell.sourceMapX = 20;
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.source == DIORAMA_RULE_SOURCE_FALLBACK);
 }
 
 static void TestNeutralFallbackWithoutCompiledRules(void)
@@ -124,6 +133,7 @@ static void TestNeutralFallbackWithoutCompiledRules(void)
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
     {
         cell = MakeCell(10, 10, 2, cases[i].behavior);
+        cell.flags = 0;
         cell.collision = cases[i].collision;
         cell.layerType = cases[i].layerType;
         assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
@@ -132,7 +142,45 @@ static void TestNeutralFallbackWithoutCompiledRules(void)
         assert(resolved.groundHeight == 0.0f);
         assert(resolved.topHeight == 0.0f);
         assert(resolved.featureHeight == 0.0f);
+        assert(resolved.source == DIORAMA_RULE_SOURCE_FALLBACK);
+        if (cases[i].collision)
+            assert(resolved.evidenceFlags & DIORAMA_EVIDENCE_COLLISION);
+        if (cases[i].layerType)
+            assert(resolved.evidenceFlags & DIORAMA_EVIDENCE_LAYER);
     }
+}
+
+static void TestNominalFeatureHeights(void)
+{
+    struct DioramaResolvedCell resolved;
+    struct DioramaCellSnapshot cell;
+
+    sSnapshot.mapGroup = 0;
+    sSnapshot.mapNum = 0;
+    sSnapshot.mapLayoutId = 1;
+    cell = MakeCell(22, 2, 176, MB_POND_WATER);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_WATER);
+    assert(resolved.groundHeight == -0.125f);
+    assert(resolved.featureHeight == 0.0f);
+    assert(resolved.topHeight == -0.125f);
+
+    sSnapshot.mapNum = 5;
+    sSnapshot.mapLayoutId = 6;
+    cell = MakeCell(48, 9, 135, MB_JUMP_SOUTH);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_LEDGE);
+    assert(resolved.groundHeight == 0.375f);
+    assert(resolved.featureHeight == 0.375f);
+
+    sSnapshot.mapNum = 23;
+    sSnapshot.mapLayoutId = 24;
+    cell = MakeCell(29, 6, 874, MB_STAIRS_OUTSIDE_ABANDONED_SHIP);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_STAIRS);
+    assert(resolved.featureHeight == 1.0f);
+    assert(resolved.topHeight == 1.0f);
+    InitLittleroot();
 }
 
 static void TestGridAndConnectedCoordinates(void)
@@ -232,8 +280,9 @@ int main(void)
 {
     InitLittleroot();
     TestMapSupport();
-    TestNoMapBuildingOrPinGeometry();
+    TestCompiledPinAndGuards();
     TestNeutralFallbackWithoutCompiledRules();
+    TestNominalFeatureHeights();
     TestGridAndConnectedCoordinates();
     TestContextualGameplayPlanes();
     TestGenericMesherUtilities();

@@ -29,6 +29,8 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertEqual(len(self.data["tilesets"]), 75)
         self.assertEqual([row["id"] for row in self.data["tilesets"]], list(range(1, 76)))
         self.assertEqual(len(self.data["layouts"]), 441)
+        self.assertEqual(sum(row["width"] * row["height"] for row in self.data["layouts"]),
+                         sum(row["terrainRecordCount"] for row in self.data["layouts"]))
         self.assertEqual([row["id"] for row in self.data["layouts"]], list(range(1, 442)))
         self.assertEqual(len(self.data["maps"]), 518)
         self.assertEqual(len(self.data["tilesets"]), 75)
@@ -50,28 +52,31 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertTrue(all(row["unsupportedReason"] for row in self.data["maps"]
                             if not row["supported"]))
 
-    def test_repository_layouts_have_no_generated_terrain(self):
+    def test_repository_layouts_have_compiled_classifier_terrain(self):
         for layout in self.data["layouts"]:
             self.assertGreater(layout["width"], 0)
             self.assertGreater(layout["height"], 0)
-            self.assertEqual(layout["terrainRecordOffset"], 0)
-            self.assertEqual(layout["terrainRecordCount"], 0)
-            self.assertEqual(layout["terrainRecords"], [])
-        self.assertEqual(sum(row["terrainRecordCount"] for row in self.data["layouts"]), 0)
+        self.assertGreater(sum(row["terrainRecordCount"] for row in self.data["layouts"]), 0)
+        self.assertTrue(self.data["ambiguities"])
         self.assertEqual(render_c(self.data), render_c(compile_data(ROOT)))
 
-    def test_repository_default_has_no_authored_rules(self):
-        for key in ("behaviorRules", "tilesetPins", "profiles", "contextualRules",
-                    "exactPatterns"):
+    def test_repository_has_authoritative_general_flower_pin(self):
+        for key in ("behaviorRules", "profiles", "contextualRules", "exactPatterns"):
             self.assertEqual(self.data[key], [])
+        self.assertEqual(len(self.data["tilesetPins"]), 1)
+        pin = self.data["tilesetPins"][0]
+        self.assertEqual((pin["tileset"], pin["metatile"], pin["placementCount"]),
+                         ("gTileset_General", 4, 615))
+        self.assertEqual((pin["action"]["archetype"], pin["action"]["pool"]),
+                         ("flower", "vegetation"))
+        self.assertIn("General_Flower", pin["reason"])
         self.assertTrue(all(row["contextualRules"] == [] for row in self.data["maps"]))
         self.assertTrue(all(row["exactPatterns"] == [] for row in self.data["maps"]))
-        self.assertIn("const size_t gDioramaTerrainV2Count = 0;", render_c(self.data))
 
     def test_sha256_is_canonical_and_covers_every_ir_section(self):
         canonical_keys = ("schemaVersion", "tilesets", "layouts", "pools", "profiles", "default",
                            "behaviorRules", "tilesetPins", "contextualRules", "exactPatterns",
-                           "maps")
+                           "maps", "evidenceDetails", "ambiguities", "classifierSources")
         canonical = {key: self.data[key] for key in canonical_keys}
         encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"),
                              ensure_ascii=True).encode("ascii")
@@ -257,13 +262,12 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertIn("struct DioramaGeneratedTerrainV2", header)
         self.assertIn("role, terrainClass", header)
         self.assertIn("struct DioramaGeneratedMapV2", header)
-        self.assertEqual(source.count("gTileset_"), 75)
-        self.assertIn("gDioramaBehaviorRulesV2", source)
-        self.assertIn("gDioramaBehaviorRuleV2Count", source)
+        self.assertTrue(all(f'"{row["symbol"]}"' in source for row in self.data["tilesets"]))
         self.assertIn("gDioramaTerrainV2Count", source)
+        self.assertIn("gDioramaAmbiguitiesV2", source)
         self.assertIn(self.data["sha256"], source)
 
-    def test_c_contract_packs_every_normalized_g3_section_and_map_scope(self):
+    def test_c_contract_excludes_compiler_only_precedence_tables(self):
         packed = copy.deepcopy(self.data)
         packed["profiles"] = [{"id": "flat-cell", "archetype": "ground",
                                "masks": {"claim": {"width": 16, "height": 1,
@@ -296,19 +300,19 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         packed["maps"][0]["contextualRules"] = [{**rule, "id": "local-rule"}]
         packed["maps"][0]["exactPatterns"] = [{**pattern, "id": "local-pattern"}]
         header, source = render_header(), render_c(packed)
-        for name in ("Pools", "Profiles", "Masks", "MaskRows", "Samples", "TilesetPins",
-                      "Selectors", "Neighbors", "ContextualRules", "PatternCells",
-                      "PatternClaims", "ExactPatterns"):
+        for name in ("Pools", "Profiles", "Masks", "MaskRows", "Samples"):
             self.assertIn(f"gDiorama{name}V2", header)
             self.assertIn(f"gDiorama{name}V2", source)
+        for name in ("TilesetPins", "Selectors", "Neighbors", "ContextualRules",
+                     "PatternCells", "PatternClaims", "ExactPatterns"):
+            self.assertNotIn(f"gDiorama{name}V2", header)
+            self.assertNotIn(f"gDiorama{name}V2", source)
         for content in ("packed-rule", "local-rule", "packed-pattern", "local-pattern",
                         "berry-tree"):
-            self.assertIn(content, source)
+            self.assertNotIn(content, source)
         self.assertNotIn("EventPreset", header)
         self.assertNotIn("EventPreset", source)
         self.assertIn("UINT64_C(0xFFFF)", source)
-        self.assertIn("{ 65535, 65535, 65535, 7, 65535, 65535 }", source)
-        self.assertIn("{ 1, 255, 0, 0, 0, 2 }", source)
 
 
 if __name__ == "__main__":

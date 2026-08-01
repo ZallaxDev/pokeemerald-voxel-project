@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "kind": "tileset",
+  "tileset": "gTileset_General",
+  "pins": [
+    {
+      "metatile": 4,
+      "reason": "Authoritative General flower metatile; its subtiles reference the exact General_Flower animation slot.",
+      "action": {
+        "archetype": "flower",
+        "pool": "vegetation",
+        "groundPolicy": { "mode": "automatic" }
+      }
+    }
+  ]
+}

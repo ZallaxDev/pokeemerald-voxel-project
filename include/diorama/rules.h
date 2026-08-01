@@ -182,7 +182,33 @@ enum DioramaRuleSource
     DIORAMA_RULE_SOURCE_FALLBACK,
     DIORAMA_RULE_SOURCE_PATTERN,
     DIORAMA_RULE_SOURCE_CONTEXT,
-    DIORAMA_RULE_SOURCE_EVENT
+    DIORAMA_RULE_SOURCE_EVENT,
+    DIORAMA_RULE_SOURCE_ANIMATION
+};
+
+enum DioramaArtMode
+{
+    DIORAMA_ART_FLAT,
+    DIORAMA_ART_TOP,
+    DIORAMA_ART_UPRIGHT,
+    DIORAMA_ART_GRASS,
+    DIORAMA_ART_FLOWER,
+    DIORAMA_ART_STAIR,
+    DIORAMA_ART_CUTOUT
+};
+
+enum DioramaClassifierEvidence
+{
+    DIORAMA_EVIDENCE_RULE = 1u << 0,
+    DIORAMA_EVIDENCE_SELECTOR = 1u << 1,
+    DIORAMA_EVIDENCE_TILESET = 1u << 2,
+    DIORAMA_EVIDENCE_METATILE = 1u << 3,
+    DIORAMA_EVIDENCE_BEHAVIOR = 1u << 4,
+    DIORAMA_EVIDENCE_ANIMATION = 1u << 5,
+    DIORAMA_EVIDENCE_COLLISION = 1u << 6,
+    DIORAMA_EVIDENCE_ELEVATION = 1u << 7,
+    DIORAMA_EVIDENCE_LAYER = 1u << 8,
+    DIORAMA_EVIDENCE_PATTERN = 1u << 9
 };
 
 enum DioramaCameraProfile
@@ -219,10 +245,19 @@ struct DioramaResolvedCell
     uint8_t semanticPool;
     uint8_t semanticProfile;
     uint8_t terrainClass;
+    uint8_t artMode;
+    uint8_t authored;
     uint8_t groundMode;
     uint8_t effectiveElevation;
     uint8_t surfaceCount;
     uint16_t baseMetatileId;
+    uint16_t classifierClass;
+    uint16_t classifierSource;
+    uint16_t evidenceFlags;
+    uint16_t ambiguityFlags;
+    uint16_t evidenceDetailsId;
+    uint16_t ambiguityDetailsId;
+    float classifierConfidence;
     uint16_t claimOwner;
     int16_t rulePriority;
     uint16_t structureId;
@@ -316,6 +351,11 @@ struct DioramaGeneratedBuildingPlacement
 
 uint32_t DioramaRules_GetGeneration(void);
 const char *DioramaRules_GetSha256(void);
+const char *DioramaRules_ClassName(uint16_t classId);
+const char *DioramaRules_ArtModeName(uint8_t artMode);
+const char *DioramaRules_ClassifierSourceName(uint16_t sourceId);
+const char *DioramaRules_EvidenceDetails(uint16_t detailsId);
+const char *DioramaRules_AmbiguityDetails(uint16_t detailsId);
 const struct DioramaGeneratedBuildingTemplate *DioramaRules_GetBuildingTemplate(uint16_t id);
 bool DioramaRules_IsMapSupported(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId);
 const char *DioramaRules_GetUnsupportedReason(uint8_t mapGroup, uint8_t mapNum,

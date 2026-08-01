@@ -14,6 +14,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
+from emerald_compositor import load_animation_slots
+from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
+from tile_shape import ClassificationError, TileShapeClassifier
 
 
 SCHEMA_VERSION = 2
@@ -29,6 +32,8 @@ ARCHETYPES = (
 )
 TERRAIN_CLASSES = ("ground", "path", "sand", "ash", "rock", "pavement",
                    "wood", "carpet", "void", "water")
+CLASS_NAMES = tuple(NOMINAL_HEIGHTS)
+ART_MODE_NAMES = ("flat", "top", "upright", "grass", "flower", "stair", "cutout")
 TERRAIN_SHAPES = ("flat", "hidden", "water", "ledge", "cliff", "stairs",
                   "bridge", "cutout", "extruded", "roof", "building-part")
 LAYERS = ("normal", "covered", "split")
@@ -444,18 +449,44 @@ def _patterns(values: object, path: str, tilesets: dict[str, TilesetInfo], pools
     return sorted(output, key=lambda item: (-item["priority"], item["id"]))
 
 
+def _animation_provenance(root: Path, tilesets: dict[str, TilesetInfo],
+                          layouts: list[dict]) -> dict[tuple[str, str, int], tuple[str, ...]]:
+    slots_by_callback = load_animation_slots(root)
+    result = {}
+    pairs = sorted({(layout["primary_tileset"], layout["secondary_tileset"])
+                    for layout in layouts if layout["primary_tileset"] in tilesets
+                    and layout["secondary_tileset"] in tilesets})
+    metatiles = {symbol: (root / info.metatiles_root / "metatiles.bin").read_bytes()
+                 for symbol, info in tilesets.items()}
+    for primary, secondary in pairs:
+        pair = primary + "|" + secondary
+        for symbol in (primary, secondary):
+            for metatile, values in enumerate(struct.iter_unpack("<8H", metatiles[symbol])):
+                sources = set()
+                for value in values:
+                    tile = value & 0x3FF
+                    role = "secondary" if tile >= 0x200 else "primary"
+                    graphics_symbol = secondary if role == "secondary" else primary
+                    local_tile = tile - 0x200 if role == "secondary" else tile
+                    for slot in slots_by_callback.get(tilesets[graphics_symbol].callback, ()):
+                        if slot.role == role and slot.local_start <= local_tile \
+                                < slot.local_start + slot.tile_count:
+                            sources.add(slot.source)
+                if sources:
+                    result[(pair, symbol, metatile)] = tuple(sorted(sources))
+    return result
+
+
 def _load_cells(root: Path, layouts: list[dict], tilesets: dict[str, TilesetInfo],
-                behavior_names: dict[int, str]) -> tuple[dict[str, tuple[dict, ...]], Counter, Counter]:
+                 behavior_names: dict[int, str]) -> tuple[dict[str, tuple[dict, ...]], Counter, Counter]:
     attributes = {}
     for symbol, info in tilesets.items():
         raw = (root / info.metatiles_root / "metatile_attributes.bin").read_bytes()
         attributes[symbol] = tuple(value for (value,) in struct.iter_unpack("<H", raw))
+    animations = _animation_provenance(root, tilesets, layouts)
     cells_by_layout, behavior_counts, pin_counts = {}, Counter(), Counter()
     for layout in layouts:
         primary, secondary = layout["primary_tileset"], layout["secondary_tileset"]
-        if primary not in tilesets or secondary not in tilesets:
-            cells_by_layout[layout["id"]] = ()
-            continue
         raw = (root / layout["blockdata_filepath"]).read_bytes()
         count = layout["width"] * layout["height"]
         if len(raw) < count * 2 or len(raw) % 2:
@@ -465,14 +496,28 @@ def _load_cells(root: Path, layouts: list[dict], tilesets: dict[str, TilesetInfo
             metatile = entry & 0x3FF
             symbol = secondary if metatile >= 0x200 else primary
             local_id = metatile - 0x200 if metatile >= 0x200 else metatile
+            if symbol not in tilesets:
+                cells.append({"metatile": metatile, "tileset": symbol,
+                              "localMetatile": local_id, "behavior": None,
+                              "behaviorId": None, "layerType": None,
+                              "collision": (entry >> 10) & 3,
+                              "elevation": (entry >> 12) & 15,
+                              "missingTileset": True})
+                continue
             if local_id >= tilesets[symbol].metatile_count:
                 raise RuleError(f"{layout['id']}: metatile {metatile} exceeds {symbol}")
             attribute = attributes[symbol][local_id]
             behavior_id, layer_id = attribute & 0xFF, (attribute >> 12) & 0xF
             behavior = behavior_names.get(behavior_id)
+            animation_sources = animations.get((primary + "|" + secondary, symbol, local_id), ())
             cell = {"metatile": metatile, "tileset": symbol, "localMetatile": local_id,
-                     "behavior": behavior, "layerType": LAYERS[layer_id] if layer_id < 3 else None,
+                     "behavior": behavior, "behaviorId": behavior_id,
+                     "layerType": LAYERS[layer_id] if layer_id < 3 else None,
                      "collision": (entry >> 10) & 3, "elevation": (entry >> 12) & 15}
+            if animation_sources:
+                cell["animationSources"] = animation_sources
+                if any("Flower" in source for source in animation_sources):
+                    cell["animationClass"] = "flower"
             cells.append(cell)
             pin_counts[(symbol, local_id)] += 1
             if behavior:
@@ -649,7 +694,7 @@ def _parse_pin_files(root: Path, tilesets: dict[str, TilesetInfo], pools: set[st
         for index, raw in enumerate(array(data.get("pins"), f"{path}.pins")):
             item_path = f"{path}.pins[{index}]"
             item = _object(raw, item_path)
-            _unknown(item, {"metatile", "action", "allowedUnused"}, item_path)
+            _unknown(item, {"metatile", "action", "reason", "allowedUnused"}, item_path)
             metatile = _integer(item.get("metatile"), f"{item_path}.metatile", 0,
                                 tilesets[symbol].metatile_count - 1)
             if (symbol, metatile) in seen:
@@ -660,10 +705,100 @@ def _parse_pin_files(root: Path, tilesets: dict[str, TilesetInfo], pools: set[st
             if not count and allowance is None:
                 raise RuleError(f"{item_path}: dead pin has no placements; add structured allowedUnused")
             action = _action(item.get("action"), f"{item_path}.action", pools, profiles)
+            reason = item.get("reason")
+            if reason is not None and (not isinstance(reason, str) or not reason.strip()):
+                raise RuleError(f"{item_path}.reason: must be a non-empty string")
             output.append({"tileset": symbol, "metatile": metatile,
-                           "action": action,
-                           "placementCount": count, "allowedUnused": allowance})
+                            "action": action,
+                            "placementCount": count, "reason": reason,
+                            "allowedUnused": allowance})
     return sorted(output, key=lambda item: (item["tileset"], item["metatile"]))
+
+
+def _with_animation_provenance(shape: TileShape, cell: dict) -> TileShape:
+    sources = tuple(cell.get("animationSources", ()))
+    if not sources:
+        return shape
+    evidence = shape.evidence + tuple(f"animation:{source}" for source in sources)
+    source = shape.source
+    if (cell.get("animationClass") == "flower" and shape.class_name == "flower"
+            and not source.startswith(("pin:", "context:"))):
+        source = "animation:" + next(item for item in sources if "Flower" in item)
+    return TileShape(shape.class_name, shape.height, shape.art_mode, shape.pool,
+                     shape.authored, source, shape.confidence, evidence,
+                     shape.ambiguity, shape.prop_ground)
+
+
+def _apply_patterns(shapes: tuple[TileShape, ...], layout: dict,
+                    cells: tuple[dict, ...], patterns: list[dict]) -> tuple[TileShape, ...]:
+    output = list(shapes)
+    claims = {}
+    for pattern in patterns:
+        if (layout["primary_tileset"] != pattern["tilesets"]["primary"]
+                or layout["secondary_tileset"] != pattern["tilesets"]["secondary"]):
+            continue
+        width = pattern["dimensions"]["width"]
+        for x, y in _pattern_origins(pattern, layout, {layout["id"]: cells}):
+            for row, mask in enumerate(pattern["claimMask"]):
+                for column, claimed in enumerate(mask):
+                    if claimed != "1":
+                        continue
+                    offset = (y + row) * layout["width"] + x + column
+                    previous = claims.get(offset)
+                    key = (pattern["priority"], pattern["id"])
+                    if previous is None or key > previous:
+                        claims[offset] = key
+                        output[offset] = shape_from_action(
+                            pattern["action"], source=f"pattern:{pattern['id']}",
+                            authored=True, confidence=1.0,
+                            evidence=(f"pattern:{pattern['id']}",))
+    return tuple(output)
+
+
+def _shape_geometry(class_name: str) -> tuple[str, str, str]:
+    if class_name == "void" or class_name == "claim-only":
+        return "hidden", class_name, "void"
+    if class_name in ("water", "shallow-water", "waterfall", "current", "hot-spring"):
+        return "water", class_name, "water"
+    if class_name == "ledge":
+        return "ledge", class_name, "rock"
+    if class_name.startswith("stairs"):
+        return "stairs", "stairs-n" if class_name == "stairs" else class_name, "rock"
+    if class_name in ("cliff", "mound", "wall", "wall-volume"):
+        archetype = "wall-volume" if class_name == "wall" else class_name
+        return "cliff", archetype, "rock"
+    if class_name in ("bridge", "deck", "rail", "support"):
+        return "bridge", class_name, "wood"
+    return "flat", class_name if class_name in ARCHETYPES else "ground", "ground"
+
+
+def _evidence_flags(values: tuple[str, ...]) -> int:
+    prefixes = (("rule:", 1 << 0), ("selector:", 1 << 1), ("tileset:", 1 << 2),
+                ("metatile:", 1 << 3), ("behavior:", 1 << 4),
+                ("animation:", 1 << 5), ("collision:", 1 << 6),
+                ("elevation:", 1 << 7), ("layerType:", 1 << 8),
+                ("pattern:", 1 << 9))
+    return sum(flag for prefix, flag in prefixes if any(value.startswith(prefix) for value in values))
+
+
+def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
+                    map_group: int = 0xFF, map_number: int = 0xFF) -> dict:
+    geometry, archetype, terrain_class = _shape_geometry(shape.class_name)
+    prop = shape.prop_ground.as_dict()
+    return {
+        "cellOffset": cell_offset, "expectedMetatile": cell["metatile"],
+        "mapGroup": map_group, "mapNumber": map_number,
+        "class": shape.class_name, "heightQ16": round(shape.height * 16),
+        "artMode": shape.art_mode, "pool": shape.pool, "authored": shape.authored,
+        "source": shape.source, "confidence": shape.confidence,
+        "evidence": list(shape.evidence), "evidenceFlags": _evidence_flags(shape.evidence),
+        "ambiguity": list(shape.ambiguity),
+        "ambiguityFlags": 1 if shape.ambiguity else 0,
+        "propGroundMode": prop["mode"], "propGroundMetatile": prop.get("metatile", 0xFFFF),
+        "shape": geometry, "archetype": archetype, "terrainClass": terrain_class,
+        "axis": "x", "cliffEdgeMask": 0, "cliffBaseMask": 0,
+        "cliffTransitionMask": 0, "cliffCornerMask": 0,
+    }
 
 
 def compile_data(root: Path) -> dict:
@@ -859,19 +994,88 @@ def compile_data(root: Path) -> dict:
                                         "focalLength": camera[2]}, "groundPolicy": ground,
                             "contextualRules": configured["contextualRules"] if configured else [],
                             "exactPatterns": configured["exactPatterns"] if configured else []})
+    map_catalog_by_symbol = {row["symbol"]: row for row in map_catalog}
+    ambiguity_counts = Counter()
+    ambiguity_flags = defaultdict(int)
+    evidence_details = set()
+    source_names = set()
+    terrain_offset = 0
+    global_classifier = TileShapeClassifier(
+        contextual_rules=contextual_rules, tileset_pins=pins,
+        behavior_rules=behavior_rules, default_action=default_action)
+    for layout, catalog_row in zip(layouts, layout_catalog):
+        layout_cells = cells[layout["id"]]
+        records = []
+        if layout_cells:
+            wildcard = global_classifier.classify_layout(
+                layout_cells, layout["width"], layout["height"])
+            wildcard = _apply_patterns(wildcard, layout, layout_cells, patterns)
+            wildcard = tuple(_with_animation_provenance(shape, cell)
+                             for shape, cell in zip(wildcard, layout_cells))
+            for offset, (cell, shape) in enumerate(zip(layout_cells, wildcard)):
+                records.append(_terrain_record(offset, cell, shape))
+                if not shape.authored and shape.confidence == 0.0:
+                    ambiguity_counts[shape.ambiguity] += 1
+                    ambiguity_flags[shape.ambiguity] |= _evidence_flags(shape.evidence)
+            for map_row in sorted(maps_by_layout.get(layout["id"], []),
+                                  key=lambda item: (item["group"], item["number"])):
+                configured = explicit_maps.get(map_row["symbol"])
+                local_rules = configured["contextualRules"] if configured else []
+                classifier = TileShapeClassifier(
+                    contextual_rules=tuple(local_rules) + tuple(contextual_rules),
+                    tileset_pins=pins, behavior_rules=behavior_rules,
+                    default_action=default_action)
+                coordinate_events = {
+                    (x, y): values for (symbol, x, y), values in event_cells.items()
+                    if symbol == map_row["symbol"]
+                }
+                exact = classifier.classify_layout(
+                    layout_cells, layout["width"], layout["height"],
+                    map_type=map_row["mapType"], events=coordinate_events)
+                exact_patterns = patterns + (configured["exactPatterns"] if configured else [])
+                exact = _apply_patterns(exact, layout, layout_cells, exact_patterns)
+                exact = tuple(_with_animation_provenance(shape, cell)
+                              for shape, cell in zip(exact, layout_cells))
+                scope = map_catalog_by_symbol[map_row["symbol"]]
+                for offset, (cell, shape, base) in enumerate(zip(layout_cells, exact, wildcard)):
+                    if shape.as_dict() == base.as_dict():
+                        continue
+                    records.append(_terrain_record(offset, cell, shape,
+                                                   scope["group"], scope["number"]))
+                    if not shape.authored and shape.confidence == 0.0:
+                        ambiguity_counts[shape.ambiguity] += 1
+                        ambiguity_flags[shape.ambiguity] |= _evidence_flags(shape.evidence)
+        records.sort(key=lambda row: (row["cellOffset"],
+                                      row["mapGroup"] == 0xFF,
+                                      row["mapGroup"], row["mapNumber"]))
+        for record in records:
+            evidence_details.add(tuple(record["evidence"]))
+            source_names.add(record["source"])
+        catalog_row["terrainRecordOffset"] = terrain_offset
+        catalog_row["terrainRecordCount"] = len(records)
+        catalog_row["terrainRecords"] = records
+        terrain_offset += len(records)
+    evidence_catalog = [{"id": index, "details": list(details)}
+                        for index, details in enumerate(sorted(evidence_details), 1)]
+    ambiguity_catalog = [
+        {"id": index, "details": list(details), "flags": ambiguity_flags[details],
+         "placementCount": ambiguity_counts[details]}
+        for index, details in enumerate(sorted(ambiguity_counts), 1)
+    ]
+    source_catalog = [{"id": index, "name": name}
+                      for index, name in enumerate(sorted(source_names), 1)]
     canonical = {"schemaVersion": SCHEMA_VERSION, "tilesets": tileset_catalog,
-                 "layouts": layout_catalog, "pools": pools, "profiles": profiles,
-                  "default": default_action, "behaviorRules": behavior_rules,
-                  "tilesetPins": pins, "contextualRules": contextual_rules,
-                  "exactPatterns": patterns, "maps": map_catalog}
+                  "layouts": layout_catalog, "pools": pools, "profiles": profiles,
+                   "default": default_action, "behaviorRules": behavior_rules,
+                   "tilesetPins": pins, "contextualRules": contextual_rules,
+                   "exactPatterns": patterns, "maps": map_catalog,
+                   "evidenceDetails": evidence_catalog, "ambiguities": ambiguity_catalog,
+                   "classifierSources": source_catalog}
     encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     digest = hashlib.sha256(encoded).hexdigest()
     generation = int(digest[:8], 16) or 1
     return {**canonical, "sha256": digest, "generation": generation,
-            # Transitional aliases for Python consumers; v2 runtime integration uses the keys above.
-            "layout_rules": layout_catalog, "map_rules": [row for row in map_catalog if row["supported"]],
-            "behavior_rules": behavior_rules, "tileset_rules": pins, "map_overrides": [],
-            "templates": [], "roof_profiles": [], "placements": []}
+            "templates": [], "roof_profiles": []}
 
 
 def _c_string(value: str | None) -> str:
@@ -889,19 +1093,15 @@ def render_header() -> str:
 
 struct DioramaGeneratedTilesetV2 { uint8_t id, role, terrainClass; uint16_t metatileCount; const char *symbol; };
 struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount; const char *symbol; };
-struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile; int16_t groundQ16, heightQ16; uint8_t shape, archetype, terrainClass, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; };
-struct DioramaGeneratedMapV2 { uint8_t group, number, supported, cameraProfile, mapType, groundMode; uint16_t layoutId, groundMetatile, mapScopeId; uint32_t contextualRuleOffset, exactPatternOffset; uint16_t contextualRuleCount, exactPatternCount; float pitchRadians, focalLength; const char *symbol, *unsupportedReason; };
-struct DioramaGeneratedActionV2 { uint8_t archetypeId, poolId, profileId, axis, groundMode, terrainClass, shape; uint16_t groundMetatile, flags; float groundOffset, height; uint16_t faceMetatiles[6]; uint8_t faceLayers[6], faceRotations[6], faceFlags[6]; };
-struct DioramaGeneratedBehaviorRuleV2 { uint8_t behavior; uint32_t placementCount; const char *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
+struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile, classId, sourceId, evidenceDetailsId, ambiguityDetailsId, propGroundMetatile, evidenceFlags, ambiguityFlags; int16_t heightQ16; uint8_t mapGroup, mapNumber, shape, archetype, terrainClass, artMode, pool, authored, sourceKind, propGroundMode, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; float confidence; };
+struct DioramaGeneratedClassifierSourceV2 { uint16_t id; const char *name; };
+struct DioramaGeneratedEvidenceV2 { uint16_t id; const char *details; };
+struct DioramaGeneratedAmbiguityV2 { uint16_t id, flags; uint32_t placementCount; const char *details; };
+struct DioramaGeneratedMapV2 { uint8_t group, number, supported, cameraProfile, mapType, groundMode; uint16_t layoutId, groundMetatile; float pitchRadians, focalLength; const char *symbol, *unsupportedReason; };
 struct DioramaGeneratedPoolV2 { uint16_t id; const char *logicalId, *description; };
 struct DioramaGeneratedProfileV2 { uint16_t id; uint8_t archetypeId; uint32_t maskOffset, sampleOffset; uint16_t maskCount, sampleCount; const char *logicalId; };
 struct DioramaGeneratedMaskV2 { uint16_t profileId; uint8_t kind, width, height; uint32_t rowOffset; uint16_t rowCount; };
 struct DioramaGeneratedSampleV2 { uint8_t tilesetId, layer; uint16_t metatile; };
-struct DioramaGeneratedTilesetPinV2 { uint8_t tilesetId; uint16_t metatile; uint32_t placementCount; const char *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
-struct DioramaGeneratedNeighborV2 { uint8_t direction, flags, behavior, layer, elevation; uint16_t metatile; };
-struct DioramaGeneratedSelectorV2 { uint32_t tilesetOffset, metatileOffset, behaviorOffset, layerOffset, elevationOffset, mapTypeOffset, neighborOffset; uint16_t tilesetCount, metatileCount, behaviorCount, layerCount, elevationCount, mapTypeCount, neighborCount; uint8_t eventKind; const char *eventClass; };
-struct DioramaGeneratedContextualRuleV2 { uint16_t id, mapScopeId, selectorId; int16_t priority; uint32_t placementCount; const char *logicalId, *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
-struct DioramaGeneratedExactPatternV2 { uint16_t id, mapScopeId; uint8_t primaryTilesetId, secondaryTilesetId, width, height; int16_t priority; uint32_t cellOffset, claimOffset, placementCount; const char *logicalId, *allowedNoPlacementsReason; struct DioramaGeneratedActionV2 action; };
 
 extern const char gDioramaRulesSha256[65];
 extern const uint32_t gDioramaRulesGeneration;
@@ -911,11 +1111,14 @@ extern const struct DioramaGeneratedLayoutV2 gDioramaLayoutsV2[];
 extern const size_t gDioramaLayoutV2Count;
 extern const struct DioramaGeneratedTerrainV2 gDioramaTerrainV2[];
 extern const size_t gDioramaTerrainV2Count;
+extern const struct DioramaGeneratedClassifierSourceV2 gDioramaClassifierSourcesV2[];
+extern const size_t gDioramaClassifierSourceV2Count;
+extern const struct DioramaGeneratedEvidenceV2 gDioramaEvidenceDetailsV2[];
+extern const size_t gDioramaEvidenceDetailV2Count;
+extern const struct DioramaGeneratedAmbiguityV2 gDioramaAmbiguitiesV2[];
+extern const size_t gDioramaAmbiguityV2Count;
 extern const struct DioramaGeneratedMapV2 gDioramaMapsV2[];
 extern const size_t gDioramaMapV2Count;
-extern const struct DioramaGeneratedActionV2 gDioramaDefaultActionV2;
-extern const struct DioramaGeneratedBehaviorRuleV2 gDioramaBehaviorRulesV2[];
-extern const size_t gDioramaBehaviorRuleV2Count;
 extern const struct DioramaGeneratedPoolV2 gDioramaPoolsV2[];
 extern const size_t gDioramaPoolV2Count;
 extern const struct DioramaGeneratedProfileV2 gDioramaProfilesV2[];
@@ -926,66 +1129,8 @@ extern const uint64_t gDioramaMaskRowsV2[];
 extern const size_t gDioramaMaskRowV2Count;
 extern const struct DioramaGeneratedSampleV2 gDioramaSamplesV2[];
 extern const size_t gDioramaSampleV2Count;
-extern const struct DioramaGeneratedTilesetPinV2 gDioramaTilesetPinsV2[];
-extern const size_t gDioramaTilesetPinV2Count;
-extern const struct DioramaGeneratedSelectorV2 gDioramaSelectorsV2[];
-extern const size_t gDioramaSelectorV2Count;
-extern const uint8_t gDioramaSelectorTilesetsV2[], gDioramaSelectorBehaviorsV2[], gDioramaSelectorLayersV2[], gDioramaSelectorElevationsV2[], gDioramaSelectorMapTypesV2[];
-extern const uint16_t gDioramaSelectorMetatilesV2[];
-extern const size_t gDioramaSelectorTilesetV2Count, gDioramaSelectorMetatileV2Count, gDioramaSelectorBehaviorV2Count, gDioramaSelectorLayerV2Count, gDioramaSelectorElevationV2Count, gDioramaSelectorMapTypeV2Count;
-extern const struct DioramaGeneratedNeighborV2 gDioramaNeighborsV2[];
-extern const size_t gDioramaNeighborV2Count;
-extern const struct DioramaGeneratedContextualRuleV2 gDioramaContextualRulesV2[];
-extern const size_t gDioramaContextualRuleV2Count;
-extern const uint16_t gDioramaPatternCellsV2[];
-extern const uint8_t gDioramaPatternClaimsV2[];
-extern const size_t gDioramaPatternCellV2Count, gDioramaPatternClaimV2Count;
-extern const struct DioramaGeneratedExactPatternV2 gDioramaExactPatternsV2[];
-extern const size_t gDioramaExactPatternV2Count;
 #endif
 """
-
-
-def _action_c(action: dict, archetypes: dict[str, int], pools: dict[str, int], profiles: dict[str, int]) -> str:
-    axes = {None: 0, "x": 1, "z": 2, "cross": 3}
-    terrain_classes = {name: index + 1 for index, name in enumerate(TERRAIN_CLASSES)}
-    shapes = {name: index for index, name in enumerate(
-        ("flat", "extruded", "cliff", "ledge", "stairs", "water", "bridge",
-         "billboard", "cutout", "roof", "building-part", "hidden"))}
-    ground = action.get("groundPolicy", {"mode": "automatic"})
-    flags = ((1 if "profile" in action else 0) | (2 if "axis" in action else 0) |
-             (4 if "groundOffset" in action else 0) | (8 if "height" in action else 0) |
-             (16 if "groundPolicy" in action else 0) | (32 if "faces" in action else 0) |
-             (64 if "shape" in action else 0))
-    faces = action.get("faces", {})
-    face_metatiles, face_layers, face_rotations, face_flags = [], [], [], []
-    layer_ids = {"full": 0, "base": 1, "foreground": 2}
-    for face in MATERIAL_FACES:
-        material = faces.get(face, {"metatile": "self", "layer":
-                                    "foreground" if face == "plane" else "full"})
-        if material == "none":
-            face_metatiles.append(0xFFFF)
-            face_layers.append(0xFF)
-            face_rotations.append(0)
-            face_flags.append(0)
-        else:
-            face_metatiles.append(0xFFFF if material["metatile"] == "self"
-                                  else material["metatile"])
-            face_layers.append(layer_ids[material["layer"]])
-            face_rotations.append(material.get("rotation", 0) // 90)
-            face_flags.append(int(material.get("flipX", False))
-                              | (int(material.get("flipY", False)) << 1))
-    return (f"{{ {archetypes[action['archetype']]}, {pools[action['pool']]}, "
-            f"{profiles.get(action.get('profile'), 0)}, {axes[action.get('axis')]}, "
-            f"{1 if ground['mode'] == 'manual' else 0}, "
-            f"{terrain_classes.get(action.get('terrainClass'), 0)}, "
-            f"{shapes.get(action.get('shape'), 0)}, "
-            f"{ground.get('metatile', 0xFFFF)}, {flags}, "
-            f"{action.get('groundOffset', 0.0):.6f}f, {action.get('height', 0.0):.6f}f, "
-            f"{{ {', '.join(str(value) for value in face_metatiles)} }}, "
-            f"{{ {', '.join(str(value) for value in face_layers)} }}, "
-            f"{{ {', '.join(str(value) for value in face_rotations)} }}, "
-            f"{{ {', '.join(str(value) for value in face_flags)} }} }}")
 
 
 def render_c(data: dict) -> str:
@@ -1001,29 +1146,17 @@ def render_c(data: dict) -> str:
         lines.extend(("};", f"const size_t {count_name} = {count};", ""))
 
     tileset_ids = {row["symbol"]: row["id"] for row in data["tilesets"]}
-    map_scope_ids = {row["symbol"]: index for index, row in enumerate(data["maps"], 1)}
     archetypes = {name: index for index, name in enumerate(ARCHETYPES, 1)}
     pools = {row["id"]: index for index, row in enumerate(data["pools"], 1)}
     profiles = {row["id"]: index for index, row in enumerate(data["profiles"], 1)}
     map_types = {name: index for index, name in enumerate(MAP_TYPES)}
-    layers = {name: index for index, name in enumerate(LAYERS, 1)}
     material_layers = {name: index for index, name in enumerate(MATERIAL_LAYERS, 1)}
     terrain_classes = {name: index + 1 for index, name in enumerate(TERRAIN_CLASSES)}
-    event_kinds = {name: index for index, name in enumerate(EVENT_KINDS, 1)}
-    directions = {name: index for index, name in enumerate(DIRECTIONS, 1)}
-
-    flat_rules = [(row, 0) for row in data["contextualRules"]]
-    flat_patterns = [(row, 0) for row in data["exactPatterns"]]
-    map_ranges = {}
-    for map_row in data["maps"]:
-        rule_offset, pattern_offset = len(flat_rules), len(flat_patterns)
-        scope = map_scope_ids[map_row["symbol"]]
-        flat_rules.extend((row, scope) for row in map_row["contextualRules"])
-        flat_patterns.extend((row, scope) for row in map_row["exactPatterns"])
-        map_ranges[map_row["symbol"]] = (rule_offset, len(map_row["contextualRules"]),
-                                         pattern_offset, len(map_row["exactPatterns"]))
-    rule_ids = {name: index for index, name in enumerate(sorted(row["id"] for row, _ in flat_rules), 1)}
-    pattern_ids = {name: index for index, name in enumerate(sorted(row["id"] for row, _ in flat_patterns), 1)}
+    class_ids = {name: index for index, name in enumerate(CLASS_NAMES, 1)}
+    art_modes = {name: index for index, name in enumerate(ART_MODE_NAMES)}
+    source_ids = {row["name"]: row["id"] for row in data["classifierSources"]}
+    evidence_ids = {tuple(row["details"]): row["id"] for row in data["evidenceDetails"]}
+    ambiguity_ids = {tuple(row["details"]): row["id"] for row in data["ambiguities"]}
 
     table("struct DioramaGeneratedTilesetV2", "gDioramaTilesetsV2", "gDioramaTilesetV2Count",
           [f"{{ {row['id']}, {1 if row['role'] == 'secondary' else 0}, "
@@ -1037,36 +1170,54 @@ def render_c(data: dict) -> str:
         ("flat", "extruded", "cliff", "ledge", "stairs", "water", "bridge",
          "billboard", "cutout", "roof", "building-part", "hidden"))}
     axes = {"x": 0, "z": 1, "cross": 2}
+    def source_kind(name: str) -> int:
+        if name.startswith("pin:"):
+            return 1
+        if name.startswith("behavior:"):
+            return 3
+        if name.startswith("pattern:"):
+            return 7
+        if name.startswith("context:"):
+            return 8
+        if name.startswith("animation:"):
+            return 10
+        return 6
     terrain_rows = []
     for layout in data["layouts"]:
         for row in layout["terrainRecords"]:
             terrain_rows.append(
-                f"{{ {row['cellOffset']}, {row['expectedMetatile']}, {row['groundQ16']}, "
-                f"{row['heightQ16']}, "
-                f"{shapes[row['shape']]}, {archetypes[row['archetype']]}, "
-                f"{terrain_classes[row['terrainClass']]}, {axes[row['axis']]}, "
+                f"{{ {row['cellOffset']}, {row['expectedMetatile']}, {class_ids[row['class']]}, "
+                f"{source_ids[row['source']]}, {evidence_ids[tuple(row['evidence'])]}, "
+                f"{ambiguity_ids.get(tuple(row['ambiguity']), 0)}, {row['propGroundMetatile']}, "
+                f"{row['evidenceFlags']}, {row['ambiguityFlags']}, {row['heightQ16']}, "
+                f"{row['mapGroup']}, {row['mapNumber']}, {shapes[row['shape']]}, "
+                f"{archetypes[row['archetype']]}, {terrain_classes[row['terrainClass']]}, "
+                f"{art_modes[row['artMode']]}, {pools[row['pool']]}, {int(row['authored'])}, "
+                f"{source_kind(row['source'])}, {1 if row['propGroundMode'] == 'manual' else 0}, "
+                f"{axes[row['axis']]}, "
                 f"{row['cliffEdgeMask']}, "
                 f"{row['cliffBaseMask']}, {row['cliffTransitionMask']}, "
-                f"{row['cliffCornerMask']} }}")
+                f"{row['cliffCornerMask']}, {row['confidence']:.6f}f }}")
     table("struct DioramaGeneratedTerrainV2", "gDioramaTerrainV2", "gDioramaTerrainV2Count",
           terrain_rows)
+    table("struct DioramaGeneratedClassifierSourceV2", "gDioramaClassifierSourcesV2",
+          "gDioramaClassifierSourceV2Count",
+          [f"{{ {row['id']}, {_c_string(row['name'])} }}" for row in data["classifierSources"]])
+    table("struct DioramaGeneratedEvidenceV2", "gDioramaEvidenceDetailsV2",
+          "gDioramaEvidenceDetailV2Count",
+          [f"{{ {row['id']}, {_c_string('|'.join(row['details']))} }}"
+           for row in data["evidenceDetails"]])
+    table("struct DioramaGeneratedAmbiguityV2", "gDioramaAmbiguitiesV2",
+          "gDioramaAmbiguityV2Count",
+          [f"{{ {row['id']}, {row['flags']}, {row['placementCount']}, "
+           f"{_c_string('|'.join(row['details']))} }}" for row in data["ambiguities"]])
     table("struct DioramaGeneratedMapV2", "gDioramaMapsV2", "gDioramaMapV2Count",
           [f"{{ {row['group']}, {row['number']}, {int(row['supported'])}, "
-           f"{1 if row['camera']['profile'] == 'interior' else 0}, {map_types[row['mapType']]}, "
-           f"{1 if row['groundPolicy']['mode'] == 'manual' else 0}, {row['layoutId']}, "
-           f"{row['groundPolicy'].get('metatile', 0xFFFF)}, {map_scope_ids[row['symbol']]}, "
-           f"{map_ranges[row['symbol']][0]}, {map_ranges[row['symbol']][2]}, "
-           f"{map_ranges[row['symbol']][1]}, {map_ranges[row['symbol']][3]}, "
-           f"{row['camera']['pitchRadians']:.6f}f, {row['camera']['focalLength']:.6f}f, "
-           f"{_c_string(row['symbol'])}, {_c_string(row['unsupportedReason'])} }}" for row in data["maps"]])
-    lines.extend((f"const struct DioramaGeneratedActionV2 gDioramaDefaultActionV2 = "
-                  f"{_action_c(data['default'], archetypes, pools, profiles)};", ""))
-    table("struct DioramaGeneratedBehaviorRuleV2", "gDioramaBehaviorRulesV2",
-          "gDioramaBehaviorRuleV2Count",
-          [f"{{ {row['behaviorId']}, {row['placementCount']}, "
-           f"{_c_string((row['allowedUnused'] or {}).get('reason'))}, "
-           f"{_action_c(row['action'], archetypes, pools, profiles)} }}"
-           for row in data["behaviorRules"]])
+            f"{1 if row['camera']['profile'] == 'interior' else 0}, {map_types[row['mapType']]}, "
+            f"{1 if row['groundPolicy']['mode'] == 'manual' else 0}, {row['layoutId']}, "
+            f"{row['groundPolicy'].get('metatile', 0xFFFF)}, "
+            f"{row['camera']['pitchRadians']:.6f}f, {row['camera']['focalLength']:.6f}f, "
+            f"{_c_string(row['symbol'])}, {_c_string(row['unsupportedReason'])} }}" for row in data["maps"]])
 
     table("struct DioramaGeneratedPoolV2", "gDioramaPoolsV2", "gDioramaPoolV2Count",
           [f"{{ {pools[row['id']]}, {_c_string(row['id'])}, {_c_string(row['description'])} }}"
@@ -1091,79 +1242,6 @@ def render_c(data: dict) -> str:
     table("uint64_t", "gDioramaMaskRowsV2", "gDioramaMaskRowV2Count",
           [f"UINT64_C(0x{value:X})" for value in mask_rows])
     table("struct DioramaGeneratedSampleV2", "gDioramaSamplesV2", "gDioramaSampleV2Count", samples)
-    table("struct DioramaGeneratedTilesetPinV2", "gDioramaTilesetPinsV2", "gDioramaTilesetPinV2Count",
-          [f"{{ {tileset_ids[row['tileset']]}, {row['metatile']}, {row['placementCount']}, "
-           f"{_c_string((row['allowedUnused'] or {}).get('reason'))}, "
-           f"{_action_c(row['action'], archetypes, pools, profiles)} }}" for row in data["tilesetPins"]])
-
-    selector_values = {name: [] for name in ("tilesets", "metatiles", "behaviors", "layers",
-                                              "elevations", "mapTypes")}
-    neighbors, selector_rows, rule_rows = [], [], []
-    for selector_id, (rule, scope) in enumerate(flat_rules, 1):
-        selector = rule["selector"]
-        converted = {
-            "tilesets": [tileset_ids[value] for value in selector.get("tilesets", [])],
-            "metatiles": selector.get("metatiles", []),
-            "behaviors": selector.get("behaviorIds", []),
-            "layers": [layers[value] for value in selector.get("layerTypes", [])],
-            "elevations": selector.get("elevations", []),
-            "mapTypes": [map_types[value] for value in selector.get("mapTypes", [])],
-        }
-        offsets, counts = {}, {}
-        for name, values in converted.items():
-            offsets[name], counts[name] = len(selector_values[name]), len(values)
-            selector_values[name].extend(values)
-        neighbor_offset = len(neighbors)
-        for direction, predicate in selector.get("neighbors", {}).items():
-            flags = ((1 if "metatile" in predicate else 0) | (2 if "behavior" in predicate else 0) |
-                     (4 if "layerType" in predicate else 0) | (8 if "elevation" in predicate else 0))
-            neighbors.append(f"{{ {directions[direction]}, {flags}, "
-                             f"{predicate.get('behaviorId', 0)}, "
-                             f"{layers.get(predicate.get('layerType'), 0)}, "
-                             f"{predicate.get('elevation', 0)}, {predicate.get('metatile', 0)} }}")
-        event = selector.get("event", {})
-        selector_rows.append("{ " + ", ".join(str(offsets[name]) for name in
-                             ("tilesets", "metatiles", "behaviors", "layers", "elevations", "mapTypes")) +
-                             f", {neighbor_offset}, " + ", ".join(str(counts[name]) for name in
-                             ("tilesets", "metatiles", "behaviors", "layers", "elevations", "mapTypes")) +
-                             f", {len(selector.get('neighbors', {}))}, {event_kinds.get(event.get('kind'), 0)}, "
-                             f"{_c_string(event.get('class'))} }}")
-        rule_rows.append(f"{{ {rule_ids[rule['id']]}, {scope}, {selector_id}, {rule['priority']}, "
-                         f"{rule['placementCount']}, {_c_string(rule['id'])}, "
-                         f"{_c_string((rule['allowedUnused'] or {}).get('reason'))}, "
-                         f"{_action_c(rule['action'], archetypes, pools, profiles)} }}")
-    table("struct DioramaGeneratedSelectorV2", "gDioramaSelectorsV2", "gDioramaSelectorV2Count", selector_rows)
-    for name, c_name, c_type in (("tilesets", "Tilesets", "uint8_t"),
-                                 ("metatiles", "Metatiles", "uint16_t"),
-                                 ("behaviors", "Behaviors", "uint8_t"),
-                                 ("layers", "Layers", "uint8_t"),
-                                 ("elevations", "Elevations", "uint8_t"),
-                                 ("mapTypes", "MapTypes", "uint8_t")):
-        table(c_type, f"gDioramaSelector{c_name}V2", f"gDioramaSelector{c_name[:-1] if c_name.endswith('s') else c_name}V2Count",
-              [str(value) for value in selector_values[name]])
-    table("struct DioramaGeneratedNeighborV2", "gDioramaNeighborsV2", "gDioramaNeighborV2Count", neighbors)
-    table("struct DioramaGeneratedContextualRuleV2", "gDioramaContextualRulesV2",
-          "gDioramaContextualRuleV2Count", rule_rows)
-
-    pattern_cells, pattern_claims, pattern_rows = [], [], []
-    for pattern, scope in flat_patterns:
-        cell_offset, claim_offset = len(pattern_cells), len(pattern_claims)
-        pattern_cells.extend(value for row in pattern["cells"] for value in row)
-        pattern_claims.extend(int(value) for row in pattern["claimMask"] for value in row)
-        pattern_rows.append(f"{{ {pattern_ids[pattern['id']]}, {scope}, "
-                            f"{tileset_ids[pattern['tilesets']['primary']]}, "
-                            f"{tileset_ids[pattern['tilesets']['secondary']]}, "
-                            f"{pattern['dimensions']['width']}, {pattern['dimensions']['height']}, "
-                            f"{pattern['priority']}, {cell_offset}, {claim_offset}, "
-                            f"{pattern['placementCount']}, {_c_string(pattern['id'])}, "
-                            f"{_c_string((pattern['allowedNoPlacements'] or {}).get('reason'))}, "
-                            f"{_action_c(pattern['action'], archetypes, pools, profiles)} }}")
-    table("uint16_t", "gDioramaPatternCellsV2", "gDioramaPatternCellV2Count",
-          [str(value) for value in pattern_cells])
-    table("uint8_t", "gDioramaPatternClaimsV2", "gDioramaPatternClaimV2Count",
-          [str(value) for value in pattern_claims])
-    table("struct DioramaGeneratedExactPatternV2", "gDioramaExactPatternsV2",
-          "gDioramaExactPatternV2Count", pattern_rows)
     lines.extend(("#endif", ""))
     return "\n".join(lines)
 
@@ -1191,7 +1269,7 @@ def main() -> int:
         output_h = args.output_h if args.output_h.is_absolute() else root / args.output_h
         write_or_check(output_c, render_c(data), args.check)
         write_or_check(output_h, render_header(), args.check)
-    except (RuleError, OSError, KeyError, IndexError, struct.error) as error:
+    except (RuleError, ClassificationError, OSError, KeyError, IndexError, struct.error) as error:
         print(f"diorama rules: {error}", file=sys.stderr)
         return 1
     return 0
