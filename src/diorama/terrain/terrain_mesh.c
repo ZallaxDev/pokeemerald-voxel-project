@@ -81,8 +81,24 @@ static bool AppendQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
     for (i = 0; i < 6; i++)
     {
         int corner = order[i];
-        float u = uvX[corner] ? material->u1 : material->u0;
-        float v = uvY[corner] ? material->v1 : material->v0;
+        uint8_t x = uvX[corner];
+        uint8_t y = uvY[corner];
+        uint8_t turn;
+        float u;
+        float v;
+
+        if (material->flags & 1)
+            x = 1 - x;
+        if (material->flags & 2)
+            y = 1 - y;
+        for (turn = 0; turn < material->rotation; turn++)
+        {
+            uint8_t previousX = x;
+            x = 1 - y;
+            y = previousX;
+        }
+        u = x ? material->u1 : material->u0;
+        v = y ? material->v1 : material->v0;
 
         if (!AppendVertex(vertices, capacity, count,
                           positions[corner][0], positions[corner][1], positions[corner][2],
@@ -216,6 +232,10 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         hash = HashByte(hash, cell->structureLocalY);
         hash = HashByte(hash, cell->southFacadeCount);
         hash = HashByte(hash, cell->volumeMaterialCount);
+        hash = HashByte(hash, cell->cliffEdgeMask);
+        hash = HashByte(hash, cell->cliffBaseMask);
+        hash = HashByte(hash, cell->cliffTransitionMask);
+        hash = HashByte(hash, cell->cliffCornerMask);
         hash = HashFloat(hash, cell->groundHeight);
         hash = HashFloat(hash, cell->visualHeight);
         hash = HashFloat(hash, cell->featureHeight);
@@ -232,6 +252,8 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         {
             hash = HashU16(hash, cell->materials[face].metatileId);
             hash = HashByte(hash, cell->materials[face].layer);
+            hash = HashByte(hash, cell->materials[face].rotation);
+            hash = HashByte(hash, cell->materials[face].flags);
             hash = HashFloat(hash, cell->materials[face].u0);
             hash = HashFloat(hash, cell->materials[face].v0);
             hash = HashFloat(hash, cell->materials[face].u1);
@@ -378,8 +400,10 @@ static bool BuildOccupancy(const struct DioramaTerrainChunkInput *input,
                     }
                     else if (cell->shape == DIORAMA_SHAPE_LEDGE)
                     {
+                        int16_t ledgeTop = HeightToVoxel(cell->groundHeight);
+
                         if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY,
-                                        0, -1, 0))
+                                        0, ledgeTop - 1, ledgeTop))
                             return false;
                     }
                     else if (cell->shape == DIORAMA_SHAPE_STAIRS)
@@ -608,8 +632,7 @@ static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput 
                 continue;
             pixelX = cell->mapX * DIORAMA_VOXELS_PER_CELL;
             pixelZ = cell->mapY * DIORAMA_VOXELS_PER_CELL;
-            top = cell->shape == DIORAMA_SHAPE_LEDGE ? 0
-                                                    : HeightToVoxel(cell->visualHeight);
+            top = HeightToVoxel(cell->visualHeight);
             bottom = top > 0 ? -1 : top - 1;
             if (!AppendCompressedFace(&faces, &rawFaces, cell, cellIndex,
                                       DIORAMA_OCCUPANCY_FACE_TOP,
@@ -640,7 +663,7 @@ static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput 
                                           axis, sign, bottom, top))
                     return false;
             }
-            if (cell->shape == DIORAMA_SHAPE_LEDGE
+            if (cell->shape == DIORAMA_SHAPE_LEDGE && cell->groundHeight == 0.0f
               && !AppendCompressedLedgeFaces(input, &faces, &rawFaces, cell, cellIndex,
                                             x, y,
                                             LedgeDirection(cell->behavior)))
@@ -668,6 +691,7 @@ static bool AppendFallbackLedgeFaces(const struct DioramaTerrainChunkInput *inpu
             int cellIndex = y * DIORAMA_TERRAIN_INPUT_SIZE + x;
 
             if (cell->present && cell->shape == DIORAMA_SHAPE_LEDGE
+             && cell->groundHeight == 0.0f
               && !AppendCompressedLedgeFaces(input, faceCount, rawFaceCount, cell, cellIndex,
                      x, y,
                      LedgeDirection(cell->behavior)))
@@ -798,6 +822,8 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
     uint32_t faceIndex;
     int32_t ownerMinX = input->chunkX * DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL;
     int32_t ownerMinZ = input->chunkY * DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL;
+    int gridY;
+    int gridX;
 
     memset(mesh, 0, sizeof(*mesh));
     mesh->bounds.minX = FLT_MAX;
@@ -806,6 +832,23 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
     mesh->bounds.maxX = -FLT_MAX;
     mesh->bounds.maxY = -FLT_MAX;
     mesh->bounds.maxZ = -FLT_MAX;
+    for (gridY = DIORAMA_TERRAIN_HALO;
+         gridY < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; gridY++)
+        for (gridX = DIORAMA_TERRAIN_HALO;
+             gridX < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; gridX++)
+        {
+            const struct DioramaTerrainCell *cell = GetCell(input, gridX, gridY);
+            uint8_t corners;
+
+            if (!cell->present || cell->shape != DIORAMA_SHAPE_CLIFF)
+                continue;
+            corners = cell->cliffCornerMask;
+            while (corners != 0)
+            {
+                mesh->cliffCornerCount += corners & 1;
+                corners >>= 1;
+            }
+        }
 
     if (BuildCompressedOccupancyShell(input, &spanCount, &shellFaceCount,
                                       &rawShellFaceCount))
@@ -905,6 +948,18 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                 mesh->featureFaceCount++;
             else
                 mesh->sideFaceCount++;
+            if (cell->shape == DIORAMA_SHAPE_CLIFF && face->axis != 1
+             && materialFace >= DIORAMA_MATERIAL_FACE_NORTH
+             && materialFace <= DIORAMA_MATERIAL_FACE_WEST)
+            {
+                uint8_t edge = 1u << (materialFace - DIORAMA_MATERIAL_FACE_NORTH);
+
+                if ((cell->cliffBaseMask & edge)
+                 && face->vMin <= HeightToVoxel(cell->groundHeight))
+                    mesh->cliffBaseFaceCount++;
+                if (cell->cliffTransitionMask & edge)
+                    mesh->cliffTransitionFaceCount++;
+            }
             for (corner = 0; corner < 4; corner++)
             {
                 if (positions[corner][0] < mesh->bounds.minX) mesh->bounds.minX = positions[corner][0];

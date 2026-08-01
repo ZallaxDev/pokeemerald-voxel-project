@@ -9,7 +9,7 @@ const state = {
   document: null, rules: null, revision: null, selection: new Set(), tool: "point",
   view: "original", dirty: false, history: [], future: [], dragStart: null,
   atlases: {}, layerAtlases: {}, faceMaterials: {}, materialFace: null, materialRole: "primary", pickFace: null,
-  draftRule: null,
+  draftRule: null, tilesetDocuments: {}, dirtyTilesets: new Set(), stagedPinKeys: new Set(), mapDirty: false,
 };
 
 function status(message, error = false) {
@@ -49,7 +49,8 @@ async function openMap() {
     state.document = document;
     state.rules = clone(document.rules);
     state.revision = document.editor.revision;
-    state.selection.clear(); state.history = []; state.future = []; state.dirty = false; state.draftRule = null;
+    state.selection.clear(); state.history = []; state.future = []; state.dirty = false; state.mapDirty = false; state.draftRule = null;
+    state.tilesetDocuments = clone(document.editor.tilesetDocuments); state.dirtyTilesets.clear(); state.stagedPinKeys.clear();
     state.atlases = {}; state.layerAtlases = {};
     await Promise.all(Object.entries(document.tilesets).map(async ([role, info]) => {
       const loadImage = async (source) => {
@@ -65,7 +66,7 @@ async function openMap() {
     }));
     $("#map-title").textContent = document.map.symbol.replace(/^MAP_/, "").replaceAll("_", " ");
     $("#map-size").textContent = `${document.map.width} x ${document.map.height}`;
-    $("#rule-path").textContent = document.ruleSource || "Generated global G5 baseline";
+    $("#rule-path").textContent = document.ruleSource || document.editor.source;
     resetCamera(); updateAll(); status("Map ready");
   } catch (error) { status(error.message, true); }
 }
@@ -79,11 +80,16 @@ function bindControls() {
   $("#redo").addEventListener("click", redo);
   $("#apply-geometry").addEventListener("click", applyGeometry);
   $("#remove-overrides").addEventListener("click", removeOverrides);
+  $("#stage-level").addEventListener("click", () => stagePlateauLevel(false));
+  $("#remove-level").addEventListener("click", () => stagePlateauLevel(true));
   $("#clear-faces").addEventListener("click", clearFaces);
+  $("#terrain-mode").addEventListener("change", () => mutateRules("Changed terrain inference mode", () => {
+    state.rules.terrainMode = $("#terrain-mode").value;
+  }));
   $("#reset-camera").addEventListener("click", resetCamera);
-  ["#shape", "#ground-height", "#height"].forEach((id) => {
-    $(id).addEventListener("input", updateDraftPreview);
-    $(id).addEventListener("change", updateDraftPreview);
+  ["#shape", "#archetype", "#axis", "#terrain-class", "#ground-height", "#height"].forEach((id) => {
+    $(id).addEventListener("input", () => { updateAbsoluteBaseControl(); updateDraftPreview(); });
+    $(id).addEventListener("change", () => { updateAbsoluteBaseControl(); updateDraftPreview(); });
   });
   $$("[data-tool]").forEach((button) => button.addEventListener("click", () => setTool(button.dataset.tool)));
   $$("[data-view]").forEach((button) => button.addEventListener("click", () => {
@@ -186,11 +192,32 @@ function cellById(id) {
 
 function overrideAt(cell) { return (state.rules.overrides || []).find((item) => item.x === cell.x && item.y === cell.y); }
 
+function visualRegionAt(cell) {
+  return state.document.editor.resolved[cell.y*state.document.map.width+cell.x].rule.visualRegion||0;
+}
+
+function regionAnchorAt(cell) {
+  const region=visualRegionAt(cell);
+  const anchors=state.rules.terrainAnchors||[];
+  const targeted=anchors.find(anchor=>(anchor.targets||[]).some(target=>target.x===cell.x&&target.y===cell.y));
+  if(targeted)return targeted;
+  if(!region)return null;
+  return anchors.find((anchor)=>{
+    if(anchor.targets?.length)return false;
+    const seed=state.document.cells[anchor.y*state.document.map.width+anchor.x];
+    return seed&&visualRegionAt(seed)===region;
+  })||null;
+}
+
 function effectiveAt(cell) {
   if (state.draftRule && state.selection.has(cell.id)) return { source: "inspector draft", rule: state.draftRule };
+  const anchor=regionAnchorAt(cell);
+  if(anchor){const inherited=state.document.editor.resolved[cell.y*state.document.map.width+cell.x],rule={...normalizeClientRule(inherited.rule),groundHeight:anchor.level};for(const key of ["shape","archetype","terrainClass","axis"])if(anchor[key]!==undefined)rule[key]=anchor[key];if(anchor.height!==undefined)rule.height=anchor.height;return{source:`region:${anchor.id}`,rule}}
+  const pinKey=`${cell.tilesetRole}:${cell.localMetatile}`,staged=state.stagedPinKeys.has(pinKey)?(state.tilesetDocuments[cell.tilesetRole]?.rules.pins||[]).find(item=>item.metatile===cell.localMetatile):null;
+  if(staged)return{source:"tileset pin",rule:normalizePinAction(staged.action)};
   const override = overrideAt(cell);
   if (override) return { source: "map override", rule: normalizeClientRule(override) };
-  const inherited = state.document.editor.resolved[state.document.cells.indexOf(cell)];
+  const inherited = state.document.editor.resolved[cell.y*state.document.map.width+cell.x];
   if (inherited.source === "tileset") return inherited;
   const building = (state.rules.buildings || []).find((item) => {
     const template = state.document.editor.templates[item.template];
@@ -204,10 +231,13 @@ function effectiveAt(cell) {
   return inherited;
 }
 
+function normalizePinAction(action){const shape=action.shape||{ground:"flat",void:"hidden",water:"water",ledge:"ledge",cliff:"cliff",mound:"cliff","wall-volume":"cliff",bridge:"bridge",deck:"bridge",rail:"bridge",support:"bridge"}[action.archetype]||(action.archetype?.startsWith("stairs")?"stairs":"cutout");return normalizeClientRule({shape,archetype:action.archetype,terrainClass:action.terrainClass,axis:action.axis,groundHeight:action.groundOffset,height:action.height,faces:action.faces})}
+
 function normalizeClientRule(rule) {
-  const faces = Object.fromEntries(FACES.map((face) => [face, {metatile:"self",layer:face === "plane"?"foreground":"full"}]));
+  const faces = Object.fromEntries(FACES.map((face) => [face, {metatile:"self",layer:face === "plane"?"foreground":"full",rotation:0,flipX:false,flipY:false}]));
   Object.assign(faces, clone(rule.faces || {}));
-  return {shape:rule.shape||"flat",profile:rule.profile||"none",axis:rule.axis||"x",baseMetatile:rule.baseMetatile??"self",groundHeight:rule.groundHeight||0,height:rule.height||0,faces};
+  FACES.forEach((face)=>{if(faces[face]!=="none")faces[face]={rotation:0,flipX:false,flipY:false,...faces[face]}});
+  return {shape:rule.shape||"flat",archetype:rule.archetype||null,terrainClass:rule.terrainClass||"ground",profile:rule.profile||"none",axis:rule.axis||"x",baseMetatile:rule.baseMetatile??"self",groundHeight:rule.groundHeight||0,height:rule.height||0,faces};
 }
 
 function drawMap() {
@@ -258,11 +288,15 @@ function updateInspector() {
   $("#selection-bounds").textContent=`${Math.min(...xs)},${Math.min(...ys)} → ${Math.max(...xs)},${Math.max(...ys)}`;
   $("#cell-heading").textContent=cells.length===1?`Cell ${first.id}`:`${cells.length} cells`;
   $("#rule-source").textContent=effective.source;
-  $("#cell-facts").innerHTML=[["Metatile",`0x${first.metatile.toString(16).toUpperCase()}`],["Local ID",`0x${first.localMetatile.toString(16).toUpperCase()}`],["Behavior",state.document.editor.behaviorNames[first.behavior]||first.behavior],["Layer / collision",`${first.layerType} / ${first.collision}`]].map(([key,value])=>`<div class="fact"><small>${key}</small><strong>${value}</strong></div>`).join("");
+  $("#cell-facts").innerHTML=[["Metatile",`0x${first.metatile.toString(16).toUpperCase()}`],["Local ID",`0x${first.localMetatile.toString(16).toUpperCase()}`],["Behavior",state.document.editor.behaviorNames[first.behavior]||first.behavior],["Layer / collision",`${first.layerType} / ${first.collision}`],["Effective base level",rule.groundHeight]].map(([key,value])=>`<div class="fact"><small>${key}</small><strong>${value}</strong></div>`).join("");
   $("#shape").value=rule.shape; $("#ground-height").value=rule.groundHeight; $("#height").value=rule.height;
+  $("#axis").value=rule.axis||"x"; $("#terrain-class").value=rule.terrainClass||"ground";
+  $("#archetype").value=rule.archetype||({flat:"ground",hidden:"void",water:"water",ledge:"ledge",cliff:"cliff",extruded:"wall-volume"}[rule.shape]||"ground");
+  updateAbsoluteBaseControl();
   state.faceMaterials=clone(rule.faces); renderFaces(first);
-  state.draftRule=captureDraftRule();
 }
+
+function updateAbsoluteBaseControl(){const cells=[...state.selection].map(cellById),region=cells.length?visualRegionAt(cells[0]):0,canAnchor=Boolean(region)&&cells.every(cell=>visualRegionAt(cell)===region);$("#ground-height").disabled=!canAnchor;$("#ground-height").title=canAnchor?"Absolute visual base for this connected region only.":"Select cells from one connected visual region.";const archetype=$("#archetype").value,relativeDisabled=["ground","void","water","shallow-water","waterfall","current","hot-spring"].includes(archetype);$("#height").disabled=relativeDisabled;if(relativeDisabled)$("#height").value=0;$("#height").title=relativeDisabled?"This surface has no independent feature height.":"Height relative to the visual base level."}
 
 function renderFaces(cell) {
   $("#face-list").replaceChildren(...FACES.map((face) => {
@@ -270,8 +304,8 @@ function renderFaces(cell) {
     const label=document.createElement("span"); label.textContent=face;
     const swatch=document.createElement("span"); swatch.className="swatch";
     const material=state.faceMaterials[face]; const id=material === "none" ? null : material.metatile;
-    if (id !== null) setSwatch(swatch,id === "self" ? cell.metatile : Number(id));
-    const button=document.createElement("button"); button.textContent=material === "none" ? "none" : `${id} · ${material.layer}`;
+    if (id !== null) {setSwatch(swatch,id === "self" ? cell.metatile : Number(id));swatch.style.transform=`rotate(${material.rotation||0}deg) scale(${material.flipX?-1:1},${material.flipY?-1:1})`}
+    const button=document.createElement("button"); button.textContent=material === "none" ? "none" : `${id} · ${material.layer} · ${material.rotation||0}deg${material.flipX?" · flipX":""}${material.flipY?" · flipY":""}`;
     button.addEventListener("click",()=>openMaterial(face)); row.append(label,swatch,button); return row;
   }));
 }
@@ -281,7 +315,7 @@ function setSwatch(node, globalId) {
   node.style.backgroundImage=`url(${image.src})`; node.style.backgroundSize=`${image.width*2}px ${image.height*2}px`; node.style.backgroundPosition=`-${(local%16)*32}px -${Math.floor(local/16)*32}px`;
 }
 
-function openMaterial(face) { state.materialFace=face; $("#material-title").textContent=`Choose ${face} material`; renderMaterialCatalog(); $("#material-dialog").showModal(); }
+function openMaterial(face) { state.materialFace=face;const material=state.faceMaterials[face];if(material!=="none"){$("#material-layer").value=material.layer||"full";$("#material-rotation").value=String(material.rotation||0);$("#material-flip-x").checked=Boolean(material.flipX);$("#material-flip-y").checked=Boolean(material.flipY)} $("#material-title").textContent=`Choose ${face} material`; renderMaterialCatalog(); $("#material-dialog").showModal(); }
 function renderMaterialCatalog() {
   if (!state.document) return;
   const role=state.materialRole, info=state.document.tilesets[role], query=$("#material-search").value.trim().toLowerCase(), fragment=document.createDocumentFragment();
@@ -297,34 +331,45 @@ function renderMaterialCatalog() {
 }
 
 function refreshDraftMaterials() { const first=state.selection.size?cellById(state.selection.values().next().value):null; if(first)renderFaces(first); updateDraftPreview(); }
-function chooseMaterial(globalId) { const layer=$("#material-layer").value; state.faceMaterials[state.materialFace]=layer==="none"?"none":{metatile:globalId,layer}; $("#material-dialog").close(); refreshDraftMaterials(); }
-function pickMaterialFromCell(cell) { state.faceMaterials[state.pickFace]={metatile:cell.metatile,layer:"full"}; status(`Picked 0x${cell.metatile.toString(16)} for ${state.pickFace}`); state.pickFace=null; $("#eyedropper").classList.remove("active"); refreshDraftMaterials(); }
-function clearFaces() { FACES.forEach((face)=>state.faceMaterials[face]={metatile:"self",layer:face==="plane"?"foreground":"full"}); refreshDraftMaterials(); }
+function chooseMaterial(globalId) { const layer=$("#material-layer").value; state.faceMaterials[state.materialFace]=layer==="none"?"none":{metatile:globalId,layer,rotation:Number($("#material-rotation").value),flipX:$("#material-flip-x").checked,flipY:$("#material-flip-y").checked}; $("#material-dialog").close(); refreshDraftMaterials(); }
+function pickMaterialFromCell(cell) { state.faceMaterials[state.pickFace]={metatile:cell.metatile,layer:"full",rotation:0,flipX:false,flipY:false}; status(`Picked 0x${cell.metatile.toString(16)} for ${state.pickFace}`); state.pickFace=null; $("#eyedropper").classList.remove("active"); refreshDraftMaterials(); }
+function clearFaces() { FACES.forEach((face)=>state.faceMaterials[face]={metatile:"self",layer:face==="plane"?"foreground":"full",rotation:0,flipX:false,flipY:false}); refreshDraftMaterials(); }
 
-function mutateRules(action, callback) { state.history.push(clone(state.rules)); if(state.history.length>100)state.history.shift(); state.future=[]; callback(); state.draftRule=null; state.dirty=true; updateAll(); status(action); }
+function mutateRules(action, callback) { state.history.push(clone(state.rules)); if(state.history.length>100)state.history.shift(); state.future=[]; callback(); state.draftRule=null; state.dirty=true; state.mapDirty=true; updateAll(); status(action); }
 function undo(){if(!state.history.length)return;state.future.push(clone(state.rules));state.rules=state.history.pop();state.draftRule=null;state.dirty=true;updateAll();status("Undid change")}
 function redo(){if(!state.future.length)return;state.history.push(clone(state.rules));state.rules=state.future.pop();state.draftRule=null;state.dirty=true;updateAll();status("Redid change")}
 
-function ruleFromInspector() {
-  const shape=$("#shape").value, height=Number($("#height").value), groundHeight=Number($("#ground-height").value);
-  if(shape==="extruded"&&height<=0)throw new Error("extruded requires a positive height");
-  const rule={shape,groundHeight,height,faces:clone(state.faceMaterials)};
-  return rule;
+function pinActionFromInspector() {
+  const shape=$("#shape").value,archetype=$("#archetype").value,height=Number($("#height").value),reusableTerrain=["ground","cliff","mound","wall-volume"].includes(archetype)||["flat","cliff"].includes(shape),groundOffset=reusableTerrain?0:Number($("#ground-height").value);
+  if((shape==="cliff"||["cliff","wall-volume"].includes(archetype))&&height<=0)throw new Error(`${archetype} requires a positive height`);
+  const water=["water","shallow-water","waterfall","current","hot-spring"].includes(archetype);
+  const vegetation=["tree","forest-wall","shrub","hedge","stump","grass","flower"].includes(archetype),furniture=["counter","table","desk","bed","bookcase"].includes(archetype),prop=["billboard","cutout","console","signpost","post","relief","rock","boulder"].includes(archetype),structure=["bridge","deck","rail","support","roof","top-slab","awning","building"].includes(archetype);
+  const action={shape,archetype,pool:water?"water":shape==="cliff"?"terrain":vegetation?"vegetation":furniture?"furniture":prop?"prop":structure?"structure":"terrain",terrainClass:$("#terrain-class").value};
+  if(shape==="cliff"||["cliff","wall-volume","billboard","cutout","relief","tree","shrub","rock"].includes(archetype)||archetype.startsWith("stairs"))action.height=height;
+  if(groundOffset)action.groundOffset=groundOffset;
+  if(shape==="cliff"||["cliff","wall-volume","billboard","cutout"].includes(archetype)||archetype.startsWith("stairs"))action.axis=$("#axis").value;
+  action.faces=clone(state.faceMaterials);
+  return action;
 }
 
 function captureDraftRule(){return {shape:$("#shape").value,groundHeight:Number($("#ground-height").value)||0,height:Math.max(0,Number($("#height").value)||0),faces:clone(state.faceMaterials)}}
 function updateDraftPreview(){if(!state.selection.size)return;state.draftRule=captureDraftRule();renderPreview();status("Previewing unsaved inspector changes")}
 
-function applyGeometry(){if(!state.selection.size)return;try{const definition=ruleFromInspector();mutateRules("Applied map overrides",()=>{for(const id of state.selection){const cell=cellById(id),existing=overrideAt(cell),next={x:cell.x,y:cell.y,...clone(definition)};if(existing)Object.assign(existing,next);else state.rules.overrides.push(next)}state.rules.overrides.sort((a,b)=>a.y-b.y||a.x-b.x)})}catch(error){status(error.message,true)}}
-function removeOverrides(){if(!state.selection.size)return;mutateRules("Removed selected overrides",()=>{state.rules.overrides=state.rules.overrides.filter((item)=>!state.selection.has(`${item.x},${item.y}`))})}
+function selectedPinTarget(){const cells=[...state.selection].map(cellById);if(!cells.length)throw new Error("Select at least one cell");const first=cells[0];if(cells.some(cell=>cell.tilesetRole!==first.tilesetRole||cell.localMetatile!==first.localMetatile))throw new Error("A reusable pin selection must use one tileset and one local metatile");return{cell:first,role:first.tilesetRole,symbol:state.document.tilesets[first.tilesetRole].symbol,document:state.tilesetDocuments[first.tilesetRole]}}
+function stageTilesetPin(remove=false){try{const target=selectedPinTarget(),rules=target.document.rules,pins=rules.pins||[],index=pins.findIndex(item=>item.metatile===target.cell.localMetatile),occurrences=state.document.cells.filter(cell=>cell.tilesetRole===target.role&&cell.localMetatile===target.cell.localMetatile).length;if(remove){if(index<0)throw new Error("The selected metatile has no reusable pin");pins.splice(index,1)}else{const pin={metatile:target.cell.localMetatile,action:pinActionFromInspector()};if(index<0)pins.push(pin);else pins[index]=pin}rules.pins=pins.sort((a,b)=>a.metatile-b.metatile);state.dirtyTilesets.add(target.role);state.stagedPinKeys.add(`${target.role}:${target.cell.localMetatile}`);state.dirty=true;state.draftRule=null;updateAll();status(`${remove?"Removed":"Staged"} reusable pin for all ${occurrences} occurrences on this map and every map sharing the tileset; press Save rules to write`)}catch(error){status(error.message,true)}}
+function applyGeometry(){const first=state.selection.size?cellById(state.selection.values().next().value):null,persisted=first?(regionAnchorAt(first)?.level??normalizeClientRule(state.document.editor.resolved[first.y*state.document.map.width+first.x].rule).groundHeight):0,current=Number($("#ground-height").value);if(first&&Number.isFinite(current)&&current!==Number(persisted))stagePlateauLevel(false);stageTilesetPin(false)}
+function removeOverrides(){stageTilesetPin(true)}
+
+function selectedVisualRegion(){const cells=[...state.selection].map(cellById);if(!cells.length)throw new Error("Select at least one visible cell");const region=visualRegionAt(cells[0]);if(!region||cells.some(cell=>visualRegionAt(cell)!==region))throw new Error("The selection must belong to one connected visual region");return{cell:cells[0],region}}
+function stagePlateauLevel(remove=false){try{const target=selectedVisualRegion(),selected=[...state.selection].map(cellById),selectedIds=new Set(selected.map(cell=>cell.id)),anchors=state.rules.terrainAnchors||(state.rules.terrainAnchors=[]),matches=anchors.filter(anchor=>anchor.targets?.length?anchor.targets.some(item=>selectedIds.has(`${item.x},${item.y}`)):(()=>{const seed=state.document.cells[anchor.y*state.document.map.width+anchor.x];return seed&&visualRegionAt(seed)===target.region})());if(remove){if(!matches.length)throw new Error("The selected region has no authored geometry")}const level=Number($("#ground-height").value),height=Number($("#height").value);if(!remove&&(!Number.isFinite(level)||level<-8||level>8||Math.abs(level*16-Math.round(level*16))>1e-9))throw new Error("Visual base level must be from -8 to 8 in 1/16-cell steps");if(!remove&&!$("#height").disabled&&(!Number.isFinite(height)||height<0||height>8||Math.abs(height*16-Math.round(height*16))>1e-9))throw new Error("Relative height must be from 0 to 8 in 1/16-cell steps");mutateRules(remove?"Removed selected region geometry":"Staged selected region geometry",()=>{state.rules.terrainAnchors=anchors.filter(anchor=>!matches.includes(anchor));if(!remove){const anchor={id:matches[0]?.id||`region-${target.cell.x}-${target.cell.y}`,x:target.cell.x,y:target.cell.y,level,expectedMetatile:target.cell.metatile,shape:$("#shape").value,archetype:$("#archetype").value,terrainClass:$("#terrain-class").value,axis:$("#axis").value,targets:selected.map(cell=>({x:cell.x,y:cell.y,expectedMetatile:cell.metatile}))};if(!$("#height").disabled)anchor.height=height;state.rules.terrainAnchors.push(anchor)}state.rules.terrainAnchors.sort((a,b)=>a.id.localeCompare(b.id))})}catch(error){status(error.message,true)}}
 
 
 function payload(){return{symbol:state.document.map.symbol,revision:state.revision,rules:state.rules}}
 async function validateRules(){if(!state.document)return;status("Validating candidate...");try{const result=await request("/api/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload())});status(result.message)}catch(error){status(error.message,true)}}
 async function regenerateRules(){status("Regenerating rule tables...");try{const result=await request("/api/regenerate",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});status(result.message)}catch(error){status(error.message,true)}}
-async function saveRules(){if(!state.document)return;if(state.document.editor.readOnly){status("This map uses the generated global baseline and is read-only",true);return}status("Validating and regenerating...");try{const result=await request("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload())});state.revision=result.revision;state.dirty=false;state.history=[];state.future=[];updateAll();status(result.message)}catch(error){status(error.message,true)}}
+async function saveRules(){if(!state.document)return;if(!state.mapDirty&&!state.dirtyTilesets.size){status("No staged changes");return}status("Validating and regenerating...");try{for(const role of state.dirtyTilesets){const item=state.tilesetDocuments[role],symbol=state.document.tilesets[role].symbol,result=await request("/api/save-tileset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol,revision:item.revision,rules:item.rules})});item.revision=result.revision}if(state.mapDirty){const result=await request("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload())});state.revision=result.revision}state.dirty=false;state.mapDirty=false;state.dirtyTilesets.clear();state.stagedPinKeys.clear();state.history=[];state.future=[];status("Saved, validated and regenerated");await openMap()}catch(error){status(error.message,true)}}
 
-function updateAll(){if(!state.document)return;drawMap();updateInspector();renderPreview();const readOnly=state.document.editor.readOnly;$("#undo").disabled=readOnly||!state.history.length;$("#redo").disabled=readOnly||!state.future.length;$("#save").disabled=readOnly;$("#apply-geometry").disabled=readOnly;$("#remove-overrides").disabled=readOnly;$("#dirty-badge").textContent=readOnly?"Global baseline":state.dirty?"Unsaved":"Clean";$("#dirty-badge").classList.toggle("dirty",state.dirty);$("#rule-counts").textContent=`${(state.rules.overrides||[]).length} overrides · ${(state.rules.buildings||[]).length} structures`;updateWarnings()}
+function updateAll(){if(!state.document)return;drawMap();updateInspector();renderPreview();const readOnly=state.document.editor.readOnly;$("#terrain-mode").value=state.rules.terrainMode||"manual";$("#terrain-mode").disabled=readOnly;$("#undo").disabled=readOnly||!state.history.length;$("#redo").disabled=readOnly||!state.future.length;$("#save").disabled=!state.dirty;$("#apply-geometry").disabled=!state.selection.size;$("#remove-overrides").disabled=!state.selection.size;let canAnchor=false;try{selectedVisualRegion();canAnchor=true}catch(_error){}$("#stage-level").disabled=!canAnchor;$("#remove-level").disabled=!canAnchor;$("#dirty-badge").textContent=state.dirty?"Unsaved":readOnly?"Global baseline":"Clean";$("#dirty-badge").classList.toggle("dirty",state.dirty);const pinCount=Object.values(state.tilesetDocuments).reduce((sum,item)=>sum+(item.rules.pins||[]).length,0),anchorCount=(state.rules.terrainAnchors||[]).length;$("#rule-counts").textContent=`${pinCount} reusable tileset pins · ${anchorCount} region overrides`;updateWarnings()}
 function updateWarnings(){const groups={};(state.rules.overrides||[]).forEach(({x,y,...rule})=>{const key=JSON.stringify(rule);groups[key]=(groups[key]||0)+1});const repeated=Object.values(groups).filter(count=>count>=4).length;$("#warning-count").textContent=repeated?`${repeated} repeated rule${repeated>1?"s":""}; consider a tileset rule`:"No warnings"}
 
 // Minimal WebGL terrain preview. The game renderer remains authoritative.
@@ -335,8 +380,8 @@ function perspective(fov,aspect,near,far){const f=1/Math.tan(fov/2),nf=1/(near-f
 function lookAt(eye,target){let zx=eye[0]-target[0],zy=eye[1]-target[1],zz=eye[2]-target[2],l=Math.hypot(zx,zy,zz);zx/=l;zy/=l;zz/=l;let xx=-zz,xz=zx;l=Math.hypot(xx,xz);xx/=l;xz/=l;const yx=-zy*xz,yy=zx*xz-zz*xx,yz=zy*xx;return[xx,yx,zx,0,0,yy,zy,0,xz,yz,zz,0,-xx*eye[0]-xz*eye[2],-yx*eye[0]-yy*eye[1]-yz*eye[2],-zx*eye[0]-zy*eye[1]-zz*eye[2],1]}
 function multiply(a,b){const o=new Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++)o[c*4+r]=a[r]*b[c*4]+a[4+r]*b[c*4+1]+a[8+r]*b[c*4+2]+a[12+r]*b[c*4+3];return o}
 function atlasUV(id,role){const local=id-(role==="secondary"?512:0),rows=Math.ceil(state.document.tilesets[role].count/16),u=(local%16)/16,v=Math.floor(local/16)/rows;return[u,v,1/16,1/rows]}
-function previewMaterial(material,cell){if(material==="none"||material?.layer==="none")return null;const raw=material?.metatile??"self";return{id:raw==="self"?cell.metatile:Number(raw),layer:material?.layer||"full"}}
-function addFace(batch,corners,material,shade,selected,vTop=0,vBottom=1,uLeft=0,uRight=1){if(material===null)return;const role=material.id>=512?"secondary":"primary",uv=atlasUV(material.id,role),base=batch[`${role}:${material.layer}`],start=base.vertices.length/7;[[uLeft,vTop],[uRight,vTop],[uRight,vBottom],[uLeft,vBottom]].forEach(([u,v],i)=>base.vertices.push(...corners[i],uv[0]+u*uv[2],uv[1]+v*uv[3],shade,selected?1:0));base.indices.push(start,start+1,start+2,start,start+2,start+3)}
+function previewMaterial(material,cell){if(material==="none"||material?.layer==="none")return null;const raw=material?.metatile??"self";return{id:raw==="self"?cell.metatile:Number(raw),layer:material?.layer||"full",rotation:material?.rotation||0,flipX:Boolean(material?.flipX),flipY:Boolean(material?.flipY)}}
+function addFace(batch,corners,material,shade,selected,vTop=0,vBottom=1,uLeft=0,uRight=1){if(material===null)return;const role=material.id>=512?"secondary":"primary",uv=atlasUV(material.id,role),base=batch[`${role}:${material.layer}`],start=base.vertices.length/7,turns=(material.rotation||0)/90;[[0,0],[1,0],[1,1],[0,1]].forEach(([rawX,rawY],i)=>{let x=material.flipX?1-rawX:rawX,y=material.flipY?1-rawY:rawY;for(let turn=0;turn<turns;turn++)[x,y]=[1-y,x];const u=uLeft+x*(uRight-uLeft),v=vTop+y*(vBottom-vTop);base.vertices.push(...corners[i],uv[0]+u*uv[2],uv[1]+v*uv[3],shade,selected?1:0)});base.indices.push(start,start+1,start+2,start,start+2,start+3)}
 function buildingAtCell(cell) {
   const placement=(state.rules.buildings||[]).find((item)=>{
     const template=state.document.editor.templates[item.template];
@@ -388,7 +433,7 @@ function previewGeometry() {
   for(const role of ["primary","secondary"])
     for(const layer of ["full","base","foreground"])
       batch[`${role}:${layer}`]={vertices:[],indices:[]};
-  if(state.document.geometry?.modelVersion===1)return previewShellGeometry(batch);
+  if(state.document.geometry?.modelVersion>=1&&!state.draftRule&&!state.dirtyTilesets.size&&!state.mapDirty)return previewShellGeometry(batch);
 
   state.document.cells.forEach((cell)=>{
     const effective=effectiveAt(cell),r=normalizeClientRule(effective.rule);
@@ -397,7 +442,7 @@ function previewGeometry() {
     const north=state.document.map.height/2-cell.y,south=north-1;
     const centerX=(left+right)/2,centerZ=(north+south)/2;
     const ground=Number(r.groundHeight)||0;
-    const featureHeight=["extruded","cutout","roof","building-part"].includes(r.shape)?Math.max(Number(r.height)||.05,.05):.04;
+    const featureHeight=["extruded","cliff","stairs","bridge","cutout","roof","building-part"].includes(r.shape)?Math.max(Number(r.height)||.05,.05):.04;
     const selected=state.selection.has(cell.id),faces=r.faces;
     const building=buildingAtCell(cell);
     let topNW=ground+featureHeight,topNE=topNW,topSE=topNW,topSW=topNW;

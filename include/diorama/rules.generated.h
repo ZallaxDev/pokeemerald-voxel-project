@@ -4,10 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct DioramaGeneratedTilesetV2 { uint8_t id, role; uint16_t metatileCount; const char *symbol; };
-struct DioramaGeneratedLayoutV2 { uint16_t id; uint8_t primaryTilesetId, secondaryTilesetId; const char *symbol; };
+struct DioramaGeneratedTilesetV2 { uint8_t id, role, terrainClass; uint16_t metatileCount; const char *symbol; };
+struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount; const char *symbol; };
+struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile; int16_t groundQ16, heightQ16; uint16_t volumeNorthY, volumeSouthY, volumeTopMetatile, volumeBackMetatiles[3], volumeFrontMetatiles[3]; uint8_t shape, archetype, terrainClass, axis, volumeRunRows, flags, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; };
+#define DIORAMA_GENERATED_TERRAIN_AUTOMATIC (1u << 0)
+#define DIORAMA_GENERATED_TERRAIN_MEASURED  (1u << 1)
 struct DioramaGeneratedMapV2 { uint8_t group, number, supported, cameraProfile, mapType, groundMode; uint16_t layoutId, groundMetatile, mapScopeId; uint32_t contextualRuleOffset, exactPatternOffset; uint16_t contextualRuleCount, exactPatternCount; float pitchRadians, focalLength; const char *symbol, *unsupportedReason; };
-struct DioramaGeneratedActionV2 { uint8_t archetypeId, poolId, profileId, axis, groundMode, terrainClass; uint16_t groundMetatile, flags; float groundOffset, height; };
+struct DioramaGeneratedActionV2 { uint8_t archetypeId, poolId, profileId, axis, groundMode, terrainClass, shape; uint16_t groundMetatile, flags; float groundOffset, height; uint16_t faceMetatiles[6]; uint8_t faceLayers[6], faceRotations[6], faceFlags[6]; };
 struct DioramaGeneratedBehaviorRuleV2 { uint8_t behavior; uint32_t placementCount; const char *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
 struct DioramaGeneratedPoolV2 { uint16_t id; const char *logicalId, *description; };
 struct DioramaGeneratedProfileV2 { uint16_t id; uint8_t archetypeId; uint32_t maskOffset, sampleOffset; uint16_t maskCount, sampleCount; const char *logicalId; };
@@ -26,6 +29,8 @@ extern const struct DioramaGeneratedTilesetV2 gDioramaTilesetsV2[];
 extern const size_t gDioramaTilesetV2Count;
 extern const struct DioramaGeneratedLayoutV2 gDioramaLayoutsV2[];
 extern const size_t gDioramaLayoutV2Count;
+extern const struct DioramaGeneratedTerrainV2 gDioramaTerrainV2[];
+extern const size_t gDioramaTerrainV2Count;
 extern const struct DioramaGeneratedMapV2 gDioramaMapsV2[];
 extern const size_t gDioramaMapV2Count;
 extern const struct DioramaGeneratedActionV2 gDioramaDefaultActionV2;

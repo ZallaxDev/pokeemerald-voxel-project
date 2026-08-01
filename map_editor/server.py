@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -14,6 +15,7 @@ import sys
 import tempfile
 import threading
 import webbrowser
+from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -35,7 +37,7 @@ from catalog import CatalogError, load_tilesets, load_world  # noqa: E402
 from emerald_compositor import (EmeraldCompositorError, METATILE_SIZE,  # noqa: E402
                                  TilesetComposer, encode_rgba_png)
 from occupancy_model import editor_geometry  # noqa: E402
-from terrain_volumes import resolve_volumes  # noqa: E402
+from terrain_volumes import normalize_rule, resolve_layout_terrain  # noqa: E402
 
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -44,6 +46,8 @@ STATIC_FILES = {
     "/editor.js": ("editor.js", "text/javascript; charset=utf-8"),
 }
 WRITE_LOCK = threading.Lock()
+ATLAS_LOCK = threading.Lock()
+ATLAS_CACHE: dict[tuple[str, str | None], dict[str, bytes]] = {}
 
 
 def json_bytes(value: object) -> bytes:
@@ -64,9 +68,25 @@ def map_sources() -> dict[str, Path]:
     return result
 
 
+def map_destination(symbol: str) -> Path:
+    source = map_sources().get(symbol)
+    if source is not None:
+        return source
+    name = symbol.removeprefix("MAP_").lower()
+    return (REPO_ROOT / "data/diorama/maps" / f"{name}.json").resolve()
+
+
+@lru_cache(maxsize=1)
+def catalog_data() -> tuple[dict, list, list]:
+    tilesets = load_tilesets(REPO_ROOT)
+    maps, layouts = load_world(REPO_ROOT)
+    return tilesets, maps, layouts
+
+
+@lru_cache(maxsize=1)
 def map_listing() -> list[dict]:
     sources = map_sources()
-    maps, _ = load_world(REPO_ROOT)
+    _, maps, _ = catalog_data()
     result = []
     for item in maps:
         path = sources.get(item["symbol"])
@@ -82,42 +102,12 @@ def map_listing() -> list[dict]:
     return sorted(result, key=lambda item: item["symbol"])
 
 
-def normalize_rule(rule: dict) -> dict:
-    archetype = rule.get("archetype")
-    shape = {
-        "ground": "flat", "void": "hidden", "ledge": "ledge",
-        "water": "water", "shallow-water": "water", "waterfall": "water",
-        "current": "water", "hot-spring": "water",
-        "cliff": "cliff", "mound": "cliff", "wall-volume": "cliff",
-        "bridge": "bridge", "deck": "bridge", "rail": "bridge", "support": "bridge",
-        "stairs-n": "stairs", "stairs-s": "stairs", "stairs-e": "stairs",
-        "stairs-w": "stairs", "stairs-down-n": "stairs",
-        "stairs-down-s": "stairs", "stairs-down-e": "stairs",
-        "stairs-down-w": "stairs",
-    }.get(archetype, "cutout" if archetype else rule.get("shape", "flat"))
-    faces = {
-        face: {"metatile": "self", "layer": "foreground" if face == "plane" else "full"}
-        for face in ("top", "north", "east", "south", "west", "plane")
-    }
-    for face, material in rule.get("faces", {}).items():
-        faces[face] = material
-    return {
-        "shape": shape,
-        "archetype": archetype,
-        "profile": rule.get("profile", "none"),
-        "semanticProfile": rule.get("profile"),
-        "axis": rule.get("axis", "x"),
-        "baseMetatile": rule.get("baseMetatile", "self"),
-        "groundHeight": rule.get("groundOffset", rule.get("groundHeight", 0)),
-        "height": rule.get("height", 0),
-        "faces": faces,
-    }
-
-
 def load_templates() -> dict:
     templates = {}
     for path in sorted((REPO_ROOT / "data/diorama/buildings").glob("*.json")):
         templates.update(load_json(path).get("templates", {}))
+    if not templates:
+        return templates
     compiled = compile_data(REPO_ROOT)
     profiles = compiled["roof_profiles"]
     for name, row in zip(sorted(templates), compiled["templates"]):
@@ -131,7 +121,26 @@ def tileset_rule_document(symbol: str) -> dict:
         data = load_json(path)
         if data.get("tileset") == symbol:
             return data
-    return {"pins": []}
+    return {"schemaVersion": 2, "kind": "tileset", "tileset": symbol,
+            "terrainMode": "automatic", "pins": []}
+
+
+def tileset_sources() -> dict[str, Path]:
+    result = {}
+    for path in sorted((REPO_ROOT / "data/diorama/tilesets").glob("*.json")):
+        data = load_json(path)
+        symbol = data.get("tileset")
+        if isinstance(symbol, str):
+            result[symbol] = path.resolve()
+    return result
+
+
+def tileset_destination(symbol: str) -> Path:
+    sources = tileset_sources()
+    if symbol in sources:
+        return sources[symbol]
+    name = re.sub(r"(?<!^)(?=[A-Z])", "_", symbol.removeprefix("gTileset_")).lower()
+    return (REPO_ROOT / "data/diorama/tilesets" / f"{name}.json").resolve()
 
 
 def enrich_document(document: dict) -> dict:
@@ -149,38 +158,50 @@ def enrich_document(document: dict) -> dict:
             "status": {"supported": True},
             "camera": {"profile": "interior" if interior else "exterior"},
             "groundPolicy": {"mode": "automatic"},
+            "terrainMode": defaults.get("mapDefault", {}).get("terrainMode", "automatic"),
+            "terrainAnchors": [],
             "contextualRules": [],
             "exactPatterns": [],
         }
     rules = document["rules"]
+    rules.setdefault("terrainMode", defaults.get("mapDefault", {}).get(
+        "terrainMode", "automatic"))
     behavior_rules = {item["behavior"]: item["action"]
                       for item in defaults.get("behaviorRules", [])}
+    terrain_defaults = defaults["tilesetTerrainDefaults"]
     tileset_docs = {
         role: tileset_rule_document(info["symbol"])
         for role, info in document["tilesets"].items()
     }
-    resolved = []
+    terrain_cells = []
     for cell in document["cells"]:
-        source = "fallback"
-        rule = defaults["default"]
-        pin = next((item for item in tileset_docs[cell["tilesetRole"]].get("pins", [])
-                    if item["metatile"] == cell["localMetatile"]), None)
-        if pin is not None:
-            source, rule = "tileset pin", pin["action"]
-        else:
-            behavior = behavior_names.get(cell["behavior"])
-            if behavior in behavior_rules:
-                source, rule = f"behavior:{behavior}", behavior_rules[behavior]
-            elif cell["collision"] or cell["elevation"] not in (0, 3, 15):
-                source = "collision/elevation"
-            elif cell["layerType"]:
-                source = "visual heuristic"
-        resolved.append({"source": source, "rule": normalize_rule(rule)})
+        symbol = document["tilesets"][cell["tilesetRole"]]["symbol"]
+        terrain_cells.append({**cell, "tileset": symbol,
+                              "behaviorName": behavior_names.get(cell["behavior"])})
+    pin_actions = {}
+    for role, tile_document in tileset_docs.items():
+        symbol = document["tilesets"][role]["symbol"]
+        pin_actions.update({(symbol, item["metatile"]): item["action"]
+                            for item in tile_document.get("pins", [])})
+    authored_cells = {}
+    for group, item in enumerate(rules.get("terrainAnchors", []), start=1):
+        payload = {key: item[key] for key in
+                   ("level", "height", "shape", "archetype", "terrainClass", "axis")
+                   if key in item}
+        payload["group"] = group
+        targets = item.get("targets", [{"x": item["x"], "y": item["y"]}])
+        for target in targets:
+            authored_cells[target["y"] * document["map"]["width"] + target["x"]] = payload
+    resolved = resolve_layout_terrain(
+        terrain_cells, document["map"]["width"], document["map"]["height"],
+        defaults["default"], terrain_defaults, behavior_rules, pin_actions,
+        [rules.get("terrainMode", defaults.get("mapDefault", {}).get(
+            "terrainMode", "automatic")) == "automatic"
+         and tileset_docs[cell["tilesetRole"]].get("terrainMode", "automatic") == "automatic"
+         for cell in document["cells"]],
+        authored_cells)
 
-    resolve_volumes(document["cells"], resolved,
-                    document["map"]["width"], document["map"]["height"])
-
-    tilesets = load_tilesets(REPO_ROOT)
+    tilesets, _, _ = catalog_data()
     primary_info = tilesets[document["tilesets"]["primary"]["symbol"]]
     composers = {}
     for role, info in document["tilesets"].items():
@@ -223,56 +244,95 @@ def enrich_document(document: dict) -> dict:
         }
     document["editor"] = {
         "revision": digest((REPO_ROOT / document["ruleSource"]).read_bytes())
-                    if document["ruleSource"] else digest(json_bytes(rules)),
-        "readOnly": document["ruleSource"] is None,
+                    if document["ruleSource"] else None,
+        "readOnly": False,
+        "source": map_destination(document["map"]["symbol"]).relative_to(REPO_ROOT).as_posix(),
         "behaviorNames": {str(key): value for key, value in behavior_names.items()},
         "templates": templates,
+        "tilesetTerrainModes": {
+            role: tile_document.get("terrainMode", "automatic")
+            for role, tile_document in tileset_docs.items()
+        },
+        "tilesetDocuments": {
+            role: {
+                "rules": tile_document,
+                "source": tileset_destination(document["tilesets"][role]["symbol"])
+                          .relative_to(REPO_ROOT).as_posix(),
+                "revision": digest(tileset_destination(
+                    document["tilesets"][role]["symbol"]).read_bytes())
+                    if tileset_destination(document["tilesets"][role]["symbol"]).exists()
+                    else None,
+            }
+            for role, tile_document in tileset_docs.items()
+        },
+        "semanticPools": [item["id"] for item in defaults.get("semanticPools", [])],
         "resolved": resolved,
     }
-    document["geometry"] = editor_geometry(document["cells"], resolved,
-                                           defaults.get("profiles", []))
+    if len(document["cells"]) <= 1024:
+        document["geometry"] = editor_geometry(document["cells"], resolved,
+                                               defaults.get("profiles", []))
+    else:
+        document["geometry"] = {"modelVersion": 0, "unitsPerCell": 16,
+                                "spans": [], "faces": [], "provenance": []}
     return document
 
 
+def build_atlases(symbol: str, primary_symbol: str | None = None) -> dict[str, bytes]:
+    key = (symbol, primary_symbol)
+    with ATLAS_LOCK:
+        cached = ATLAS_CACHE.get(key)
+        if cached is not None:
+            return cached
+        tilesets, _, _ = catalog_data()
+        if symbol not in tilesets:
+            raise RuleError("unknown tileset")
+        info = tilesets[symbol]
+        if info.role == "secondary":
+            if primary_symbol not in tilesets or tilesets[primary_symbol].role != "primary":
+                raise RuleError("secondary atlas requires its primary tileset")
+            primary_info = tilesets[primary_symbol]
+        else:
+            primary_info = info
+        primary_root = REPO_ROOT / primary_info.root
+        selected_root = REPO_ROOT / info.root
+        try:
+            composer = TilesetComposer(
+                primary_root, selected_root,
+                REPO_ROOT / primary_info.metatiles_root,
+                REPO_ROOT / info.metatiles_root)
+        except EmeraldCompositorError as error:
+            raise RuleError(str(error)) from error
+        secondary = info.role == "secondary"
+        count = composer.metatile_count(secondary)
+        columns, size = 16, METATILE_SIZE
+        width = columns * size
+        height = ((count + columns - 1) // columns) * size
+        outputs = {name: bytearray(width * height * 4)
+                   for name in ("base", "foreground", "full")}
+        for metatile in range(count):
+            origin_x = (metatile % columns) * size
+            origin_y = (metatile // columns) * size
+            global_id = metatile + (0x200 if secondary else 0)
+            layers = composer.compose_metatile(global_id)
+            for layer_name, layer in zip(("base", "foreground", "full"), layers):
+                output = outputs[layer_name]
+                for py in range(size):
+                    for px in range(size):
+                        target = ((origin_y + py) * width + origin_x + px) * 4
+                        output[target:target + 4] = bytes(layer[py * size + px].rgba)
+        result = {name: encode_rgba_png(width, height, bytes(output))
+                  for name, output in outputs.items()}
+        ATLAS_CACHE[key] = result
+        return result
+
+
 def build_atlas(symbol: str, primary_symbol: str | None = None, layer_name: str = "full") -> bytes:
-    tilesets = load_tilesets(REPO_ROOT)
+    tilesets, _, _ = catalog_data()
     if symbol not in tilesets:
         raise RuleError("unknown tileset")
     if layer_name not in ("full", "base", "foreground"):
         raise RuleError("unknown atlas layer")
-    info = tilesets[symbol]
-    if info.role == "secondary":
-        if primary_symbol not in tilesets or tilesets[primary_symbol].role != "primary":
-            raise RuleError("secondary atlas requires its primary tileset")
-        primary_info = tilesets[primary_symbol]
-    else:
-        primary_info = info
-    primary_root = REPO_ROOT / primary_info.root
-    selected_root = REPO_ROOT / info.root
-    try:
-        composer = TilesetComposer(
-            primary_root, selected_root,
-            REPO_ROOT / primary_info.metatiles_root,
-            REPO_ROOT / info.metatiles_root)
-    except EmeraldCompositorError as error:
-        raise RuleError(str(error)) from error
-    secondary = info.role == "secondary"
-    count = composer.metatile_count(secondary)
-    columns, size = 16, METATILE_SIZE
-    width = columns * size
-    height = ((count + columns - 1) // columns) * size
-    output = bytearray(width * height * 4)
-    layer_index = {"base": 0, "foreground": 1, "full": 2}[layer_name]
-    for metatile in range(count):
-        origin_x = (metatile % columns) * size
-        origin_y = (metatile // columns) * size
-        global_id = metatile + (0x200 if secondary else 0)
-        layer = composer.compose_metatile(global_id)[layer_index]
-        for py in range(size):
-            for px in range(size):
-                target = ((origin_y + py) * width + origin_x + px) * 4
-                output[target:target + 4] = bytes(layer[py * size + px].rgba)
-    return encode_rgba_png(width, height, bytes(output))
+    return build_atlases(symbol, primary_symbol)[layer_name]
 
 
 def validate_candidate(destination: Path, candidate: bytes) -> None:
@@ -309,13 +369,25 @@ def validate_payload(payload: dict) -> tuple[Path, bytes]:
     if set(payload) - {"symbol", "revision", "rules"}:
         raise RuleError("request contains unknown fields")
     symbol = payload.get("symbol")
-    sources = map_sources()
-    if symbol not in sources:
-        raise RuleError("unknown or non-editable map")
+    if symbol not in {item["symbol"] for item in map_listing()}:
+        raise RuleError("unknown map")
     rules = payload.get("rules")
     if not isinstance(rules, dict) or rules.get("map") != symbol:
         raise RuleError("rules do not match the selected map")
-    return sources[symbol], json_bytes(rules)
+    return map_destination(symbol), json_bytes(rules)
+
+
+def validate_tileset_payload(payload: dict) -> tuple[Path, bytes]:
+    if set(payload) - {"symbol", "revision", "rules"}:
+        raise RuleError("request contains unknown fields")
+    symbol = payload.get("symbol")
+    if symbol not in load_tilesets(REPO_ROOT):
+        raise RuleError("unknown tileset")
+    rules = payload.get("rules")
+    if (not isinstance(rules, dict) or rules.get("kind") != "tileset"
+            or rules.get("tileset") != symbol):
+        raise RuleError("rules do not match the selected tileset")
+    return tileset_destination(symbol), json_bytes(rules)
 
 
 class EditorHandler(BaseHTTPRequestHandler):
@@ -354,7 +426,7 @@ class EditorHandler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed.query)
                 symbol = query.get("symbol", [None])[0]
                 role = query.get("role", [None])[0]
-                tilesets = load_tilesets(REPO_ROOT)
+                tilesets, _, _ = catalog_data()
                 if symbol not in tilesets or role not in ("primary", "secondary") or tilesets[symbol].role != role:
                     raise RuleError("invalid tileset atlas request")
                 primary = query.get("primary", [None])[0]
@@ -384,17 +456,19 @@ class EditorHandler(BaseHTTPRequestHandler):
                     "commands": command_output,
                 })
                 return
-            destination, candidate = validate_payload(payload)
-            if self.path == "/api/validate":
+            tileset_request = self.path in ("/api/validate-tileset", "/api/save-tileset")
+            destination, candidate = (validate_tileset_payload(payload) if tileset_request
+                                      else validate_payload(payload))
+            if self.path in ("/api/validate", "/api/validate-tileset"):
                 validate_candidate(destination, candidate)
                 self.send_json(HTTPStatus.OK, {"ok": True, "message": "Rules are valid"})
                 return
-            if self.path != "/api/save":
+            if self.path not in ("/api/save", "/api/save-tileset"):
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             with WRITE_LOCK:
-                current = destination.read_bytes()
-                if payload.get("revision") != digest(current):
+                current_revision = digest(destination.read_bytes()) if destination.exists() else None
+                if payload.get("revision") != current_revision:
                     self.send_json(HTTPStatus.CONFLICT, {"error": "The rules file changed outside the editor; reopen the map"})
                     return
                 validate_candidate(destination, candidate)
@@ -405,6 +479,7 @@ class EditorHandler(BaseHTTPRequestHandler):
                         temporary.flush()
                         os.fsync(temporary.fileno())
                     os.replace(temporary_name, destination)
+                    map_listing.cache_clear()
                 finally:
                     if os.path.exists(temporary_name):
                         os.unlink(temporary_name)

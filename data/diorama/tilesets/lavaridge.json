@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "kind": "tileset",
+  "tileset": "gTileset_Lavaridge",
+  "terrainMode": "manual",
+  "pins": [
+    {
+      "metatile": 112,
+      "action": { "archetype": "cliff", "pool": "terrain", "terrainClass": "rock", "axis": "z", "height": 1.0 }
+    },
+    {
+      "metatile": 113,
+      "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "rock" }
+    },
+    {
+      "metatile": 114,
+      "action": { "archetype": "cliff", "pool": "terrain", "terrainClass": "rock", "axis": "z", "height": 1.0 }
+    },
+    {
+      "metatile": 116,
+      "action": { "archetype": "cliff", "pool": "terrain", "terrainClass": "rock", "axis": "x", "height": 1.0 }
+    },
+    {
+      "metatile": 120,
+      "action": { "archetype": "cliff", "pool": "terrain", "terrainClass": "rock", "axis": "cross", "height": 1.0 }
+    },
+    {
+      "metatile": 121,
+      "action": { "archetype": "cliff", "pool": "terrain", "terrainClass": "rock", "axis": "cross", "height": 1.0 }
+    },
+    {
+      "metatile": 122,
+      "action": { "archetype": "cliff", "pool": "terrain", "terrainClass": "rock", "axis": "cross", "height": 1.0 }
+    },
+    {
+      "metatile": 123,
+      "action": { "archetype": "cliff", "pool": "terrain", "terrainClass": "rock", "axis": "cross", "height": 1.0 }
+    },
+    {
+      "metatile": 124,
+      "action": { "archetype": "cliff", "pool": "terrain", "terrainClass": "rock", "axis": "cross", "height": 1.0 }
+    },
+    {
+      "metatile": 126,
+      "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "rock" }
+    },
+    {
+      "metatile": 127,
+      "action": { "archetype": "ground", "pool": "terrain", "terrainClass": "rock" }
+    }
+  ]
+}

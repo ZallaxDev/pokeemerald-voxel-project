@@ -11,6 +11,7 @@
 #define CHECK_CLOSE(actual, expected) CheckClose((actual), (expected), #actual, __LINE__)
 
 static struct DioramaSceneSnapshot sSnapshot;
+static struct DioramaResolvedCell sResolvedCells[DIORAMA_MAX_VISIBLE_CELLS];
 static uint32_t sPixels[DIORAMA_SPRITE_MAX_PIXELS];
 
 static void Check(bool condition, const char *expression, int line)
@@ -216,6 +217,25 @@ static void TestJumpLift(void)
     CHECK_CLOSE(pose.y, 0.5f);
 }
 
+static void TestResolvedPlateauPose(void)
+{
+    struct DioramaObjectSnapshot object = MakeObject();
+    struct DioramaSpritePose pose;
+    int index = 2 * DIORAMA_GRID_WIDTH + 2;
+
+    memset(sResolvedCells, 0, sizeof(sResolvedCells));
+    object.previousMapX = object.currentMapX = 2;
+    object.previousMapY = object.currentMapY = 2;
+    sResolvedCells[index].shape = DIORAMA_SHAPE_FLAT;
+    sResolvedCells[index].groundHeight = 2.0f;
+    sResolvedCells[index].topHeight = 2.0f;
+    CHECK(DioramaSprite_BuildResolvedPose(&sSnapshot, sResolvedCells,
+                                           sSnapshot.visibleCellCount,
+                                           &object, &pose));
+    CHECK_CLOSE(pose.groundY, 2.0f);
+    CHECK_CLOSE(pose.y, 2.0f);
+}
+
 static void TestCardinalMovementAnchors(void)
 {
     struct DioramaObjectSnapshot object = MakeObject();
@@ -319,6 +339,7 @@ int main(void)
     TestSupportAndFrameKeys();
     TestPoseAndInterpolation();
     TestJumpLift();
+    TestResolvedPlateauPose();
     TestCardinalMovementAnchors();
     TestInterpolationDiscontinuities();
     TestDepthOrder();

@@ -40,6 +40,7 @@ static GLuint sDebugVertexBuffer;
 static GLint sCameraLocation;
 static GLint sCameraPitchLocation;
 static GLint sFocalLengthLocation;
+static GLint sAspectCorrectionLocation;
 static GLint sImageLocation;
 static GLint sBaseImageLocation;
 static GLint sForegroundImageLocation;
@@ -60,6 +61,7 @@ static const char sTerrainVertexShader[] =
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
+    "uniform float aspectCorrection;\n"
     "out vec2 uv;\n"
     "out float shade;\n"
     "flat out int textureLayer;\n"
@@ -76,7 +78,7 @@ static const char sTerrainVertexShader[] =
     "  float relativeZ = position.z - cameraPosition.y;\n"
     "  float depth = (cameraHeight - position.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
     "  float vertical = -(cameraHeight - position.y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;\n"
-    "  float clipX = relativeX * focalLength * 2.0 / 240.0;\n"
+    "  float clipX = relativeX * focalLength * 2.0 / 240.0 * aspectCorrection;\n"
     "  float clipY = -0.04 * depth + vertical * focalLength * 2.0 / 160.0;\n"
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
@@ -159,13 +161,15 @@ static bool CreateProgram(void)
     sCameraLocation = dglGetUniformLocation(sProgram, "cameraPosition");
     sCameraPitchLocation = dglGetUniformLocation(sProgram, "cameraPitch");
     sFocalLengthLocation = dglGetUniformLocation(sProgram, "focalLength");
+    sAspectCorrectionLocation = dglGetUniformLocation(sProgram, "aspectCorrection");
     sImageLocation = dglGetUniformLocation(sProgram, "image");
     sBaseImageLocation = dglGetUniformLocation(sProgram, "baseImage");
     sForegroundImageLocation = dglGetUniformLocation(sProgram, "foregroundImage");
     sDebugColorLocation = dglGetUniformLocation(sProgram, "debugColor");
     sRenderPassLocation = dglGetUniformLocation(sProgram, "renderPass");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
-        && sFocalLengthLocation >= 0 && sImageLocation >= 0
+        && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
+        && sImageLocation >= 0
         && sBaseImageLocation >= 0 && sForegroundImageLocation >= 0
         && sDebugColorLocation >= 0 && sRenderPassLocation >= 0;
 }
@@ -244,10 +248,21 @@ static void SetTerrainMaterial(struct DioramaTerrainMaterial *material,
 
     material->metatileId = metatileId;
     material->layer = layer;
+    material->rotation = 0;
+    material->flags = 0;
     material->u0 = uv.u0;
     material->v0 = uv.v0;
     material->u1 = uv.u1;
     material->v1 = uv.v1;
+}
+
+static void SetTerrainMaterialTransformed(struct DioramaTerrainMaterial *material,
+                                          uint16_t metatileId, uint8_t layer,
+                                          uint8_t rotation, uint8_t flags)
+{
+    SetTerrainMaterial(material, metatileId, layer);
+    material->rotation = rotation;
+    material->flags = flags;
 }
 
 static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
@@ -318,6 +333,10 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->structureLocalX = resolvedCells[gridIndex].structureLocalX;
             cell->structureLocalY = resolvedCells[gridIndex].structureLocalY;
             cell->volumeMaterialCount = resolvedCells[gridIndex].volumeRunRows;
+            cell->cliffEdgeMask = resolvedCells[gridIndex].cliffEdgeMask;
+            cell->cliffBaseMask = resolvedCells[gridIndex].cliffBaseMask;
+            cell->cliffTransitionMask = resolvedCells[gridIndex].cliffTransitionMask;
+            cell->cliffCornerMask = resolvedCells[gridIndex].cliffCornerMask;
             cell->groundHeight = resolvedCells[gridIndex].groundHeight;
             cell->visualHeight = resolvedCells[gridIndex].topHeight;
             cell->featureHeight = resolvedCells[gridIndex].featureHeight;
@@ -335,8 +354,11 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                 uint16_t materialId = resolvedCells[gridIndex].materials[face].metatileId;
                 if (materialId == DIORAMA_MATERIAL_METATILE_SELF)
                     materialId = source->metatileId;
-                SetTerrainMaterial(&cell->materials[face], materialId,
-                                   resolvedCells[gridIndex].materials[face].layer);
+                SetTerrainMaterialTransformed(
+                    &cell->materials[face], materialId,
+                    resolvedCells[gridIndex].materials[face].layer,
+                    resolvedCells[gridIndex].materials[face].rotation,
+                    resolvedCells[gridIndex].materials[face].flags);
                 SetTerrainMaterial(&cell->underlayMaterials[face], source->metatileId,
                                    DIORAMA_MATERIAL_BASE);
             }
@@ -354,38 +376,20 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             else if (cell->shape == DIORAMA_SHAPE_CLIFF && cell->volumeMaterialCount != 0)
             {
                 const struct DioramaResolvedCell *resolved = &resolvedCells[gridIndex];
-                int extent = resolved->volumeSouthY - resolved->volumeNorthY + 1;
-                int topY = resolved->volumeNorthY
-                         + (source->mapY - resolved->volumeNorthY) % (extent < 2 ? extent : 2);
-                const struct DioramaCellSnapshot *topSource = FindSnapshotCell(
-                    snapshot, source->mapX, topY);
                 uint8_t band;
 
-                if (topSource != NULL)
-                    SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
-                                       topSource->metatileId, DIORAMA_MATERIAL_FULL);
+                SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
+                                   resolved->volumeTopMetatile, DIORAMA_MATERIAL_FULL);
                 for (band = 0; band < cell->volumeMaterialCount; band++)
                 {
-                    int frontY = resolved->volumeSouthY - band;
-                    int backY = resolved->volumeNorthY + band;
-                    const struct DioramaCellSnapshot *frontSource;
-                    const struct DioramaCellSnapshot *backSource;
-
-                    if (frontY < resolved->volumeNorthY)
-                        frontY = resolved->volumeNorthY;
-                    if (backY > resolved->volumeSouthY)
-                        backY = resolved->volumeSouthY;
-                    frontSource = FindSnapshotCell(snapshot, source->mapX, frontY);
-                    backSource = FindSnapshotCell(snapshot, source->mapX, backY);
-                    if (frontSource == NULL || backSource == NULL)
-                        break;
                     SetTerrainMaterial(&cell->volumeMaterials[0][band],
-                                       backSource->metatileId, DIORAMA_MATERIAL_FULL);
+                                       resolved->volumeBackMetatiles[band],
+                                       DIORAMA_MATERIAL_FULL);
                     for (face = 1; face < 4; face++)
                         SetTerrainMaterial(&cell->volumeMaterials[face][band],
-                                           frontSource->metatileId, DIORAMA_MATERIAL_FULL);
+                                           resolved->volumeFrontMetatiles[band],
+                                           DIORAMA_MATERIAL_FULL);
                 }
-                cell->volumeMaterialCount = band;
             }
             else if (cell->shape == DIORAMA_SHAPE_CLIFF)
             {
@@ -602,7 +606,8 @@ static uint32_t AppendBoundsVertices(uint32_t count, const struct DioramaTerrain
 
 void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                            GLuint foregroundAtlasTexture, float cameraX, float cameraZ,
-                           float cameraPitch, float focalLength, bool debug)
+                           float cameraPitch, float focalLength,
+                           float aspectCorrection, bool debug)
 {
     uint32_t debugVertexCount = 0;
     int i;
@@ -616,6 +621,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     dglUniform2f(sCameraLocation, cameraX, cameraZ);
     dglUniform1f(sCameraPitchLocation, cameraPitch);
     dglUniform1f(sFocalLengthLocation, focalLength);
+    dglUniform1f(sAspectCorrectionLocation, aspectCorrection);
     dglUniform1i(sImageLocation, 0);
     dglUniform1i(sBaseImageLocation, 1);
     dglUniform1i(sForegroundImageLocation, 2);

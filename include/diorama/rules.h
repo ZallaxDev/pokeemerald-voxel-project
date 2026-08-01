@@ -128,6 +128,22 @@ enum DioramaPlaneAxis
     DIORAMA_PLANE_AXIS_CROSS
 };
 
+enum DioramaCliffEdge
+{
+    DIORAMA_CLIFF_EDGE_NORTH = 1u << 0,
+    DIORAMA_CLIFF_EDGE_EAST = 1u << 1,
+    DIORAMA_CLIFF_EDGE_SOUTH = 1u << 2,
+    DIORAMA_CLIFF_EDGE_WEST = 1u << 3
+};
+
+enum DioramaCliffCorner
+{
+    DIORAMA_CLIFF_CORNER_NORTH_WEST = 1u << 0,
+    DIORAMA_CLIFF_CORNER_NORTH_EAST = 1u << 1,
+    DIORAMA_CLIFF_CORNER_SOUTH_EAST = 1u << 2,
+    DIORAMA_CLIFF_CORNER_SOUTH_WEST = 1u << 3
+};
+
 #define DIORAMA_MATERIAL_METATILE_SELF UINT16_C(0xFFFF)
 #define DIORAMA_MAX_VISUAL_SURFACES 3
 #define DIORAMA_BUILDING_MAX_FACADE_ROWS 4
@@ -145,6 +161,8 @@ struct DioramaFaceMaterial
 {
     uint16_t metatileId;
     uint8_t layer;
+    uint8_t rotation;
+    uint8_t flags;
 };
 
 struct DioramaResolvedSurface
@@ -219,6 +237,14 @@ struct DioramaResolvedCell
     uint8_t structureLocalY;
     uint8_t structureSouthFacadeRows;
     uint8_t volumeRunRows;
+    uint8_t volumeTerrainMeasured;
+    uint16_t volumeTopMetatile;
+    uint16_t volumeBackMetatiles[DIORAMA_VOLUME_MAX_ROWS];
+    uint16_t volumeFrontMetatiles[DIORAMA_VOLUME_MAX_ROWS];
+    uint8_t cliffEdgeMask;
+    uint8_t cliffBaseMask;
+    uint8_t cliffTransitionMask;
+    uint8_t cliffCornerMask;
     int16_t volumeNorthY;
     int16_t volumeSouthY;
     float groundHeight;

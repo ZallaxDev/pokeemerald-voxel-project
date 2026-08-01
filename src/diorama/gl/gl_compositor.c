@@ -24,7 +24,7 @@
 #define CAMERA_PITCH_STEP 0.08726646f
 #define CAMERA_DEFAULT_FOCAL_LENGTH 130.0f
 #define CAMERA_MIN_FOCAL_LENGTH 80.0f
-#define CAMERA_MAX_FOCAL_LENGTH 200.0f
+#define CAMERA_MAX_FOCAL_LENGTH 600.0f
 #define CAMERA_ZOOM_STEP 10.0f
 #define SOURCE_FADE_SECONDS 0.12
 #define CAMERA_TELEPORT_LIMIT 2.0f
@@ -856,7 +856,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
         {
             EnsureAtlas(&sSceneSnapshot);
             sCurrent3DReady = DioramaGLTerrain_Sync(&sSceneSnapshot, sAtlasResolvedCells)
-                           && DioramaGLObjects_Sync(&sSceneSnapshot);
+                           && DioramaGLObjects_Sync(&sSceneSnapshot, sAtlasResolvedCells);
         }
         current3D = sCurrent3DReady;
     }
@@ -964,30 +964,33 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
     {
         float cameraPitch;
         float cameraFocalLength;
+        float aspectCorrection = (float)DISPLAY_WIDTH * outputHeight
+                               / ((float)DISPLAY_HEIGHT * outputWidth);
 
         GetCameraPosition(&sRenderedSceneSnapshot, &sPreviousRenderedSceneSnapshot,
                           sHasPreviousRenderedSceneSnapshot,
                           current3D ? frameAlpha : 1.0f, &cameraX, &cameraZ);
         GetCameraSettings(&sRenderedSceneSnapshot, &cameraPitch, &cameraFocalLength);
         glEnable(GL_SCISSOR_TEST);
-        glScissor(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
+        glScissor(0, 0, outputWidth, outputHeight);
         glClearColor(0.035f, 0.055f, 0.07f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glViewport(gameX, outputHeight - gameY - gameHeight, gameWidth, gameHeight);
+        glViewport(0, 0, outputWidth, outputHeight);
         DioramaGLTerrain_Draw(sAtlasTexture.id, sBaseAtlasTexture.id,
                                sForegroundAtlasTexture.id, cameraX, cameraZ,
-                               cameraPitch, cameraFocalLength, sTerrainDebug);
+                               cameraPitch, cameraFocalLength,
+                               aspectCorrection, sTerrainDebug);
         DioramaGLObjects_Draw(current3D ? frameAlpha : 1.0f,
                                cameraX, cameraZ, cameraPitch,
-                               cameraFocalLength);
+                               cameraFocalLength, aspectCorrection);
         glDisable(GL_SCISSOR_TEST);
         glViewport(0, 0, outputWidth, outputHeight);
         dglUseProgram(sProgram);
         dglBindVertexArray(sVertexArray);
         if (BuildWeatherImage(&sRenderedSceneSnapshot))
             DrawTexture(&sWeatherTexture, outputWidth, outputHeight,
-                        gameX, gameY, gameWidth, gameHeight,
+                        0, 0, outputWidth, outputHeight,
                         0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, true, 1.0f);
         if (sTerrainDebug)
         {
@@ -1010,7 +1013,7 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                     gameX, gameY, gameWidth, gameHeight,
                     0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, false, 1.0f);
 
-    if (border && sBorderTexture.id != 0)
+    if (!drawTerrain && border && sBorderTexture.id != 0)
     {
         int innerWidth = gameWidth - 2;
         int innerHeight = gameHeight - 2;
@@ -1033,6 +1036,13 @@ void DioramaGL_SetVSync(bool enabled)
 void DioramaGL_ToggleTerrainDebug(void)
 {
     sTerrainDebug = !sTerrainDebug;
+}
+
+void DioramaGL_ToggleEnabled(void)
+{
+    sRenderMode = sRenderMode == DIORAMA_RENDER_CLASSIC_2D
+                ? DIORAMA_RENDER_AUTO
+                : DIORAMA_RENDER_CLASSIC_2D;
 }
 
 void DioramaGL_AdjustCameraZoom(int steps)

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from catalog import load_tilesets
-from compile_rules import RuleError, compile_data, load_json
+from compile_rules import RuleError, load_json
 
 
 def find_map(root: Path, symbol: str) -> tuple[Path, dict]:
@@ -50,7 +50,6 @@ def read_attributes(root: Path, tileset: str) -> tuple[str, list[int]]:
 
 
 def build_editor_document(root: Path, symbol: str) -> dict:
-    compile_data(root)
     map_path, map_data = find_map(root, symbol)
     layout = find_layout(root, map_data["layout"])
     rule_path, rule_data = find_rule_source(root, symbol)

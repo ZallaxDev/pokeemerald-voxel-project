@@ -267,6 +267,7 @@ test-diorama-rules: tests/diorama/test_rules.c $(DIORAMA_RULE_TEST_DEPS)
 	python3 tools/diorama_rules/test_catalog.py
 	python3 tools/diorama_rules/test_occupancy_model.py
 	python3 tools/diorama_rules/test_terrain_volumes.py
+	python3 tools/diorama_rules/test_g5_audit.py
 	python3 tools/diorama_rules/g5_audit.py --check --output build/diorama_catalog/g5_coverage.json
 	python3 map_editor/test_server.py
 	mkdir -p $(dir $(DIORAMA_RULES_TEST))

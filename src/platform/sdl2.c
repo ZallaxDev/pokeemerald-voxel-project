@@ -1159,6 +1159,10 @@ void ProcessEvents(void)
                 if (event.key.repeat == 0)
                     DioramaGL_ToggleTerrainDebug();
                 break;
+            case SDLK_F4:
+                if (event.key.repeat == 0)
+                    DioramaGL_ToggleEnabled();
+                break;
             case SDLK_COMMA:
                 DioramaGL_AdjustCameraPitch(-1);
                 break;

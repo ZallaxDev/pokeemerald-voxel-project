@@ -7,6 +7,8 @@
 
 #include "diorama/scene_snapshot.h"
 
+struct DioramaResolvedCell;
+
 #define DIORAMA_SPRITE_MAX_DIMENSION 64
 #define DIORAMA_SPRITE_MAX_PIXELS (DIORAMA_SPRITE_MAX_DIMENSION * DIORAMA_SPRITE_MAX_DIMENSION)
 
@@ -41,12 +43,26 @@ bool DioramaSprite_DecodeFrame(const struct DioramaSceneSnapshot *snapshot,
                                uint32_t *pixels, size_t pixelCapacity,
                                uint8_t *width, uint8_t *height);
 bool DioramaSprite_BuildPose(const struct DioramaSceneSnapshot *snapshot,
-                             const struct DioramaObjectSnapshot *object,
-                             struct DioramaSpritePose *pose);
+                              const struct DioramaObjectSnapshot *object,
+                              struct DioramaSpritePose *pose);
+bool DioramaSprite_BuildResolvedPose(const struct DioramaSceneSnapshot *snapshot,
+                                     const struct DioramaResolvedCell *resolvedCells,
+                                     uint16_t resolvedCount,
+                                     const struct DioramaObjectSnapshot *object,
+                                     struct DioramaSpritePose *pose);
 bool DioramaSprite_CanInterpolate(const struct DioramaSceneSnapshot *previousSnapshot,
                                   const struct DioramaObjectSnapshot *previousObject,
-                                  const struct DioramaSceneSnapshot *currentSnapshot,
-                                  const struct DioramaObjectSnapshot *currentObject);
+                                   const struct DioramaSceneSnapshot *currentSnapshot,
+                                   const struct DioramaObjectSnapshot *currentObject);
+bool DioramaSprite_CanInterpolateResolved(
+    const struct DioramaSceneSnapshot *previousSnapshot,
+    const struct DioramaResolvedCell *previousResolvedCells,
+    uint16_t previousResolvedCount,
+    const struct DioramaObjectSnapshot *previousObject,
+    const struct DioramaSceneSnapshot *currentSnapshot,
+    const struct DioramaResolvedCell *currentResolvedCells,
+    uint16_t currentResolvedCount,
+    const struct DioramaObjectSnapshot *currentObject);
 struct DioramaSpritePose DioramaSprite_InterpolatePose(struct DioramaSpritePose previous,
                                                          struct DioramaSpritePose current,
                                                          float alpha);

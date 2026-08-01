@@ -20,9 +20,10 @@ instead of reviving them.
 
 `maps/*.json` are `kind: map` documents. They identify the authoritative map and
 layout, explicitly state supported status (with a reason when unsupported), select a
-camera and automatic/manual ground policy, and may add contextual rules or exact
-patterns. `tilesets/*.json` are optional `kind: tileset` documents containing local
-metatile pins. Empty v1 building and tileset files have been removed.
+camera, ground policy and terrain inference mode, and may add plateau anchors,
+contextual rules or exact patterns. `tilesets/*.json` are optional `kind: tileset` documents containing
+local metatile pins and a terrain inference mode. Empty v1 building and tileset files
+have been removed.
 
 Every object has a closed key set. Duplicate JSON keys, unknown keys, invalid types,
 non-finite/out-of-range numbers, duplicate logical IDs across global and map-local
@@ -33,8 +34,16 @@ numeric references cannot be ambiguous.
 
 ## Actions and archetypes
 
-An action requires `archetype` and `pool`. Optional fields are `profile`, `axis`,
-`groundOffset`, `height`, and `groundPolicy`. The closed archetype set is:
+An action requires `archetype` and `pool`. Optional fields are `shape`, `profile`, `axis`,
+`groundOffset`, `height`, `groundPolicy`, and `faces`. `shape` explicitly overrides the
+coarse geometry normally derived from the archetype, allowing a reusable `rock` action
+to render as a `cliff`. `groundOffset` is an absolute
+visual datum and should not encode a reusable terrace level; cliff `height` is a
+relative course delta consumed by the topology solver. `faces` may override `top`,
+`north`, `east`, `south`, `west`, and `plane` with `self` or a global metatile plus
+`base`, `foreground`, or `full` layer; `"none"` suppresses a face. The closed archetype set is:
+Each face material may also specify `rotation` (`0`, `90`, `180`, or `270`) and
+boolean `flipX`/`flipY`; these transform UVs only and never alter gameplay or geometry.
 
 ```text
 ground void water shallow-water waterfall current hot-spring
@@ -88,6 +97,37 @@ Ground policy is exactly one of:
 
 Automatic policy leaves compatible-ground selection to the later occupancy runtime.
 Manual policy fixes a global 0..1023 metatile source.
+
+`terrainMode` is independent of ground policy and is exactly `"automatic"` or
+`"manual"`. Automatic mode permits offline blocked-art volume and plateau inference.
+Manual mode still resolves pins, behavior rules and defaults, but residual blocked art
+cannot be classified or extruded automatically. The topology solver remains active:
+explicit cliffs, ledges and stairs connect compatible ground regions by relative deltas,
+so repeated one-course cliff art can delimit cumulative terrace levels without storing
+an absolute height in the tileset pin. Cliff edge masks are likewise derived from
+explicitly authored cliffs. A tileset's manual mode applies only to cells using that tileset; a map's
+manual mode applies to its complete layout. Maps sharing one layout must select the
+same mode because generated terrain records are layout-scoped.
+
+Tileset pins for `ground`, `cliff`, `mound`, and `wall-volume` reject nonzero
+`groundOffset`. One metatile can occur on several terraces, so an absolute reusable
+base would collapse every occurrence onto the same floor. Such pins author only a
+relative cliff `height`; the complete-layout graph assigns each occurrence its base.
+
+Map-local `terrainAnchors` assign a visual `level` from -8 through 8 to one connected
+visual region using an `x`, `y` seed and `expectedMetatile` guard. An optional nonnegative
+`height` authors the feature height of walls and other extruded regions. The coordinate
+identifies a semantic region; it is not emitted as a runtime per-cell override. During
+compilation the full-layout solver expands the anchor and emits immutable terrain
+records. Walkable ground anchors participate in plateau topology, while water, walls,
+and other visual components receive their authored base directly. Different connected
+regions may therefore reuse the same metatile at unrelated levels. Maps sharing a
+layout must declare identical anchors because generated terrain records are layout-scoped.
+An anchor may also contain guarded `targets` plus `shape`, `archetype`, `terrainClass`,
+and `axis`. This form persists an editor selection whose inherited classification is
+wrong, such as flat ash cells that are actually a rock cliff. Targeted cells are grouped
+during full-layout solving, so the authored geometry survives draft cleanup without
+changing equal metatiles elsewhere.
 
 ## Normalized output
 

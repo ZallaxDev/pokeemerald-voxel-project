@@ -16,6 +16,7 @@
     <button id="redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
     <button id="validate">Validate</button><button id="regenerate">Regenerate</button>
     <button id="save" class="primary">Save rules</button>
+    <label class="map-picker"><span>Terrain</span><select id="terrain-mode"><option value="automatic">Automatic</option><option value="manual">Manual</option></select></label>
     <div class="view-switch" role="group" aria-label="Map view">
       <button data-view="original" class="active">Original</button>
       <button data-view="resolved">Resolved</button>
@@ -45,17 +46,20 @@
         <section class="inspector-section">
           <h3>Geometry</h3>
           <div class="field-grid">
-            <label class="wide">Shape<select id="shape"><option>flat</option><option>extruded</option><option>ledge</option><option>water</option><option>hidden</option></select></label>
-            <label>Ground height<input id="ground-height" type="number" min="-1" max="8" step="0.125"></label><label>Volume height<input id="height" type="number" min="0" max="8" step="0.125"></label>
+            <label class="wide">Shape<select id="shape"><option>flat</option><option>extruded</option><option>cliff</option><option>ledge</option><option>water</option><option>hidden</option></select></label>
+            <label class="wide">Reusable archetype<select id="archetype"><option>ground</option><option>void</option><option>water</option><option>ledge</option><option>cliff</option><option>wall-volume</option><option>stairs-n</option><option>stairs-s</option><option>stairs-e</option><option>stairs-w</option><option>stairs-down-n</option><option>stairs-down-s</option><option>stairs-down-e</option><option>stairs-down-w</option><option>bridge</option><option>billboard</option><option>cutout</option><option>relief</option><option>tree</option><option>shrub</option><option>rock</option></select></label>
+            <label>Axis<select id="axis"><option value="x">X</option><option value="z">Z</option><option value="cross">Cross</option></select></label><label>Terrain class<select id="terrain-class"><option>ground</option><option>path</option><option>sand</option><option>ash</option><option>rock</option><option>pavement</option><option>wood</option><option>carpet</option><option>void</option><option>water</option></select></label>
+            <label>Visual base level<input id="ground-height" type="number" min="-8" max="8" step="0.125" title="Visual base level for the selected connected region."></label><label>Relative height<input id="height" type="number" min="0" max="8" step="0.125"></label>
           </div>
-          <button id="apply-geometry" class="primary wide-button">Apply override to selection</button><button id="remove-overrides" class="danger wide-button">Remove selected overrides</button>
+          <button id="stage-level" class="primary wide-button">Stage selected region geometry</button><button id="remove-level" class="danger wide-button">Stage region geometry removal</button>
+          <button id="apply-geometry" class="wide-button">Stage global tileset pin</button><button id="remove-overrides" class="danger wide-button">Stage global pin removal</button>
         </section>
         <section class="inspector-section"><div class="section-title"><h3>Face materials</h3><button id="clear-faces" class="text-button">Use self</button></div><div id="face-list" class="face-list"></div></section>
       </div>
     </aside>
   </main>
   <footer><code id="rule-path">data/diorama/maps/...</code><span id="status" class="status">Ready</span><span id="rule-counts">0 overrides · 0 structures</span><span id="warning-count">No warnings</span></footer>
-  <dialog id="material-dialog"><form method="dialog" class="dialog-shell"><header><div><small>Original metatiles</small><h2 id="material-title">Choose material</h2></div><button value="cancel">Close</button></header><div class="catalog-tabs"><button type="button" data-role="primary" class="active">Primary</button><button type="button" data-role="secondary">Secondary</button></div><div class="catalog-controls"><input id="material-search" type="search" placeholder="Filter local or global ID"><select id="material-layer"><option>full</option><option>base</option><option>foreground</option><option>none</option></select></div><div id="material-grid" class="material-grid"></div></form></dialog>
+  <dialog id="material-dialog"><form method="dialog" class="dialog-shell"><header><div><small>Original metatiles</small><h2 id="material-title">Choose material</h2></div><button value="cancel">Close</button></header><div class="catalog-tabs"><button type="button" data-role="primary" class="active">Primary</button><button type="button" data-role="secondary">Secondary</button></div><div class="catalog-controls"><input id="material-search" type="search" placeholder="Filter local or global ID"><select id="material-layer"><option>full</option><option>base</option><option>foreground</option><option>none</option></select><select id="material-rotation"><option value="0">0 degrees</option><option value="90">90 degrees</option><option value="180">180 degrees</option><option value="270">270 degrees</option></select><label><input id="material-flip-x" type="checkbox"> Flip X</label><label><input id="material-flip-y" type="checkbox"> Flip Y</label></div><div id="material-grid" class="material-grid"></div></form></dialog>
   <script src="/editor.js"></script>
 </body>
 </html>

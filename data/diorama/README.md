@@ -22,11 +22,14 @@ rule refinements. No retired G0 prototype is active.
 
 `defaults.json` owns semantic pools, profiles/masks/samples, the fallback action,
 global behavior/context/event/pattern rules and the global map baseline. `maps/` owns
-explicit camera and ground policy refinements plus optional local rules.
-`tilesets/` may contain local metatile pins; it is empty until reviewed G3 pins exist.
-Unauthored blocked art is refined at runtime by bounded local vertical runs. Passable
-cells remain flat, explicit pins and patterns remain authoritative, and no gameplay
-elevation is converted into metric height.
+explicit camera, ground policy and terrain inference mode refinements plus optional
+local rules. `tilesets/` contains reviewed local metatile pins and may set
+`terrainMode` to `manual`. Manual cells still resolve pins, behaviors and defaults,
+but cannot be changed by blocked-art volume or plateau inference. This is the required
+mode for partially authored rock families: unknown cells stay flat rather than becoming
+speculative columns. The global map default is manual until the complete Red-equivalent
+assembled-art detector replaces the residual run heuristic. No gameplay elevation is
+converted into metric height.
 
 Rules with no real placements are errors. The only escape hatches are structured
 `allowedUnused: {"reason": "..."}` for rules/pins/presets and

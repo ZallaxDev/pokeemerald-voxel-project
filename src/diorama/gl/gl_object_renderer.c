@@ -7,6 +7,7 @@
 
 #include "diorama/gl_loader.h"
 #include "diorama/gl_object_renderer.h"
+#include "diorama/rules.h"
 #include "diorama/sprite_frame.h"
 
 #define SPRITE_TEXTURE_CACHE_SIZE 48
@@ -51,6 +52,8 @@ struct ObjectRenderItem
 static struct SpriteTextureCacheEntry sTextureCache[SPRITE_TEXTURE_CACHE_SIZE];
 static struct ObjectRenderItem sItems[OBJECT_RENDER_ITEM_CAPACITY];
 static struct DioramaSceneSnapshot sPreviousSnapshot;
+static struct DioramaResolvedCell sPreviousResolvedCells[DIORAMA_MAX_VISIBLE_CELLS];
+static uint16_t sPreviousResolvedCount;
 static uint32_t sDecodePixels[DIORAMA_SPRITE_MAX_PIXELS];
 static struct DioramaObjectMetrics sMetrics;
 static uint64_t sSequence;
@@ -64,6 +67,7 @@ static GLuint sVertexBuffer;
 static GLint sCameraLocation;
 static GLint sCameraPitchLocation;
 static GLint sFocalLengthLocation;
+static GLint sAspectCorrectionLocation;
 static GLint sImageLocation;
 static GLint sDrawModeLocation;
 static GLint sAnimationTimeLocation;
@@ -75,6 +79,7 @@ static const char sObjectVertexShader[] =
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
+    "uniform float aspectCorrection;\n"
     "out vec2 uv;\n"
     "void main() {\n"
     "  const float cameraHeight = 16.0;\n"
@@ -88,7 +93,7 @@ static const char sObjectVertexShader[] =
     "  float relativeZ = position.z - cameraPosition.y;\n"
     "  float depth = (cameraHeight - position.y) * pitchSin + (relativeZ + cameraDistance) * pitchCos;\n"
     "  float vertical = -(cameraHeight - position.y) * pitchCos + (relativeZ + cameraDistance) * pitchSin;\n"
-    "  float clipX = relativeX * focalLength * 2.0 / 240.0;\n"
+    "  float clipX = relativeX * focalLength * 2.0 / 240.0 * aspectCorrection;\n"
     "  float clipY = -0.04 * depth + vertical * focalLength * 2.0 / 160.0;\n"
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
@@ -166,11 +171,13 @@ static bool CreateProgram(void)
     sCameraLocation = dglGetUniformLocation(sProgram, "cameraPosition");
     sCameraPitchLocation = dglGetUniformLocation(sProgram, "cameraPitch");
     sFocalLengthLocation = dglGetUniformLocation(sProgram, "focalLength");
+    sAspectCorrectionLocation = dglGetUniformLocation(sProgram, "aspectCorrection");
     sImageLocation = dglGetUniformLocation(sProgram, "image");
     sDrawModeLocation = dglGetUniformLocation(sProgram, "drawMode");
     sAnimationTimeLocation = dglGetUniformLocation(sProgram, "animationTime");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
-        && sFocalLengthLocation >= 0 && sImageLocation >= 0
+        && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
+        && sImageLocation >= 0
         && sDrawModeLocation >= 0 && sAnimationTimeLocation >= 0;
 }
 
@@ -307,7 +314,8 @@ void DioramaGLObjects_Reset(void)
     sReady = false;
 }
 
-bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot)
+bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
+                           const struct DioramaResolvedCell *resolvedCells)
 {
     struct ObjectRenderItem nextItems[OBJECT_RENDER_ITEM_CAPACITY];
     uint8_t nextItemCount = 0;
@@ -315,6 +323,8 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot)
     int playerItem = -1;
     int i;
 
+    if (snapshot == NULL || resolvedCells == NULL)
+        return false;
     if (snapshot->sequence == sSequence)
         return sReady;
     sMetrics.uploadedFrames = 0;
@@ -353,14 +363,21 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot)
                 return false;
             item->reflectionTexture = texture->texture;
         }
-        if (!DioramaSprite_BuildPose(snapshot, object, &item->currentPose))
+        if (!DioramaSprite_BuildResolvedPose(snapshot, resolvedCells,
+                                             snapshot->visibleCellCount,
+                                             object, &item->currentPose))
             return false;
         item->previousPose = item->currentPose;
         previousObject = FindPreviousObject(object);
         if (previousObject != NULL
-         && DioramaSprite_CanInterpolate(&sPreviousSnapshot, previousObject, snapshot, object))
+         && DioramaSprite_CanInterpolateResolved(
+                &sPreviousSnapshot, sPreviousResolvedCells, sPreviousResolvedCount,
+                previousObject, snapshot, resolvedCells, snapshot->visibleCellCount,
+                object))
         {
-            DioramaSprite_BuildPose(&sPreviousSnapshot, previousObject, &item->previousPose);
+            DioramaSprite_BuildResolvedPose(&sPreviousSnapshot, sPreviousResolvedCells,
+                                            sPreviousResolvedCount, previousObject,
+                                            &item->previousPose);
             item->interpolate = true;
         }
         if (object->flags & DIORAMA_OBJECT_PLAYER)
@@ -413,6 +430,9 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot)
         if (sTextureCache[i].occupied)
             sMetrics.cachedFrames++;
     sPreviousSnapshot = *snapshot;
+    memcpy(sPreviousResolvedCells, resolvedCells,
+           snapshot->visibleCellCount * sizeof(*sPreviousResolvedCells));
+    sPreviousResolvedCount = snapshot->visibleCellCount;
     sHasPreviousSnapshot = true;
     sSequence = snapshot->sequence;
     sReady = true;
@@ -486,7 +506,8 @@ static void DrawReflection(const struct ObjectRenderItem *item,
 }
 
 void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
-                           float cameraPitch, float focalLength)
+                           float cameraPitch, float focalLength,
+                           float aspectCorrection)
 {
     struct DioramaSpritePose poses[OBJECT_RENDER_ITEM_CAPACITY];
     uint8_t order[OBJECT_RENDER_ITEM_CAPACITY];
@@ -543,6 +564,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform2f(sCameraLocation, cameraX, cameraZ);
     dglUniform1f(sCameraPitchLocation, cameraPitch);
     dglUniform1f(sFocalLengthLocation, focalLength);
+    dglUniform1f(sAspectCorrectionLocation, aspectCorrection);
     dglUniform1i(sImageLocation, 0);
     dglUniform1f(sAnimationTimeLocation, (float)fmod(
         (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), 120.0));

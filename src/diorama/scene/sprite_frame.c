@@ -134,14 +134,18 @@ bool DioramaSprite_DecodeFrame(const struct DioramaSceneSnapshot *snapshot,
     return true;
 }
 
-bool DioramaSprite_BuildPose(const struct DioramaSceneSnapshot *snapshot,
-                             const struct DioramaObjectSnapshot *object,
-                             struct DioramaSpritePose *pose)
+static bool BuildPose(const struct DioramaSceneSnapshot *snapshot,
+                      const struct DioramaResolvedCell *resolvedCells,
+                      uint16_t resolvedCount,
+                      const struct DioramaObjectSnapshot *object,
+                      struct DioramaSpritePose *pose)
 {
     const struct DioramaCellSnapshot *currentCell;
     const struct DioramaCellSnapshot *previousCell;
-    struct DioramaResolvedCell currentRule;
-    struct DioramaResolvedCell previousRule;
+    struct DioramaResolvedCell currentStorage;
+    struct DioramaResolvedCell previousStorage;
+    const struct DioramaResolvedCell *currentRule;
+    const struct DioramaResolvedCell *previousRule;
     float currentHeight;
     float previousHeight;
     float moveProgress = 1.0f;
@@ -154,19 +158,45 @@ bool DioramaSprite_BuildPose(const struct DioramaSceneSnapshot *snapshot,
     previousCell = FindCell(snapshot, object->previousMapX, object->previousMapY);
     if (currentCell == NULL)
         return false;
-    if (!DioramaRules_ResolveCell(snapshot, currentCell, &currentRule))
-        return false;
-    currentHeight = DioramaRules_ObjectGroundHeight(&currentRule, currentCell->elevation,
+    if (resolvedCells != NULL)
+    {
+        uint16_t currentIndex = currentCell - snapshot->cells;
+
+        if (currentIndex >= resolvedCount)
+            return false;
+        currentRule = &resolvedCells[currentIndex];
+    }
+    else
+    {
+        if (!DioramaRules_ResolveCell(snapshot, currentCell, &currentStorage))
+            return false;
+        currentRule = &currentStorage;
+    }
+    currentHeight = DioramaRules_ObjectGroundHeight(currentRule, currentCell->elevation,
         object->elevation, currentCell->behavior, DIORAMA_BUILDING_PIXELS_PER_CELL / 2,
         DIORAMA_BUILDING_PIXELS_PER_CELL / 2);
     previousHeight = currentHeight;
-    if (previousCell != NULL
-     && DioramaRules_ResolveCell(snapshot, previousCell, &previousRule))
-        previousHeight = DioramaRules_ObjectGroundHeight(&previousRule,
-            previousCell->elevation, object->previousElevation,
-            previousCell->behavior,
-            DIORAMA_BUILDING_PIXELS_PER_CELL / 2,
-            DIORAMA_BUILDING_PIXELS_PER_CELL / 2);
+    if (previousCell != NULL)
+    {
+        if (resolvedCells != NULL)
+        {
+            uint16_t previousIndex = previousCell - snapshot->cells;
+
+            previousRule = previousIndex < resolvedCount
+                         ? &resolvedCells[previousIndex] : NULL;
+        }
+        else
+        {
+            previousRule = DioramaRules_ResolveCell(snapshot, previousCell, &previousStorage)
+                         ? &previousStorage : NULL;
+        }
+        if (previousRule != NULL)
+            previousHeight = DioramaRules_ObjectGroundHeight(previousRule,
+                previousCell->elevation, object->previousElevation,
+                previousCell->behavior,
+                DIORAMA_BUILDING_PIXELS_PER_CELL / 2,
+                DIORAMA_BUILDING_PIXELS_PER_CELL / 2);
+    }
     deltaX = object->currentMapX - object->previousMapX;
     deltaY = object->currentMapY - object->previousMapY;
     if (deltaX != 0)
@@ -184,10 +214,32 @@ bool DioramaSprite_BuildPose(const struct DioramaSceneSnapshot *snapshot,
     return true;
 }
 
-bool DioramaSprite_CanInterpolate(const struct DioramaSceneSnapshot *previousSnapshot,
-                                  const struct DioramaObjectSnapshot *previousObject,
-                                  const struct DioramaSceneSnapshot *currentSnapshot,
-                                  const struct DioramaObjectSnapshot *currentObject)
+bool DioramaSprite_BuildPose(const struct DioramaSceneSnapshot *snapshot,
+                             const struct DioramaObjectSnapshot *object,
+                             struct DioramaSpritePose *pose)
+{
+    return BuildPose(snapshot, NULL, 0, object, pose);
+}
+
+bool DioramaSprite_BuildResolvedPose(const struct DioramaSceneSnapshot *snapshot,
+                                     const struct DioramaResolvedCell *resolvedCells,
+                                     uint16_t resolvedCount,
+                                     const struct DioramaObjectSnapshot *object,
+                                     struct DioramaSpritePose *pose)
+{
+    if (resolvedCells == NULL)
+        return false;
+    return BuildPose(snapshot, resolvedCells, resolvedCount, object, pose);
+}
+
+static bool CanInterpolate(const struct DioramaSceneSnapshot *previousSnapshot,
+                           const struct DioramaResolvedCell *previousResolvedCells,
+                           uint16_t previousResolvedCount,
+                           const struct DioramaObjectSnapshot *previousObject,
+                           const struct DioramaSceneSnapshot *currentSnapshot,
+                           const struct DioramaResolvedCell *currentResolvedCells,
+                           uint16_t currentResolvedCount,
+                           const struct DioramaObjectSnapshot *currentObject)
 {
     struct DioramaSpritePose previousPose;
     struct DioramaSpritePose currentPose;
@@ -221,8 +273,10 @@ bool DioramaSprite_CanInterpolate(const struct DioramaSceneSnapshot *previousSna
      || (!sameMovement && !continuedMovement)
      || abs(currentObject->currentMapX - currentObject->previousMapX) > 1
      || abs(currentObject->currentMapY - currentObject->previousMapY) > 1
-     || !DioramaSprite_BuildPose(previousSnapshot, previousObject, &previousPose)
-     || !DioramaSprite_BuildPose(currentSnapshot, currentObject, &currentPose))
+     || !BuildPose(previousSnapshot, previousResolvedCells, previousResolvedCount,
+                   previousObject, &previousPose)
+     || !BuildPose(currentSnapshot, currentResolvedCells, currentResolvedCount,
+                   currentObject, &currentPose))
         return false;
     dx = currentPose.x - previousPose.x;
     dy = currentPose.y - previousPose.y;
@@ -230,6 +284,32 @@ bool DioramaSprite_CanInterpolate(const struct DioramaSceneSnapshot *previousSna
     if (continuedMovement && !sameMovement && dx * dx + dy * dy + dz * dz > 0.25f)
         return false;
     return dx * dx + dy * dy + dz * dz <= 2.25f;
+}
+
+bool DioramaSprite_CanInterpolate(const struct DioramaSceneSnapshot *previousSnapshot,
+                                  const struct DioramaObjectSnapshot *previousObject,
+                                  const struct DioramaSceneSnapshot *currentSnapshot,
+                                  const struct DioramaObjectSnapshot *currentObject)
+{
+    return CanInterpolate(previousSnapshot, NULL, 0, previousObject,
+                          currentSnapshot, NULL, 0, currentObject);
+}
+
+bool DioramaSprite_CanInterpolateResolved(
+    const struct DioramaSceneSnapshot *previousSnapshot,
+    const struct DioramaResolvedCell *previousResolvedCells,
+    uint16_t previousResolvedCount,
+    const struct DioramaObjectSnapshot *previousObject,
+    const struct DioramaSceneSnapshot *currentSnapshot,
+    const struct DioramaResolvedCell *currentResolvedCells,
+    uint16_t currentResolvedCount,
+    const struct DioramaObjectSnapshot *currentObject)
+{
+    if (previousResolvedCells == NULL || currentResolvedCells == NULL)
+        return false;
+    return CanInterpolate(previousSnapshot, previousResolvedCells, previousResolvedCount,
+                          previousObject, currentSnapshot, currentResolvedCells,
+                          currentResolvedCount, currentObject);
 }
 
 struct DioramaSpritePose DioramaSprite_InterpolatePose(struct DioramaSpritePose previous,

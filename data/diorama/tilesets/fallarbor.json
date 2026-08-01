@@ -1,0 +1,1442 @@
+{
+  "schemaVersion": 2,
+  "kind": "tileset",
+  "tileset": "gTileset_Fallarbor",
+  "terrainMode": "manual",
+  "pins": [
+    {
+      "metatile": 8,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 51,
+      "action": {
+        "shape": "extruded",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 59,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 64,
+      "action": {
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "cross",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": 577,
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "metatile": 576,
+            "layer": "full",
+            "rotation": 90,
+            "flipX": false,
+            "flipY": false
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 65,
+      "action": {
+        "shape": "flat",
+        "archetype": "ground",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 67,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 68,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 69,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 72,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 73,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 75,
+      "action": {
+        "shape": "extruded",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 76,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 77,
+      "action": {
+        "shape": "extruded",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 83,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 84,
+      "action": {
+        "shape": "cliff",
+        "archetype": "rock",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 85,
+      "action": {
+        "shape": "cliff",
+        "archetype": "rock",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 89,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 91,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 92,
+      "action": {
+        "shape": "extruded",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 97,
+      "action": {
+        "shape": "cliff",
+        "archetype": "rock",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 99,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 100,
+      "action": {
+        "shape": "extruded",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 101,
+      "action": {
+        "shape": "cliff",
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 105,
+      "action": {
+        "archetype": "cliff",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1
+      }
+    },
+    {
+      "metatile": 329,
+      "action": {
+        "shape": "flat",
+        "archetype": "ground",
+        "pool": "terrain",
+        "terrainClass": "ash",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 336,
+      "action": {
+        "shape": "extruded",
+        "archetype": "rock",
+        "pool": "prop",
+        "terrainClass": "rock",
+        "height": 1,
+        "groundOffset": -1,
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    },
+    {
+      "metatile": 337,
+      "action": {
+        "shape": "cliff",
+        "archetype": "rock",
+        "pool": "terrain",
+        "terrainClass": "rock",
+        "height": 1,
+        "axis": "x",
+        "faces": {
+          "top": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "north": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "east": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "south": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "west": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "full"
+          },
+          "plane": {
+            "rotation": 0,
+            "flipX": false,
+            "flipY": false,
+            "metatile": "self",
+            "layer": "foreground"
+          }
+        }
+      }
+    }
+  ]
+}

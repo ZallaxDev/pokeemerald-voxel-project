@@ -99,6 +99,23 @@ static void TestFlatChunk(void)
     assert(mesh.bounds.minY == -1.0f / 16.0f && mesh.bounds.maxY == 0.0f);
 }
 
+static void TestMaterialRotation(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    int i;
+
+    InitInput(&input, 3, MB_NORMAL);
+    for (i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        input.cells[i].materials[DIORAMA_MATERIAL_FACE_TOP].rotation = 1;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(sVertices[0].u > 0.299f && sVertices[0].v > 0.2f);
+    assert(sVertices[1].u > 0.299f && sVertices[1].v < 0.4f);
+    assert(sVertices[2].u > 0.1f && sVertices[2].u < 0.101f
+           && sVertices[2].v < 0.4f);
+}
+
 static void TestProfiledGeometryUsesPixelFallback(void)
 {
     struct DioramaTerrainChunkInput input;
@@ -428,6 +445,40 @@ static void TestCliffFaceBandsAndRamp(void)
     assert(mesh.bounds.maxY == 1.0f);
 }
 
+static void TestCliffBaseCornersAndHeightTransition(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *high;
+    struct DioramaTerrainCell *low;
+
+    InitInput(&input, 3, MB_NORMAL);
+    high = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    low = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 5];
+    high->shape = low->shape = DIORAMA_SHAPE_CLIFF;
+    high->archetype = low->archetype = DIORAMA_ARCHETYPE_CLIFF;
+    high->visualHeight = 2.0f;
+    low->visualHeight = 1.0f;
+    high->cliffEdgeMask = DIORAMA_CLIFF_EDGE_NORTH | DIORAMA_CLIFF_EDGE_EAST
+                        | DIORAMA_CLIFF_EDGE_SOUTH | DIORAMA_CLIFF_EDGE_WEST;
+    high->cliffBaseMask = DIORAMA_CLIFF_EDGE_NORTH | DIORAMA_CLIFF_EDGE_SOUTH
+                        | DIORAMA_CLIFF_EDGE_WEST;
+    high->cliffTransitionMask = DIORAMA_CLIFF_EDGE_EAST;
+    high->cliffCornerMask = DIORAMA_CLIFF_CORNER_NORTH_WEST
+                          | DIORAMA_CLIFF_CORNER_SOUTH_WEST;
+    low->cliffEdgeMask = DIORAMA_CLIFF_EDGE_NORTH | DIORAMA_CLIFF_EDGE_EAST
+                       | DIORAMA_CLIFF_EDGE_SOUTH;
+    low->cliffBaseMask = low->cliffEdgeMask;
+    low->cliffCornerMask = DIORAMA_CLIFF_CORNER_NORTH_EAST
+                         | DIORAMA_CLIFF_CORNER_SOUTH_EAST;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.cliffBaseFaceCount >= 6);
+    assert(mesh.cliffCornerCount == 4);
+    assert(mesh.cliffTransitionFaceCount == 1);
+    assert(mesh.bounds.maxY == 2.0f);
+}
+
 static void TestSignaturesAndHashes(void)
 {
     struct DioramaTerrainChunkInput input;
@@ -583,6 +634,7 @@ int main(void)
     TestFloorDiv();
     TestElevationNormalization();
     TestFlatChunk();
+    TestMaterialRotation();
     TestProfiledGeometryUsesPixelFallback();
     TestGameplayPlanesStayFlat();
     TestReflectionMask();
@@ -595,6 +647,7 @@ int main(void)
     TestBridgeHasTwoSurfaces();
     TestStairsAndDescendingStairwell();
     TestCliffFaceBandsAndRamp();
+    TestCliffBaseCornersAndHeightTransition();
     TestSignaturesAndHashes();
     TestDirtyChunkCoverage();
     TestHiddenShape();

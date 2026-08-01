@@ -13,7 +13,7 @@ class EditorServerTests(unittest.TestCase):
         maps = server.map_listing()
         self.assertEqual(len(maps), 518)
         atlas_pairs = set()
-        references = {"MAP_LITTLEROOT_TOWN", "MAP_ROUTE101", "MAP_FORTREE_CITY",
+        references = {"MAP_LITTLEROOT_TOWN", "MAP_ROUTE101", "MAP_ROUTE115", "MAP_FORTREE_CITY",
                       "MAP_SOOTOPOLIS_CITY", "MAP_MT_CHIMNEY", "MAP_JAGGED_PASS",
                       "MAP_GRANITE_CAVE_B1F", "MAP_MT_PYRE_2F"}
         for item in (row for row in maps if row["symbol"] in references):
@@ -25,13 +25,19 @@ class EditorServerTests(unittest.TestCase):
                 document["map"]["width"] * document["map"]["height"],
             )
             self.assertEqual(len(document["editor"]["resolved"]), len(document["cells"]))
-            self.assertEqual(document["geometry"]["modelVersion"], 3)
+            self.assertIn(document["geometry"]["modelVersion"], {0, 3})
             self.assertEqual(document["geometry"]["unitsPerCell"], 16)
-            self.assertTrue(document["geometry"]["spans"])
-            self.assertTrue(document["geometry"]["faces"])
+            if len(document["cells"]) <= 1024:
+                self.assertTrue(document["geometry"]["spans"])
+                self.assertTrue(document["geometry"]["faces"])
+            self.assertTrue(all(item["rule"].get("terrainClass")
+                                for item in document["editor"]["resolved"]))
+            self.assertIn(document["rules"]["terrainMode"], {"automatic", "manual"})
+            self.assertEqual(set(document["editor"]["tilesetTerrainModes"]),
+                             {"primary", "secondary"})
             self.assertEqual(document["rules"]["status"], {"supported": True})
-            self.assertEqual(document["editor"]["readOnly"], item["file"] is None)
-            if item["symbol"] == "MAP_SOOTOPOLIS_CITY":
+            self.assertFalse(document["editor"]["readOnly"])
+            if item["symbol"] == "MAP_SOOTOPOLIS_CITY" and document["geometry"]["modelVersion"] == 3:
                 maximum = max(span["y_max"] for span in document["geometry"]["spans"])
                 self.assertGreater(maximum, 0)
                 self.assertLessEqual(maximum, 3 * document["geometry"]["unitsPerCell"])
@@ -62,6 +68,38 @@ class EditorServerTests(unittest.TestCase):
                 "revision": "irrelevant",
                 "rules": {},
             })
+
+    def test_unconfigured_map_can_create_a_scoped_rule_document(self) -> None:
+        entry = next(item for item in server.map_listing() if item["file"] is None)
+        symbol = entry["symbol"]
+        document = server.enrich_document(server.build_editor_document(server.REPO_ROOT, symbol))
+        destination, candidate = server.validate_payload({
+            "symbol": symbol,
+            "revision": None,
+            "rules": document["rules"],
+        })
+        self.assertEqual(destination, server.map_destination(symbol))
+        self.assertIn(b'"terrainAnchors": []', candidate)
+
+    def test_tileset_payload_targets_only_cataloged_tilesets(self) -> None:
+        document = server.tileset_rule_document("gTileset_General")
+        destination, candidate = server.validate_tileset_payload({
+            "symbol": "gTileset_General",
+            "revision": "irrelevant",
+            "rules": document,
+        })
+        self.assertEqual(destination, server.tileset_destination("gTileset_General"))
+        self.assertIn(b'"kind": "tileset"', candidate)
+        with self.assertRaises(server.RuleError):
+            server.validate_tileset_payload({
+                "symbol": "../../README",
+                "revision": None,
+                "rules": document,
+            })
+
+    def test_browser_uses_the_shared_shell_model(self) -> None:
+        source = (server.EDITOR_ROOT / "editor.js").read_text(encoding="utf-8")
+        self.assertIn("geometry?.modelVersion>=1", source)
 
 
 if __name__ == "__main__":

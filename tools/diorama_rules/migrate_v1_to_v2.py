@@ -56,6 +56,7 @@ def migrate_document(source: dict, path: str = "input") -> dict:
             "contextualRules": [], "exactPatterns": [], "eventPresets": [],
             "mapDefault": {"supported": False, "reason": "No curated G3 map rule is available.",
                            "groundPolicy": {"mode": "automatic"},
+                           "terrainMode": "automatic",
                            "camera": {"profile": "exterior"}},
         }
     if "map" in source:
@@ -71,14 +72,16 @@ def migrate_document(source: dict, path: str = "input") -> dict:
         return {"schemaVersion": 2, "kind": "map", "map": source.get("map"),
                 "layout": source.get("layout"), "status": status,
                 "camera": source.get("camera", {"profile": "exterior"}),
-                "groundPolicy": {"mode": "automatic"}, "contextualRules": [], "exactPatterns": []}
+                "groundPolicy": {"mode": "automatic"}, "terrainMode": "automatic",
+                "contextualRules": [], "exactPatterns": []}
     if "tileset" in source:
         unknown = set(source) - {"version", "tileset", "role", "metatiles"}
         if unknown:
             raise MigrationError(f"{path}: unknown fields: {', '.join(sorted(unknown))}")
         if source.get("metatiles"):
             raise MigrationError(f"{path}: v1 metatile shapes need manual G3 pin migration")
-        return {"schemaVersion": 2, "kind": "tileset", "tileset": source.get("tileset"), "pins": []}
+        return {"schemaVersion": 2, "kind": "tileset", "tileset": source.get("tileset"),
+                "terrainMode": "automatic", "pins": []}
     if "templates" in source:
         if source.get("templates"):
             raise MigrationError(f"{path}: v1 building templates were retired in G0")

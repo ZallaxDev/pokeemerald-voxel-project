@@ -26,7 +26,8 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
                            const struct DioramaResolvedCell *resolvedCells);
 void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                            GLuint foregroundAtlasTexture, float cameraX, float cameraZ,
-                           float cameraPitch, float focalLength, bool debug);
+                           float cameraPitch, float focalLength,
+                           float aspectCorrection, bool debug);
 const struct DioramaTerrainMetrics *DioramaGLTerrain_GetMetrics(void);
 void DioramaGLTerrain_Shutdown(void);
 

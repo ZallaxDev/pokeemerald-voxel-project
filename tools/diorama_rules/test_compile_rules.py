@@ -9,8 +9,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from compile_rules import (ARCHETYPES, RuleError, _action, _ground_policy, _mask,
-                            _pattern_placements, _patterns, _profiles, _selector,
-                            _validate_logical_ids, _validate_pattern_claim_overlaps,
+                             _pattern_placements, _patterns, _profiles, _selector,
+                             _terrain_anchors, _terrain_mode, _validate_logical_ids, _validate_pattern_claim_overlaps,
+                            _validate_tileset_pin_action,
                             compile_data, load_json, parse_camera, render_c, render_header)
 from migrate_v1_to_v2 import MigrationError, migrate_document
 
@@ -32,6 +33,16 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertEqual(len(self.data["layouts"]), 441)
         self.assertEqual([row["id"] for row in self.data["layouts"]], list(range(1, 442)))
         self.assertEqual(len(self.data["maps"]), 518)
+        self.assertEqual(len(self.data["tilesets"]), 75)
+        self.assertEqual({row["terrainClass"] for row in self.data["tilesets"]},
+                         {"ground", "path", "sand", "ash", "rock", "pavement",
+                          "wood", "carpet"})
+        modes = {row["symbol"]: row["terrainMode"] for row in self.data["tilesets"]}
+        self.assertEqual(modes["gTileset_General"], "manual")
+        self.assertEqual(modes["gTileset_Cave"], "manual")
+        self.assertTrue(all(row["terrainMode"] in {"automatic", "manual"}
+                            for row in self.data["maps"]))
+        self.assertTrue(all("terrainAnchors" in row for row in self.data["maps"]))
         self.assertEqual(sum(row["supported"] for row in self.data["maps"]), 518)
         references = {"MAP_FORTREE_CITY", "MAP_SOOTOPOLIS_CITY", "MAP_MT_CHIMNEY",
                       "MAP_JAGGED_PASS", "MAP_GRANITE_CAVE_B1F", "MAP_MT_PYRE_2F"}
@@ -47,6 +58,56 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertEqual(indoor["camera"]["profile"], "interior")
         self.assertTrue(all(row["unsupportedReason"] for row in self.data["maps"]
                             if not row["supported"]))
+
+    def test_layout_terrain_ranges_are_complete_and_deterministic(self):
+        offset = 0
+        records = []
+        for layout in self.data["layouts"]:
+            self.assertGreater(layout["width"], 0)
+            self.assertGreater(layout["height"], 0)
+            self.assertEqual(layout["terrainRecordOffset"], offset)
+            self.assertEqual(layout["terrainRecordCount"], len(layout["terrainRecords"]))
+            cell_offsets = [row["cellOffset"] for row in layout["terrainRecords"]]
+            self.assertEqual(cell_offsets, sorted(cell_offsets))
+            self.assertTrue(all(0 <= value < layout["width"] * layout["height"]
+                                for value in cell_offsets))
+            offset += layout["terrainRecordCount"]
+            records.extend(layout["terrainRecords"])
+        self.assertGreater(len(records), 0)
+        self.assertFalse(any(row["automatic"] for row in records))
+        self.assertTrue(all(len(row["volumeBackMetatiles"]) == 3
+                            and len(row["volumeFrontMetatiles"]) == 3
+                            for row in records))
+        self.assertTrue(any(row["groundQ16"] > 0 for row in records))
+        self.assertEqual(render_c(self.data), render_c(compile_data(ROOT)))
+
+    def test_manual_reference_layouts_use_relative_terrace_levels(self):
+        layouts = {row["symbol"]: row for row in self.data["layouts"]}
+        chimney = layouts["LAYOUT_MT_CHIMNEY"]["terrainRecords"]
+        granite = layouts["LAYOUT_GRANITE_CAVE_B1F"]["terrainRecords"]
+
+        for records in (chimney, granite):
+            self.assertTrue(records)
+            self.assertFalse(any(row["automatic"] for row in records))
+            self.assertEqual({row["heightQ16"] for row in records
+                              if row["shape"] == "cliff"}, {16})
+        chimney_levels = {row["groundQ16"] for row in chimney if row["shape"] == "flat"}
+        granite_levels = {row["groundQ16"] for row in granite if row["shape"] == "flat"}
+        self.assertIn(16, chimney_levels)
+        self.assertGreaterEqual(max(chimney_levels), 32)
+        self.assertIn(16, granite_levels)
+
+    def test_terrain_anchor_is_guarded_by_the_layout_metatile(self):
+        layout = {"width": 2, "height": 1}
+        cells = ({"metatile": 7}, {"metatile": 7})
+        anchor = {"id": "upper-region", "x": 1, "y": 0,
+                  "level": -1, "height": 1.5, "expectedMetatile": 7}
+        parsed = _terrain_anchors([anchor], "anchors", layout, cells)[0]
+        self.assertEqual(parsed["level"], -1.0)
+        self.assertEqual(parsed["height"], 1.5)
+        with self.assertRaisesRegex(RuleError, "expected 7"):
+            _terrain_anchors([{**anchor, "expectedMetatile": 8}],
+                             "anchors", layout, cells)
 
     def test_sha256_is_canonical_and_covers_every_ir_section(self):
         canonical_keys = ("schemaVersion", "tilesets", "layouts", "pools", "profiles", "default",
@@ -95,6 +156,40 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         with self.assertRaisesRegex(RuleError, "unknown terrain class"):
             _action({"archetype": "ground", "pool": "terrain",
                      "terrainClass": "generic-stuff"}, "test", {"terrain"}, {})
+
+    def test_action_shape_can_override_archetype_geometry(self):
+        action = _action({"shape": "cliff", "archetype": "rock", "pool": "prop",
+                          "terrainClass": "rock", "height": 1},
+                         "test", {"prop"}, {})
+        self.assertEqual(action["shape"], "cliff")
+        self.assertEqual(action["archetype"], "rock")
+        with self.assertRaisesRegex(RuleError, "unknown shape"):
+            _action({"shape": "sphere", "archetype": "rock", "pool": "prop"},
+                    "test", {"prop"}, {})
+
+    def test_action_face_materials_are_closed(self):
+        action = _action({"archetype": "cliff", "pool": "terrain",
+                          "faces": {"top": {"metatile": "self", "layer": "base",
+                                             "rotation": 90, "flipX": True},
+                                    "south": {"metatile": 23, "layer": "full"},
+                                    "north": "none"}},
+                         "test", {"terrain"}, {})
+        self.assertEqual(action["faces"]["south"]["metatile"], 23)
+        self.assertEqual(action["faces"]["north"], "none")
+        self.assertEqual(action["faces"]["top"]["rotation"], 90)
+        self.assertTrue(action["faces"]["top"]["flipX"])
+        with self.assertRaisesRegex(RuleError, "unknown fields"):
+            _action({"archetype": "ground", "pool": "terrain",
+                     "faces": {"bottom": "none"}}, "test", {"terrain"}, {})
+
+    def test_reusable_rock_terrain_rejects_absolute_floor(self):
+        with self.assertRaisesRegex(RuleError, "absolute floor"):
+            _validate_tileset_pin_action(
+                {"archetype": "ground", "terrainClass": "rock", "groundOffset": 2},
+                "pin.action")
+        _validate_tileset_pin_action(
+            {"archetype": "cliff", "terrainClass": "rock", "height": 1},
+            "pin.action")
 
     def test_rejects_v1_and_duplicate_json_keys(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -193,6 +288,12 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         with self.assertRaisesRegex(RuleError, "unknown fields"):
             _ground_policy({"mode": "automatic", "metatile": 1}, "ground")
 
+    def test_terrain_mode_is_closed(self):
+        self.assertEqual(_terrain_mode("manual", "terrainMode"), "manual")
+        self.assertEqual(_terrain_mode("automatic", "terrainMode"), "automatic")
+        with self.assertRaisesRegex(RuleError, "automatic.*manual"):
+            _terrain_mode("hybrid", "terrainMode")
+
     def test_camera_ranges(self):
         profile, pitch, focal = parse_camera(
             {"profile": "interior", "pitch": 55, "focalLength": 150}, "test")
@@ -217,17 +318,23 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         header, source = render_header(), render_c(self.data)
         self.assertIn("struct DioramaGeneratedTilesetV2", header)
         self.assertIn("struct DioramaGeneratedLayoutV2", header)
+        self.assertIn("struct DioramaGeneratedTerrainV2", header)
+        self.assertIn("role, terrainClass", header)
         self.assertIn("struct DioramaGeneratedMapV2", header)
         self.assertEqual(source.count("gTileset_"), 75)
         self.assertIn("gDioramaBehaviorRulesV2", source)
         self.assertIn("gDioramaBehaviorRuleV2Count", source)
+        self.assertIn("gDioramaTerrainV2Count", source)
         self.assertIn(self.data["sha256"], source)
 
     def test_c_contract_packs_every_normalized_g3_section_and_map_scope(self):
         packed = copy.deepcopy(self.data)
         action = {"archetype": "ground", "pool": "terrain", "profile": "flat-cell",
-                  "axis": "cross", "groundOffset": 0.25, "height": 1.0,
-                  "groundPolicy": {"mode": "manual", "metatile": 1}}
+                   "axis": "cross", "groundOffset": 0.25, "height": 1.0,
+                  "faces": {"top": {"metatile": "self", "layer": "base"},
+                            "south": {"metatile": 7, "layer": "full"},
+                            "north": "none"},
+                   "groundPolicy": {"mode": "manual", "metatile": 1}}
         selector = {"tilesets": [packed["tilesets"][0]["symbol"]], "metatiles": [1],
                     "behaviors": ["MB_NORMAL"], "behaviorIds": [0],
                     "layerTypes": ["normal"], "elevations": [2],
@@ -262,6 +369,8 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                         "packed-preset", "berry-tree"):
             self.assertIn(content, source)
         self.assertIn("UINT64_C(0xFFFF)", source)
+        self.assertIn("{ 65535, 65535, 65535, 7, 65535, 65535 }", source)
+        self.assertIn("{ 1, 255, 0, 0, 0, 2 }", source)
 
 
 if __name__ == "__main__":

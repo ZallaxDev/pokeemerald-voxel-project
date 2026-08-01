@@ -40,6 +40,8 @@ struct DioramaTerrainMaterial
 {
     uint16_t metatileId;
     uint8_t layer;
+    uint8_t rotation;
+    uint8_t flags;
     float u0;
     float v0;
     float u1;
@@ -84,6 +86,10 @@ struct DioramaTerrainCell
     uint8_t structureLocalY;
     uint8_t southFacadeCount;
     uint8_t volumeMaterialCount;
+    uint8_t cliffEdgeMask;
+    uint8_t cliffBaseMask;
+    uint8_t cliffTransitionMask;
+    uint8_t cliffCornerMask;
     float groundHeight;
     float visualHeight;
     float featureHeight;
@@ -147,6 +153,9 @@ struct DioramaTerrainMesh
     uint32_t bottomFaceCount;
     uint32_t sideFaceCount;
     uint32_t featureFaceCount;
+    uint32_t cliffBaseFaceCount;
+    uint32_t cliffCornerCount;
+    uint32_t cliffTransitionFaceCount;
     uint8_t usedCompressedOccupancy;
     uint64_t geometryHash;
     struct DioramaTerrainBounds bounds;

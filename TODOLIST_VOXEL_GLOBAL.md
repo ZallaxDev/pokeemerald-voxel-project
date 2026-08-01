@@ -213,13 +213,27 @@ Arquetipos minimos:
 - [ ] Clasificar suelo, caminos, arena, ceniza, roca, pavimento, madera, alfombras y void por tileset.
 - [x] Implementar materiales de borde, esquina, union y transicion sin estirar arte.
 - [ ] Implementar acantilados con top, cara, base, esquinas y transiciones.
-- [x] Inferir volumenes locales solo sobre arte bloqueado sin regla explicita, sin elevar regiones transitables.
-- [x] Medir runs norte-sur con repeticion local, limite fisico de tres metatiles y rechazo de runs cortados por el snapshot.
+- [x] Inferir volumenes sobre layouts completos solo en arte bloqueado sin regla explicita.
+- [x] Elevar regiones transitables solo mediante constraints fiables de ledges y escaleras, con fallback plano ante conflictos.
+- [x] Medir runs norte-sur en los 441 layouts completos, con repeticion local y limite fisico de tres metatiles.
+- [x] Compilar alturas, topologia y procedencia por coordenada de layout con guard de metatile esperado.
+- [x] Eliminar inferencia de volumenes, plateaus y alturas dependiente del viewport en runtime.
 - [x] Reconstruir bandas laterales desde las filas propietarias del run sin estirar una unica textura.
 - [x] Implementar ledges direccionales y diagonales desde behaviors y arte local.
 - [x] Implementar rampas y escaleras en cuatro direcciones.
 - [x] Implementar stairwells descendentes y aperturas oscuras sin convertirlos en cajas.
 - [ ] Validar visualmente y perfilar excepciones de Fortree, Sootopolis, cuevas, Mt. Chimney, Jagged Pass y elevaciones especiales.
+
+Estado de cierre G5: la implementación automatizada ya declara clases base para los 75
+tilesets, conserva overrides fiables por behavior/pin, publica topología de top/cara/base/
+esquina/transición para cliffs y audita seis perfiles reproducibles en
+`data/diorama/g5_profiles.json`. El compilador resuelve los 441 layouts completos con el
+mismo modelo Python del editor y runtime solo consume registros estáticos protegidos por
+layout, coordenada y metatile; la cámara ya no participa en la topología. Los puntos
+pendientes de esta fase no se marcarán como
+completados hasta ejecutar la validación manual en el juego y recibir confirmación
+explícita del usuario. `tools/diorama_rules/g5_audit.py --require-manual` mantiene ese
+gate cerrado mientras el estado sea `pending-user-confirmation`.
 
 ## Fase G6: agua, orillas, puentes y terreno especial
 

@@ -12,6 +12,7 @@
 #define ACTION_HAS_GROUND       (1u << 2)
 #define ACTION_HAS_HEIGHT       (1u << 3)
 #define ACTION_HAS_GROUND_MODE  (1u << 4)
+#define ACTION_HAS_SHAPE        (1u << 6)
 
 #define NEIGHBOR_HAS_METATILE   (1u << 0)
 #define NEIGHBOR_HAS_BEHAVIOR   (1u << 1)
@@ -28,6 +29,22 @@ struct DioramaVolumeRun
     uint8_t height;
     bool bounded;
     bool fromRepeat;
+    bool terrainMeasured;
+};
+
+struct DioramaPlateauEdge
+{
+    uint16_t highRegion;
+    uint16_t lowRegion;
+    uint16_t transitionCell;
+    int8_t delta;
+};
+
+struct DioramaPlateauLink
+{
+    uint16_t neighbor;
+    int8_t delta;
+    int16_t next;
 };
 
 static int FindCell(const struct DioramaSceneSnapshot *snapshot,
@@ -40,6 +57,88 @@ static const struct DioramaGeneratedLayoutV2 *FindLayout(uint16_t layoutId)
     if (gDioramaLayoutsV2[layoutId - 1].id == layoutId)
         return &gDioramaLayoutsV2[layoutId - 1];
     return NULL;
+}
+
+static const struct DioramaGeneratedTerrainV2 *FindStaticTerrain(
+    const struct DioramaGeneratedLayoutV2 *layout, uint32_t cellOffset)
+{
+    uint32_t low = 0;
+    uint32_t high;
+
+    if (layout == NULL || layout->terrainRecordOffset > gDioramaTerrainV2Count
+     || layout->terrainRecordCount > gDioramaTerrainV2Count - layout->terrainRecordOffset)
+        return NULL;
+    high = layout->terrainRecordCount;
+    while (low < high)
+    {
+        uint32_t middle = low + (high - low) / 2;
+        const struct DioramaGeneratedTerrainV2 *record =
+            &gDioramaTerrainV2[layout->terrainRecordOffset + middle];
+
+        if (record->cellOffset < cellOffset)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    if (low < layout->terrainRecordCount
+     && gDioramaTerrainV2[layout->terrainRecordOffset + low].cellOffset == cellOffset)
+        return &gDioramaTerrainV2[layout->terrainRecordOffset + low];
+    return NULL;
+}
+
+static void ApplyStaticTerrain(const struct DioramaCellSnapshot *cell,
+                               struct DioramaResolvedCell *resolved)
+{
+    const struct DioramaGeneratedLayoutV2 *layout;
+    const struct DioramaGeneratedTerrainV2 *record;
+    uint32_t cellOffset;
+
+    if (!(cell->flags & DIORAMA_CELL_SOURCE_VALID) || cell->sourceMapX < 0
+     || cell->sourceMapY < 0)
+        return;
+    layout = FindLayout(cell->sourceLayoutId);
+    if (layout == NULL || cell->sourceMapX >= layout->width || cell->sourceMapY >= layout->height)
+        return;
+    cellOffset = (uint32_t)cell->sourceMapY * layout->width + cell->sourceMapX;
+    record = FindStaticTerrain(layout, cellOffset);
+    if (record == NULL || record->expectedMetatile != cell->metatileId)
+        return;
+    if (resolved->source == DIORAMA_RULE_SOURCE_MAP
+     || resolved->source == DIORAMA_RULE_SOURCE_BUILDING
+     || resolved->source == DIORAMA_RULE_SOURCE_PATTERN
+     || resolved->source == DIORAMA_RULE_SOURCE_CONTEXT
+     || resolved->source == DIORAMA_RULE_SOURCE_EVENT)
+        return;
+    if (record->flags & DIORAMA_GENERATED_TERRAIN_AUTOMATIC)
+    {
+        if (resolved->source != DIORAMA_RULE_SOURCE_BEHAVIOR
+         || resolved->shape != DIORAMA_SHAPE_FLAT
+         || resolved->terrainClass != DIORAMA_TERRAIN_CLASS_ROCK
+         || (cell->behavior != MB_CAVE && cell->behavior != MB_MOUNTAIN_TOP))
+            return;
+        resolved->source = DIORAMA_RULE_SOURCE_HEURISTIC;
+    }
+    resolved->shape = record->shape;
+    resolved->archetype = record->archetype;
+    resolved->terrainClass = record->terrainClass;
+    resolved->planeAxis = record->axis;
+    resolved->groundHeight = record->groundQ16 / 16.0f;
+    resolved->featureHeight = record->heightQ16 / 16.0f;
+    resolved->topHeight = resolved->groundHeight + resolved->featureHeight;
+    resolved->volumeNorthY = record->volumeNorthY;
+    resolved->volumeSouthY = record->volumeSouthY;
+    resolved->volumeRunRows = record->volumeRunRows;
+    resolved->volumeTopMetatile = record->volumeTopMetatile;
+    memcpy(resolved->volumeBackMetatiles, record->volumeBackMetatiles,
+           sizeof(resolved->volumeBackMetatiles));
+    memcpy(resolved->volumeFrontMetatiles, record->volumeFrontMetatiles,
+           sizeof(resolved->volumeFrontMetatiles));
+    resolved->volumeTerrainMeasured =
+        (record->flags & DIORAMA_GENERATED_TERRAIN_MEASURED) != 0;
+    resolved->cliffEdgeMask = record->cliffEdgeMask;
+    resolved->cliffBaseMask = record->cliffBaseMask;
+    resolved->cliffTransitionMask = record->cliffTransitionMask;
+    resolved->cliffCornerMask = record->cliffCornerMask;
 }
 
 static const struct DioramaGeneratedMapV2 *FindMap(uint8_t mapGroup, uint8_t mapNum,
@@ -149,6 +248,9 @@ static void ApplyAction(const struct DioramaGeneratedActionV2 *action,
     resolved->semanticProfile = action->profileId;
     resolved->terrainClass = action->terrainClass;
     resolved->shape = ArchetypeShape(action->archetypeId);
+    if (action->flags & ACTION_HAS_SHAPE)
+        resolved->shape = action->shape;
+    resolved->volumeTerrainMeasured = resolved->shape == DIORAMA_SHAPE_CLIFF;
     resolved->profile = DIORAMA_ROOF_NONE;
     resolved->planeAxis = action->axis == 2 ? DIORAMA_PLANE_AXIS_Z
                         : action->axis == 3 ? DIORAMA_PLANE_AXIS_CROSS
@@ -165,8 +267,18 @@ static void ApplyAction(const struct DioramaGeneratedActionV2 *action,
     {
         resolved->materials[i].metatileId = DIORAMA_MATERIAL_METATILE_SELF;
         resolved->materials[i].layer = i == DIORAMA_MATERIAL_FACE_PLANE
-                                     ? DIORAMA_MATERIAL_FOREGROUND : DIORAMA_MATERIAL_FULL;
+            ? DIORAMA_MATERIAL_FOREGROUND : DIORAMA_MATERIAL_FULL;
+        resolved->materials[i].rotation = 0;
+        resolved->materials[i].flags = 0;
     }
+    if (action->flags & 32)
+        for (i = 0; i < DIORAMA_MATERIAL_FACE_COUNT; i++)
+        {
+            resolved->materials[i].metatileId = action->faceMetatiles[i];
+            resolved->materials[i].layer = action->faceLayers[i];
+            resolved->materials[i].rotation = action->faceRotations[i];
+            resolved->materials[i].flags = action->faceFlags[i];
+        }
 }
 
 static uint8_t ResolveEffectiveElevation(const struct DioramaSceneSnapshot *snapshot,
@@ -353,6 +465,9 @@ static void ResolveBase(const struct DioramaSceneSnapshot *snapshot,
 
     ApplyAction(&gDioramaDefaultActionV2, DIORAMA_RULE_SOURCE_FALLBACK, -32768, resolved);
     tileset = CellTileset(layoutId, cell, &localMetatile);
+    if (tileset != 0 && tileset <= gDioramaTilesetV2Count
+     && gDioramaTilesetsV2[tileset - 1].id == tileset)
+        resolved->terrainClass = gDioramaTilesetsV2[tileset - 1].terrainClass;
     for (i = 0; i < gDioramaTilesetPinV2Count; i++)
         if (gDioramaTilesetPinsV2[i].tilesetId == tileset
          && gDioramaTilesetPinsV2[i].metatile == localMetatile)
@@ -364,8 +479,13 @@ static void ResolveBase(const struct DioramaSceneSnapshot *snapshot,
     for (i = 0; i < gDioramaBehaviorRuleV2Count; i++)
         if (gDioramaBehaviorRulesV2[i].behavior == cell->behavior)
         {
+            uint8_t baseTerrainClass = resolved->terrainClass;
+
             ApplyAction(&gDioramaBehaviorRulesV2[i].action,
                         DIORAMA_RULE_SOURCE_BEHAVIOR, -1, resolved);
+            if (resolved->shape == DIORAMA_SHAPE_LEDGE
+             || resolved->shape == DIORAMA_SHAPE_STAIRS)
+                resolved->terrainClass = baseTerrainClass;
             return;
         }
 }
@@ -433,6 +553,9 @@ static bool MatchPattern(const struct DioramaSceneSnapshot *snapshot,
     return true;
 }
 
+/* Static topology is compiled from complete layouts. Keep the retired implementation
+ * nearby for comparison until G5 settles, but never execute viewport-local inference. */
+#if 0
 static bool IsExplicitVolumeRule(const struct DioramaResolvedCell *resolved)
 {
     return resolved->source == DIORAMA_RULE_SOURCE_MAP
@@ -444,12 +567,15 @@ static bool IsExplicitVolumeRule(const struct DioramaResolvedCell *resolved)
 }
 
 static bool IsVolumeCandidate(const struct DioramaCellSnapshot *cell,
-                              const struct DioramaResolvedCell *resolved)
+                               const struct DioramaResolvedCell *resolved)
 {
     return (cell->flags & DIORAMA_CELL_SOURCE_VALID)
         && cell->collision != 0
         && resolved->shape == DIORAMA_SHAPE_FLAT
-        && !IsExplicitVolumeRule(resolved);
+        && !IsExplicitVolumeRule(resolved)
+        && resolved->source == DIORAMA_RULE_SOURCE_BEHAVIOR
+        && resolved->terrainClass == DIORAMA_TERRAIN_CLASS_ROCK
+        && (cell->behavior == MB_CAVE || cell->behavior == MB_MOUNTAIN_TOP);
 }
 
 static bool SameSourceStep(const struct DioramaCellSnapshot *from,
@@ -556,8 +682,17 @@ static void ResolveAutomaticVolumes(const struct DioramaSceneSnapshot *snapshot,
         } while (extent < UINT8_MAX);
         run->southY = snapshot->cells[current].mapY;
         run->extent = extent;
+        run->terrainMeasured = resolvedCells[i].source == DIORAMA_RULE_SOURCE_BEHAVIOR
+                            && resolvedCells[i].terrainClass == DIORAMA_TERRAIN_CLASS_ROCK
+                            && (snapshot->cells[i].behavior == MB_CAVE
+                             || snapshot->cells[i].behavior == MB_MOUNTAIN_TOP);
         run->bounded = FindCell(snapshot, &snapshot->cells[north], 0, -1) >= 0
                     && FindCell(snapshot, &snapshot->cells[current], 0, 1) >= 0;
+        if (!run->terrainMeasured)
+        {
+            run->height = 1;
+            continue;
+        }
         unit = extent < DIORAMA_VOLUME_MAX_ROWS ? extent : DIORAMA_VOLUME_MAX_ROWS;
         for (distance = 1; distance < extent; distance++)
         {
@@ -603,7 +738,8 @@ static void ResolveAutomaticVolumes(const struct DioramaSceneSnapshot *snapshot,
             if (votes[height] >= votes[mode])
                 mode = height;
         for (runIndex = 0; runIndex < runCount; runIndex++)
-            if (runs[runIndex].component == i && runs[runIndex].fromRepeat
+            if (runs[runIndex].component == i && runs[runIndex].terrainMeasured
+             && runs[runIndex].fromRepeat
              && mode > runs[runIndex].height)
                 runs[runIndex].height = mode;
     }
@@ -634,11 +770,494 @@ static void ResolveAutomaticVolumes(const struct DioramaSceneSnapshot *snapshot,
             resolved->featureHeight = run->height;
             resolved->topHeight = run->height;
             resolved->volumeRunRows = run->height;
+            resolved->volumeTerrainMeasured = run->terrainMeasured;
             resolved->volumeNorthY = run->northY;
             resolved->volumeSouthY = run->southY;
         }
     }
 }
+
+static bool SameVisualPlane(const struct DioramaResolvedCell *left,
+                            const struct DioramaResolvedCell *right)
+{
+    return left->effectiveElevation == right->effectiveElevation;
+}
+
+static bool IsPlateauCell(const struct DioramaCellSnapshot *cell,
+                           const struct DioramaResolvedCell *resolved)
+{
+    return (cell->collision == 0
+         || (resolved->source == DIORAMA_RULE_SOURCE_TILESET
+          && resolved->archetype == DIORAMA_ARCHETYPE_GROUND))
+        && resolved->shape == DIORAMA_SHAPE_FLAT
+        && resolved->archetype != DIORAMA_ARCHETYPE_VOID
+        && resolved->terrainClass != DIORAMA_TERRAIN_CLASS_WATER;
+}
+
+static bool TransitionDirections(const struct DioramaCellSnapshot *cell,
+                                 const struct DioramaResolvedCell *resolved,
+                                 int8_t *highX, int8_t *highY,
+                                 int8_t *lowX, int8_t *lowY)
+{
+    if (resolved->shape == DIORAMA_SHAPE_LEDGE)
+    {
+        switch (cell->behavior)
+        {
+        case MB_JUMP_NORTH: *lowX = 0; *lowY = -1; break;
+        case MB_JUMP_EAST:  *lowX = 1; *lowY = 0; break;
+        case MB_JUMP_SOUTH: *lowX = 0; *lowY = 1; break;
+        case MB_JUMP_WEST:  *lowX = -1; *lowY = 0; break;
+        default: return false;
+        }
+        *highX = -*lowX;
+        *highY = -*lowY;
+        return true;
+    }
+    if (resolved->shape != DIORAMA_SHAPE_STAIRS)
+        return false;
+    switch (resolved->archetype)
+    {
+    case DIORAMA_ARCHETYPE_STAIRS_N:
+    case DIORAMA_ARCHETYPE_STAIRS_DOWN_S:
+        *highX = 0; *highY = -1; break;
+    case DIORAMA_ARCHETYPE_STAIRS_S:
+    case DIORAMA_ARCHETYPE_STAIRS_DOWN_N:
+        *highX = 0; *highY = 1; break;
+    case DIORAMA_ARCHETYPE_STAIRS_E:
+    case DIORAMA_ARCHETYPE_STAIRS_DOWN_W:
+        *highX = 1; *highY = 0; break;
+    case DIORAMA_ARCHETYPE_STAIRS_W:
+    case DIORAMA_ARCHETYPE_STAIRS_DOWN_E:
+        *highX = -1; *highY = 0; break;
+    default:
+        return false;
+    }
+    *lowX = -*highX;
+    *lowY = -*highY;
+    return true;
+}
+
+static uint16_t FindPlateauRegion(const struct DioramaSceneSnapshot *snapshot,
+                                  const struct DioramaResolvedCell *resolvedCells,
+                                  const uint16_t *regions, uint16_t origin,
+                                  int dx, int dy)
+{
+    const struct DioramaCellSnapshot *originCell = &snapshot->cells[origin];
+    int step;
+
+    for (step = 1; step <= 8; step++)
+    {
+        int index = FindCell(snapshot, originCell, dx * step, dy * step);
+
+        if (index < 0 || !SameSourceStep(originCell, &snapshot->cells[index],
+                                         dx * step, dy * step))
+            return 0;
+        if (regions[index] != 0)
+            return regions[index];
+        if (resolvedCells[index].shape != DIORAMA_SHAPE_LEDGE
+         && resolvedCells[index].shape != DIORAMA_SHAPE_STAIRS)
+            return 0;
+    }
+    return 0;
+}
+
+static uint16_t FindPlateauAcrossCliffs(const struct DioramaSceneSnapshot *snapshot,
+                                        const struct DioramaResolvedCell *resolvedCells,
+                                        const uint16_t *regions, uint16_t origin,
+                                        int dy)
+{
+    const struct DioramaCellSnapshot *originCell = &snapshot->cells[origin];
+    int step;
+
+    for (step = 1; step <= 8; step++)
+    {
+        int index = FindCell(snapshot, originCell, 0, dy * step);
+
+        if (index < 0 || !SameSourceStep(originCell, &snapshot->cells[index],
+                                         0, dy * step))
+            return 0;
+        if (regions[index] != 0)
+            return regions[index];
+        if (resolvedCells[index].shape != DIORAMA_SHAPE_CLIFF)
+            return 0;
+    }
+    return 0;
+}
+
+static void ResolveVisualPlateaus(const struct DioramaSceneSnapshot *snapshot,
+                                  struct DioramaResolvedCell *resolvedCells,
+                                  uint16_t count)
+{
+    static const int8_t offsets[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    uint16_t regions[DIORAMA_MAX_VISIBLE_CELLS] = {0};
+    uint16_t queue[DIORAMA_MAX_VISIBLE_CELLS];
+    struct DioramaPlateauEdge edges[DIORAMA_MAX_VISIBLE_CELLS * 2];
+    struct DioramaPlateauLink links[DIORAMA_MAX_VISIBLE_CELLS * 4];
+    int16_t heads[DIORAMA_MAX_VISIBLE_CELLS + 1];
+    int16_t levels[DIORAMA_MAX_VISIBLE_CELLS + 1];
+    float levelOffsets[DIORAMA_MAX_VISIBLE_CELLS + 1] = {0};
+    bool offsetSet[DIORAMA_MAX_VISIBLE_CELLS + 1] = {false};
+    float anchors[DIORAMA_MAX_VISIBLE_CELLS + 1] = {0};
+    bool anchored[DIORAMA_MAX_VISIBLE_CELLS + 1] = {false};
+    bool anchorConflict[DIORAMA_MAX_VISIBLE_CELLS + 1] = {false};
+    bool visited[DIORAMA_MAX_VISIBLE_CELLS + 1] = {false};
+    bool cliffVisited[DIORAMA_MAX_VISIBLE_CELLS] = {false};
+    uint16_t regionCount = 0;
+    uint16_t edgeCount = 0;
+    uint16_t linkCount = 0;
+    uint16_t i;
+
+    for (i = 0; i <= DIORAMA_MAX_VISIBLE_CELLS; i++)
+    {
+        heads[i] = -1;
+        levels[i] = INT16_MAX;
+    }
+    for (i = 0; i < count; i++)
+    {
+        uint16_t read = 0;
+        uint16_t queued = 0;
+
+        if (regions[i] != 0 || !IsPlateauCell(&snapshot->cells[i], &resolvedCells[i]))
+            continue;
+        regionCount++;
+        regions[i] = regionCount;
+        queue[queued++] = i;
+        while (read < queued)
+        {
+            uint16_t current = queue[read++];
+            uint8_t direction;
+
+            for (direction = 0; direction < 4; direction++)
+            {
+                int neighbor = FindCell(snapshot, &snapshot->cells[current],
+                                        offsets[direction][0], offsets[direction][1]);
+
+                if (neighbor < 0 || regions[neighbor] != 0
+                 || !SameSourceStep(&snapshot->cells[current], &snapshot->cells[neighbor],
+                                    offsets[direction][0], offsets[direction][1])
+                 || !SameVisualPlane(&resolvedCells[current], &resolvedCells[neighbor])
+                 || !IsPlateauCell(&snapshot->cells[neighbor], &resolvedCells[neighbor]))
+                    continue;
+                regions[neighbor] = regionCount;
+                queue[queued++] = neighbor;
+            }
+        }
+    }
+    for (i = 0; i < count && edgeCount < DIORAMA_MAX_VISIBLE_CELLS * 2; i++)
+    {
+        int8_t highX;
+        int8_t highY;
+        int8_t lowX;
+        int8_t lowY;
+        uint16_t high;
+        uint16_t low;
+
+        if (!TransitionDirections(&snapshot->cells[i], &resolvedCells[i],
+                                  &highX, &highY, &lowX, &lowY))
+            continue;
+        high = FindPlateauRegion(snapshot, resolvedCells, regions, i, highX, highY);
+        low = FindPlateauRegion(snapshot, resolvedCells, regions, i, lowX, lowY);
+        if (high == 0 || low == 0 || high == low)
+            continue;
+        edges[edgeCount].highRegion = high;
+        edges[edgeCount].lowRegion = low;
+        edges[edgeCount].transitionCell = i;
+        edges[edgeCount].delta = 1;
+        links[linkCount] = (struct DioramaPlateauLink){low, -edges[edgeCount].delta, heads[high]};
+        heads[high] = linkCount++;
+        links[linkCount] = (struct DioramaPlateauLink){high, edges[edgeCount].delta, heads[low]};
+        heads[low] = linkCount++;
+        edgeCount++;
+    }
+    for (i = 0; i < count && edgeCount < DIORAMA_MAX_VISIBLE_CELLS * 2; i++)
+    {
+        const struct DioramaResolvedCell *cliff = &resolvedCells[i];
+        int southIndex;
+        uint16_t high;
+        uint16_t low;
+        int8_t delta;
+
+        if (cliff->source != DIORAMA_RULE_SOURCE_HEURISTIC
+         || cliff->shape != DIORAMA_SHAPE_CLIFF
+         || !cliff->volumeTerrainMeasured
+         || snapshot->cells[i].mapY != cliff->volumeNorthY
+         || cliff->volumeRunRows == 0)
+            continue;
+        southIndex = FindCell(snapshot, &snapshot->cells[i], 0,
+                              cliff->volumeSouthY - snapshot->cells[i].mapY);
+        if (southIndex < 0)
+            continue;
+        high = FindPlateauRegion(snapshot, resolvedCells, regions, i, 0, -1);
+        low = FindPlateauRegion(snapshot, resolvedCells, regions, southIndex, 0, 1);
+        if (high == 0 || low == 0 || high == low)
+            continue;
+        delta = cliff->volumeRunRows;
+        edges[edgeCount] = (struct DioramaPlateauEdge){high, low, UINT16_MAX, delta};
+        links[linkCount] = (struct DioramaPlateauLink){low, -delta, heads[high]};
+        heads[high] = linkCount++;
+        links[linkCount] = (struct DioramaPlateauLink){high, delta, heads[low]};
+        heads[low] = linkCount++;
+        edgeCount++;
+    }
+    for (i = 0; i < count && edgeCount < DIORAMA_MAX_VISIBLE_CELLS * 2; i++)
+    {
+        uint16_t high;
+        uint16_t low;
+        int8_t delta;
+
+        if (resolvedCells[i].source != DIORAMA_RULE_SOURCE_TILESET
+         || resolvedCells[i].shape != DIORAMA_SHAPE_CLIFF
+         || resolvedCells[i].planeAxis != DIORAMA_PLANE_AXIS_X)
+            continue;
+        high = FindPlateauAcrossCliffs(snapshot, resolvedCells, regions, i, -1);
+        low = FindPlateauAcrossCliffs(snapshot, resolvedCells, regions, i, 1);
+        if (high == 0 || low == 0 || high == low)
+            continue;
+        delta = resolvedCells[i].featureHeight < 1.0f ? 1
+              : resolvedCells[i].featureHeight > DIORAMA_VOLUME_MAX_ROWS
+              ? DIORAMA_VOLUME_MAX_ROWS : resolvedCells[i].featureHeight;
+        edges[edgeCount] = (struct DioramaPlateauEdge){high, low, UINT16_MAX, delta};
+        links[linkCount] = (struct DioramaPlateauLink){low, -delta, heads[high]};
+        heads[high] = linkCount++;
+        links[linkCount] = (struct DioramaPlateauLink){high, delta, heads[low]};
+        heads[low] = linkCount++;
+        edgeCount++;
+    }
+    for (i = 0; i < count; i++)
+    {
+        uint8_t direction;
+
+        if (resolvedCells[i].shape != DIORAMA_SHAPE_BRIDGE
+         || resolvedCells[i].effectiveElevation == 0)
+            continue;
+        for (direction = 0; direction < 4; direction++)
+        {
+            int neighbor = FindCell(snapshot, &snapshot->cells[i],
+                                    offsets[direction][0], offsets[direction][1]);
+            uint16_t region;
+
+            if (neighbor < 0 || !SameSourceStep(&snapshot->cells[i],
+                                                &snapshot->cells[neighbor],
+                                                offsets[direction][0], offsets[direction][1])
+             || resolvedCells[neighbor].effectiveElevation
+                != resolvedCells[i].effectiveElevation)
+                continue;
+            region = regions[neighbor];
+            if (region == 0)
+                continue;
+            if (anchored[region] && anchors[region] != resolvedCells[i].groundHeight)
+                anchorConflict[region] = true;
+            else
+            {
+                anchored[region] = true;
+                anchors[region] = resolvedCells[i].groundHeight;
+            }
+        }
+    }
+    for (i = 1; i <= regionCount; i++)
+    {
+        uint16_t read = 0;
+        uint16_t queued = 0;
+        int16_t minimum = 0;
+        int16_t maximum = 0;
+        bool conflict = false;
+
+        if (visited[i] || heads[i] < 0)
+            continue;
+        visited[i] = true;
+        levels[i] = 0;
+        queue[queued++] = i;
+        while (read < queued)
+        {
+            uint16_t current = queue[read++];
+            int16_t link;
+
+            if (levels[current] < minimum) minimum = levels[current];
+            if (levels[current] > maximum) maximum = levels[current];
+            for (link = heads[current]; link >= 0; link = links[link].next)
+            {
+                uint16_t neighbor = links[link].neighbor;
+                int16_t expected = levels[current] + links[link].delta;
+
+                if (levels[neighbor] == INT16_MAX)
+                {
+                    levels[neighbor] = expected;
+                    visited[neighbor] = true;
+                    queue[queued++] = neighbor;
+                }
+                else if (levels[neighbor] != expected)
+                    conflict = true;
+            }
+        }
+        if (conflict || maximum - minimum > DIORAMA_VOLUME_MAX_ROWS)
+        {
+            while (queued != 0)
+                levels[queue[--queued]] = 0;
+        }
+        else
+            while (queued != 0)
+                levels[queue[--queued]] -= minimum;
+    }
+    for (i = 1; i <= regionCount; i++)
+        if (anchored[i] && !anchorConflict[i])
+        {
+            uint16_t read = 0;
+            uint16_t queued = 0;
+            float offset;
+
+            if (levels[i] == INT16_MAX)
+                levels[i] = 0;
+            offset = anchors[i] - levels[i];
+            queue[queued++] = i;
+            while (read < queued)
+            {
+                uint16_t current = queue[read++];
+                int16_t link;
+
+                if (offsetSet[current])
+                    continue;
+                offsetSet[current] = true;
+                levelOffsets[current] = offset;
+                for (link = heads[current]; link >= 0; link = links[link].next)
+                    if (!offsetSet[links[link].neighbor])
+                        queue[queued++] = links[link].neighbor;
+            }
+        }
+    for (i = 0; i < count; i++)
+        if (regions[i] != 0 && levels[regions[i]] != INT16_MAX)
+        {
+            float height = levels[regions[i]] + levelOffsets[regions[i]];
+
+            resolvedCells[i].groundHeight += height;
+            resolvedCells[i].topHeight += height;
+        }
+    for (i = 0; i < edgeCount; i++)
+    {
+        struct DioramaResolvedCell *transition;
+        int16_t high = levels[edges[i].highRegion] == INT16_MAX ? 0
+                     : levels[edges[i].highRegion];
+        int16_t low = levels[edges[i].lowRegion] == INT16_MAX ? 0
+                    : levels[edges[i].lowRegion];
+
+        if (edges[i].transitionCell == UINT16_MAX || high <= low)
+            continue;
+        transition = &resolvedCells[edges[i].transitionCell];
+        if (transition->shape == DIORAMA_SHAPE_LEDGE)
+        {
+            transition->groundHeight = high;
+            transition->topHeight = high;
+        }
+        else
+        {
+            transition->groundHeight = low;
+            transition->featureHeight = high - low;
+            transition->topHeight = high;
+        }
+    }
+    for (i = 0; i < count; i++)
+    {
+        uint16_t read = 0;
+        uint16_t queued = 0;
+        int16_t minimum = INT16_MAX;
+        int16_t maximum = INT16_MIN;
+
+        if (cliffVisited[i] || resolvedCells[i].shape != DIORAMA_SHAPE_CLIFF
+         || !resolvedCells[i].volumeTerrainMeasured)
+            continue;
+        cliffVisited[i] = true;
+        queue[queued++] = i;
+        while (read < queued)
+        {
+            uint16_t current = queue[read++];
+            uint8_t direction;
+
+            for (direction = 0; direction < 4; direction++)
+            {
+                int neighbor = FindCell(snapshot, &snapshot->cells[current],
+                                        offsets[direction][0], offsets[direction][1]);
+
+                if (neighbor < 0)
+                    continue;
+                if (regions[neighbor] != 0 && levels[regions[neighbor]] != INT16_MAX)
+                {
+                    int16_t level = levels[regions[neighbor]];
+
+                    if (level < minimum) minimum = level;
+                    if (level > maximum) maximum = level;
+                }
+                else if (!cliffVisited[neighbor]
+                      && resolvedCells[neighbor].shape == DIORAMA_SHAPE_CLIFF
+                      && resolvedCells[neighbor].volumeTerrainMeasured
+                      && SameSourceStep(&snapshot->cells[current], &snapshot->cells[neighbor],
+                                        offsets[direction][0], offsets[direction][1]))
+                {
+                    cliffVisited[neighbor] = true;
+                    queue[queued++] = neighbor;
+                }
+            }
+        }
+        if (minimum != INT16_MAX && maximum > minimum)
+            while (queued != 0)
+            {
+                struct DioramaResolvedCell *cliff = &resolvedCells[queue[--queued]];
+
+                cliff->groundHeight = minimum;
+                cliff->featureHeight = maximum - minimum;
+                cliff->topHeight = maximum;
+                cliff->volumeRunRows = maximum - minimum;
+            }
+    }
+}
+
+static void ResolveCliffTopology(const struct DioramaSceneSnapshot *snapshot,
+                                 struct DioramaResolvedCell *resolvedCells,
+                                 uint16_t count)
+{
+    static const int8_t offsets[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    static const uint8_t edges[4] = {DIORAMA_CLIFF_EDGE_NORTH, DIORAMA_CLIFF_EDGE_EAST,
+                                     DIORAMA_CLIFF_EDGE_SOUTH, DIORAMA_CLIFF_EDGE_WEST};
+    uint16_t i;
+
+    for (i = 0; i < count; i++)
+    {
+        struct DioramaResolvedCell *resolved = &resolvedCells[i];
+        uint8_t direction;
+
+        if (resolved->shape != DIORAMA_SHAPE_CLIFF)
+            continue;
+        for (direction = 0; direction < 4; direction++)
+        {
+            int neighborIndex = FindCell(snapshot, &snapshot->cells[i],
+                                         offsets[direction][0], offsets[direction][1]);
+            const struct DioramaResolvedCell *neighbor = neighborIndex >= 0
+                ? &resolvedCells[neighborIndex] : NULL;
+            float neighborTop = neighbor != NULL && neighbor->shape != DIORAMA_SHAPE_HIDDEN
+                ? neighbor->topHeight : resolved->groundHeight;
+
+            if (neighbor == NULL || neighbor->shape != DIORAMA_SHAPE_CLIFF
+             || neighborTop < resolved->topHeight)
+                resolved->cliffEdgeMask |= edges[direction];
+            if (neighbor == NULL || neighborTop <= resolved->groundHeight)
+                resolved->cliffBaseMask |= edges[direction];
+            if (neighbor != NULL && neighbor->shape == DIORAMA_SHAPE_CLIFF
+             && neighborTop != resolved->topHeight)
+                resolved->cliffTransitionMask |= edges[direction];
+        }
+        if ((resolved->cliffEdgeMask & (DIORAMA_CLIFF_EDGE_NORTH | DIORAMA_CLIFF_EDGE_WEST))
+         == (DIORAMA_CLIFF_EDGE_NORTH | DIORAMA_CLIFF_EDGE_WEST))
+            resolved->cliffCornerMask |= DIORAMA_CLIFF_CORNER_NORTH_WEST;
+        if ((resolved->cliffEdgeMask & (DIORAMA_CLIFF_EDGE_NORTH | DIORAMA_CLIFF_EDGE_EAST))
+         == (DIORAMA_CLIFF_EDGE_NORTH | DIORAMA_CLIFF_EDGE_EAST))
+            resolved->cliffCornerMask |= DIORAMA_CLIFF_CORNER_NORTH_EAST;
+        if ((resolved->cliffEdgeMask & (DIORAMA_CLIFF_EDGE_SOUTH | DIORAMA_CLIFF_EDGE_EAST))
+         == (DIORAMA_CLIFF_EDGE_SOUTH | DIORAMA_CLIFF_EDGE_EAST))
+            resolved->cliffCornerMask |= DIORAMA_CLIFF_CORNER_SOUTH_EAST;
+        if ((resolved->cliffEdgeMask & (DIORAMA_CLIFF_EDGE_SOUTH | DIORAMA_CLIFF_EDGE_WEST))
+         == (DIORAMA_CLIFF_EDGE_SOUTH | DIORAMA_CLIFF_EDGE_WEST))
+            resolved->cliffCornerMask |= DIORAMA_CLIFF_CORNER_SOUTH_WEST;
+    }
+}
+#endif
 
 uint32_t DioramaRules_GetGeneration(void)
 {
@@ -699,6 +1318,7 @@ bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
         return false;
     ResolveBase(snapshot, cell, resolved);
     ResolveContext(snapshot, cell, resolved);
+    ApplyStaticTerrain(cell, resolved);
     if (resolved->source == DIORAMA_RULE_SOURCE_FALLBACK)
     {
         if (cell->collision != 0
@@ -753,7 +1373,8 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
                 }
         }
     }
-    ResolveAutomaticVolumes(snapshot, resolvedCells, count);
+    for (i = 0; i < count; i++)
+        ApplyStaticTerrain(&snapshot->cells[i], &resolvedCells[i]);
     for (i = 0; i < count; i++)
         resolvedCells[i].effectiveElevation = snapshot->cells[i].elevation > 0
                                           && snapshot->cells[i].elevation < 15
