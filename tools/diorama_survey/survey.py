@@ -233,8 +233,11 @@ def record_captures(root: Path, plan: dict, captures: Path, output: Path,
             row_size = ((width * bits_per_pixel + 31) // 32) * 4
             required_size = pixel_offset + row_size * abs(height)
             actual_size = path.stat().st_size
+            supported_compression = compression == 0 or (
+                compression == 3 and bits_per_pixel == 32 and dib_size >= 56)
             if (dib_size < 40 or planes != 1 or bits_per_pixel not in (24, 32)
-                    or compression != 0 or height <= 0 or pixel_offset < 54
+                    or not supported_compression or height <= 0
+                    or pixel_offset < 14 + dib_size
                     or declared_size != actual_size or actual_size != required_size):
                 raise SurveyError(f"{path}: truncated or unsupported BMP")
             metadata_path = path.with_suffix(path.suffix + ".json")

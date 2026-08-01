@@ -7,8 +7,8 @@
 - Referencia Rojo congelada: `b21fd46ea789a0b8cb99d2c7e0add5a007568a54`.
 - Especificacion: `docs/diorama_red_parity.md`.
 - Editor visual: fuera de alcance hasta terminar este TODO.
-- Fase activa: **R0**.
-- Ultima fase aprobada manualmente: **R0**.
+- Fase activa: ninguna; la siguiente es **R2**.
+- Ultima fase aprobada manualmente: **R1**.
 - El stash anterior permanece aislado y no se mezcla aqui.
 
 ## Protocolo obligatorio de fases
@@ -140,7 +140,7 @@ contiene ninguna ruta residual sin owner. Solo entonces empieza R1.
 
 ## R1: corpus extraido y survey reproducible equivalente a Rojo
 
-**Estado:** `manual-pending`
+**Estado:** `approved`
 
 **Objetivo:** disponer del equivalente Emerald de los datos extraidos y de
 `voxel_survey.lua` antes de escribir detectores.
@@ -172,11 +172,12 @@ Validacion automatica especifica:
 
 **Prueba manual obligatoria R1:**
 
-1. Ejecutar el survey completo de Littleroot y Route 115.
+1. Ejecutar el survey completo de Littleroot; el usuario dispensa Route 115 y la segunda
+   pasada para este gate.
 2. Comprobar que cada spot genera exactamente cinco vistas.
 3. Comparar `flat` con el renderer classic en la misma posicion.
 4. Verificar que facing, mapa y pitch escritos en el manifest son correctos.
-5. Repetir el survey y confirmar que las posiciones no derivan.
+5. Validar que las cinco vistas comparten el mismo snapshot y no derivan.
 
 **Gate R1:** el usuario aprueba la autoridad 2D y la reproducibilidad del survey. Solo
 entonces empieza R2.

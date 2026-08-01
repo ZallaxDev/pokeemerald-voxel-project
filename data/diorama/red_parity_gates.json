@@ -27,20 +27,50 @@
     },
     {
       "id": "R1",
-      "state": "manual-pending",
-      "binarySha256": "6471beb6c22672d963a214ec49d2b797e5294c6959abfa864779cc64452c1b09",
+      "state": "approved",
+      "binarySha256": "e76d3058f6bd058ec8ce72479e810ab506babed5d10d01f95e908f8ffe5ebb1f",
       "classicBinarySha256": "397453d71e4e23075e6b896eeb26cc27259d0ceecb9561a0c4e27b424c0fb12e",
-      "automaticTestedAtUtc": "2026-08-01T18:14:42Z",
+      "automaticTestedAtUtc": "2026-08-01T18:28:44Z",
       "automaticCommands": [
         "make -f Makefile_pc test-diorama-red-parity PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig",
         "make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)",
         "make -f Makefile_pc NATIVE_LINUX=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)"
       ],
       "manualScenarios": [
-        "R1-LITTLEROOT-SURVEY",
-        "R1-ROUTE115-SURVEY"
+        "R1-LITTLEROOT-SURVEY"
       ],
-      "manualGuide": "docs/diorama_red_parity_manual_testing.md"
+      "manualGuide": "docs/diorama_red_parity_manual_testing.md",
+      "manualRunSha256": [
+        "9643f4b206e3f866e4769b32d484b0dcdb9a707479d253f72f2eb564e73e5f17"
+      ],
+      "manualEvidence": {
+        "manifestSha256": "9643f4b206e3f866e4769b32d484b0dcdb9a707479d253f72f2eb564e73e5f17",
+        "map": "MAP_LITTLEROOT_TOWN",
+        "mapGroup": 0,
+        "mapNum": 9,
+        "layoutId": 10,
+        "position": { "x": 10, "y": 10 },
+        "facing": "south",
+        "captureRun": 1,
+        "views": {
+          "flat": "5de0230e6cb793f67cf858caf529526fea70356d954913e0a7526b8a1ebc8744",
+          "v15": "00f41944a512438d4f6c3c39e5c42fd5f1182ae2682e2bd1db1c6832f8539cf1",
+          "v35": "b33e546addb557daf576d916db599421fb9cdc10f1252a33ce164a47486187bd",
+          "v50": "f95601335031b3f85eb56ed3dcd246a84827d6021335dc4036da12b31506c039",
+          "v75": "643ef7d204641c94ddc6f64254085fb5a5047f582c80cd92f0831d42f4840db9"
+        },
+        "snapshotIdentity": {
+          "snapshotSequence": 2248,
+          "mapGeneration": 3,
+          "mapEditGeneration": 0,
+          "paletteGeneration": 46,
+          "objPaletteGeneration": 42,
+          "animationGeneration": 403
+        }
+      },
+      "tester": "usuario",
+      "testedAtUtc": "2026-08-01T18:44:12Z",
+      "approval": "Saltamos la prueba restante y doy R1 por valida porque la pasada anterior de Villa Raiz fue validada correctamente."
     },
     { "id": "R2", "state": "pending" },
     { "id": "R3", "state": "pending" },

@@ -327,9 +327,10 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
     const struct DioramaTerrainMetrics *metrics = DioramaGLTerrain_GetMetrics();
     const struct DioramaObjectMetrics *objectMetrics = DioramaGLObjects_GetMetrics();
     struct DioramaMapProfile profile;
+    char text[32];
 
     memset(sDebugPixels, 0, sizeof(sDebugPixels));
-    FillRect(2, 2, 74, 102, RGBA(10, 14, 18, 220));
+    FillRect(2, 2, 74, 120, RGBA(10, 14, 18, 220));
     DrawValue(5, 5, "GEN:", snapshot->mapGeneration);
     DrawValue(5, 14, "CH:", metrics->activeChunks);
     DrawValue(5, 23, "VIS:", metrics->visibleChunks);
@@ -346,6 +347,11 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
                            ? "CAM:I" : "CAM:E", RGB(220, 230, 235));
     else
         DrawText(5, 95, "CAM:-", RGB(220, 230, 235));
+    SDL_snprintf(text, sizeof(text), "MAP:%u,%u", snapshot->mapGroup, snapshot->mapNum);
+    DrawText(5, 104, text, RGB(220, 230, 235));
+    SDL_snprintf(text, sizeof(text), "POS:%d,%d", snapshot->playerMapX,
+                 snapshot->playerMapY);
+    DrawText(5, 113, text, RGB(220, 230, 235));
 
     glBindTexture(GL_TEXTURE_2D, sDebugTexture.id);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);

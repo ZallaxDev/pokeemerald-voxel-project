@@ -15,13 +15,16 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def write_bmp(path: Path, width: int = 960, height: int = 640) -> None:
     row_size = width * 4
-    file_size = 54 + row_size * height
-    header = bytearray(54)
+    pixel_offset = 138
+    file_size = pixel_offset + row_size * height
+    header = bytearray(pixel_offset)
     header[:2] = BMP_SIGNATURE
     struct.pack_into("<I", header, 2, file_size)
-    struct.pack_into("<I", header, 10, 54)
-    struct.pack_into("<IiiHHII", header, 14, 40, width, height, 1, 32, 0,
-                     row_size * height)
+    struct.pack_into("<I", header, 10, pixel_offset)
+    struct.pack_into("<IiiHHII", header, 14, 124, width, height, 1, 32, 3,
+                      row_size * height)
+    struct.pack_into("<IIII", header, 54, 0x000000FF, 0x0000FF00,
+                     0x00FF0000, 0xFF000000)
     with path.open("wb") as output:
         output.write(header)
         output.seek(file_size - 1)

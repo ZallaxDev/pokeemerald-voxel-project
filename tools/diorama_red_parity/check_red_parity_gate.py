@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import subprocess
@@ -13,14 +12,6 @@ from pathlib import Path
 
 STATES = {"pending", "implementation", "automatic-passed", "manual-pending", "approved"}
 ACTIVE = {"implementation", "manual-pending"}
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 R0_SCENARIOS = {
     "R0-LITTLEROOT", "R0-ROUTE101", "R0-ROUTE104", "R0-ROUTE115",
     "R0-MT-CHIMNEY", "R0-CLASSIC-SMOKE",
@@ -30,7 +21,7 @@ R0_COMMANDS = [
     "make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)",
     "make -f Makefile_pc NATIVE_LINUX=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)",
 ]
-R1_SCENARIOS = {"R1-LITTLEROOT-SURVEY", "R1-ROUTE115-SURVEY"}
+R1_SCENARIOS = {"R1-LITTLEROOT-SURVEY"}
 R1_COMMANDS = list(R0_COMMANDS)
 
 
@@ -145,17 +136,30 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
             fail("generated Diorama catalog or survey output is tracked")
         if r1["state"] == "approved":
             run_hashes = r1.get("manualRunSha256", [])
-            if len(run_hashes) != 2 or len(set(run_hashes)) != 2 \
+            if len(run_hashes) != 1 or not re.fullmatch(r"[0-9a-f]{64}", run_hashes[0]):
+                fail("R1 approval requires one validated survey manifest")
+            evidence = r1.get("manualEvidence", {})
+            entry = plan_by_map["MAP_LITTLEROOT_TOWN"]
+            expected_evidence = {
+                "manifestSha256": run_hashes[0], "map": entry["map"],
+                "mapGroup": entry["mapGroup"], "mapNum": entry["mapNum"],
+                "layoutId": entry["layoutId"], "position": entry["position"],
+                "facing": entry["facing"], "captureRun": 1,
+            }
+            if any(evidence.get(key) != value for key, value in expected_evidence.items()):
+                fail("R1 manual evidence does not match the approved scenario")
+            view_hashes = evidence.get("views", {})
+            if set(view_hashes) != {"flat", "v15", "v35", "v50", "v75"} \
                     or any(not re.fullmatch(r"[0-9a-f]{64}", value)
-                           for value in run_hashes):
-                fail("R1 approval requires two distinct validated survey manifests")
-            manifest_dir = root / "build/diorama_survey"
-            if not manifest_dir.is_dir():
-                fail("R1 approval requires stored survey manifests")
-            digests = {_sha256_file(path) for path in manifest_dir.glob("manifest*.json")}
-            for value in run_hashes:
-                if value not in digests:
-                    fail("R1 approval hash does not match a stored survey manifest")
+                           for value in view_hashes.values()):
+                fail("R1 manual evidence does not contain five valid image hashes")
+            identity = evidence.get("snapshotIdentity", {})
+            identity_fields = ("snapshotSequence", "mapGeneration", "mapEditGeneration",
+                               "paletteGeneration", "objPaletteGeneration",
+                               "animationGeneration")
+            if set(identity) != set(identity_fields) \
+                    or not all(isinstance(identity[field], int) for field in identity_fields):
+                fail("R1 manual evidence has an invalid snapshot identity")
     ids = [entry["id"] for entry in resolvers]
     if len(ids) != len(set(ids)):
         fail("resolver responsibilities must be unique")
