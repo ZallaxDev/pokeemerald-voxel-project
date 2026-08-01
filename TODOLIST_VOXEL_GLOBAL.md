@@ -1,5 +1,12 @@
 # TODO global: Pokemon Emerald voxel fiel al arte original
 
+> **Cambio de direccion G5:** la heuristica actual de runs por ID no constituye paridad
+> con el detector automatico de Pokemon Rojo. El reemplazo completo, el sistema de
+> correcciones manuales y los gates obligatorios se especifican en
+> `docs/diorama_red_parity.md` y `TODOLIST_DIORAMA_RED_PARITY.md`. Ese TODO bloquea el
+> avance a G6 y no usa `map_editor/`. Las casillas G5 de este documento describen la
+> baseline existente, no autorizan cerrar G5 antes de completar y aprobar la paridad R0-R10.
+
 Este documento sustituye el alcance limitado de las fases 10 y 12 de
 `TODOLIST.md`. El objetivo ya no es corregir manualmente Villa Raiz y Ruta 101,
 sino portar a Pokemon Emerald el sistema completo de interpretacion voxel de

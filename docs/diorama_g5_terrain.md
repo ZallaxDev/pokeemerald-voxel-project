@@ -1,5 +1,11 @@
 # G5 terrain and visual planes
 
+> The current complete-layout ID-run inference is a conservative baseline, not parity
+> with the assembled-art detector used by the Pokemon Red reference. Its replacement is
+> specified in `docs/diorama_red_parity.md` and gated phase by phase in
+> `TODOLIST_DIORAMA_RED_PARITY.md`. G6 and editor work remain blocked until that TODO is
+> manually approved.
+
 The G5 runtime baseline is active for every cataloged map. Passable metatiles stay flat
 and retain their own atlas art. Specialized behavior rules add verified terrain
 geometry, while ambiguous blocked art remains flat until a dedicated profile classifies it.
