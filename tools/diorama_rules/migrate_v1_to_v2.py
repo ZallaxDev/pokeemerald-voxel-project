@@ -53,10 +53,9 @@ def migrate_document(source: dict, path: str = "input") -> dict:
                 {"behavior": behavior, "action": _action(rule, f"{path}.behaviors.{behavior}")}
                 for behavior, rule in sorted(source.get("behaviors", {}).items())
             ],
-            "contextualRules": [], "exactPatterns": [], "eventPresets": [],
-            "mapDefault": {"supported": False, "reason": "No curated G3 map rule is available.",
-                           "groundPolicy": {"mode": "automatic"},
-                           "terrainMode": "automatic",
+            "contextualRules": [], "exactPatterns": [],
+             "mapDefault": {"supported": False, "reason": "No curated G3 map rule is available.",
+                            "groundPolicy": {"mode": "automatic"},
                            "camera": {"profile": "exterior"}},
         }
     if "map" in source:
@@ -72,7 +71,7 @@ def migrate_document(source: dict, path: str = "input") -> dict:
         return {"schemaVersion": 2, "kind": "map", "map": source.get("map"),
                 "layout": source.get("layout"), "status": status,
                 "camera": source.get("camera", {"profile": "exterior"}),
-                "groundPolicy": {"mode": "automatic"}, "terrainMode": "automatic",
+                "groundPolicy": {"mode": "automatic"},
                 "contextualRules": [], "exactPatterns": []}
     if "tileset" in source:
         unknown = set(source) - {"version", "tileset", "role", "metatiles"}
@@ -81,7 +80,7 @@ def migrate_document(source: dict, path: str = "input") -> dict:
         if source.get("metatiles"):
             raise MigrationError(f"{path}: v1 metatile shapes need manual G3 pin migration")
         return {"schemaVersion": 2, "kind": "tileset", "tileset": source.get("tileset"),
-                "terrainMode": "automatic", "pins": []}
+                "pins": []}
     if "templates" in source:
         if source.get("templates"):
             raise MigrationError(f"{path}: v1 building templates were retired in G0")

@@ -6,9 +6,7 @@
 
 struct DioramaGeneratedTilesetV2 { uint8_t id, role, terrainClass; uint16_t metatileCount; const char *symbol; };
 struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount; const char *symbol; };
-struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile; int16_t groundQ16, heightQ16; uint16_t volumeNorthY, volumeSouthY, volumeTopMetatile, volumeBackMetatiles[3], volumeFrontMetatiles[3]; uint8_t shape, archetype, terrainClass, axis, volumeRunRows, flags, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; };
-#define DIORAMA_GENERATED_TERRAIN_AUTOMATIC (1u << 0)
-#define DIORAMA_GENERATED_TERRAIN_MEASURED  (1u << 1)
+struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile; int16_t groundQ16, heightQ16; uint8_t shape, archetype, terrainClass, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; };
 struct DioramaGeneratedMapV2 { uint8_t group, number, supported, cameraProfile, mapType, groundMode; uint16_t layoutId, groundMetatile, mapScopeId; uint32_t contextualRuleOffset, exactPatternOffset; uint16_t contextualRuleCount, exactPatternCount; float pitchRadians, focalLength; const char *symbol, *unsupportedReason; };
 struct DioramaGeneratedActionV2 { uint8_t archetypeId, poolId, profileId, axis, groundMode, terrainClass, shape; uint16_t groundMetatile, flags; float groundOffset, height; uint16_t faceMetatiles[6]; uint8_t faceLayers[6], faceRotations[6], faceFlags[6]; };
 struct DioramaGeneratedBehaviorRuleV2 { uint8_t behavior; uint32_t placementCount; const char *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
@@ -21,7 +19,6 @@ struct DioramaGeneratedNeighborV2 { uint8_t direction, flags, behavior, layer, e
 struct DioramaGeneratedSelectorV2 { uint32_t tilesetOffset, metatileOffset, behaviorOffset, layerOffset, elevationOffset, mapTypeOffset, neighborOffset; uint16_t tilesetCount, metatileCount, behaviorCount, layerCount, elevationCount, mapTypeCount, neighborCount; uint8_t eventKind; const char *eventClass; };
 struct DioramaGeneratedContextualRuleV2 { uint16_t id, mapScopeId, selectorId; int16_t priority; uint32_t placementCount; const char *logicalId, *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
 struct DioramaGeneratedExactPatternV2 { uint16_t id, mapScopeId; uint8_t primaryTilesetId, secondaryTilesetId, width, height; int16_t priority; uint32_t cellOffset, claimOffset, placementCount; const char *logicalId, *allowedNoPlacementsReason; struct DioramaGeneratedActionV2 action; };
-struct DioramaGeneratedEventPresetV2 { uint16_t id; uint8_t eventKind; uint32_t placementCount; const char *logicalId, *eventClass, *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
 
 extern const char gDioramaRulesSha256[65];
 extern const uint32_t gDioramaRulesGeneration;
@@ -62,6 +59,4 @@ extern const uint8_t gDioramaPatternClaimsV2[];
 extern const size_t gDioramaPatternCellV2Count, gDioramaPatternClaimV2Count;
 extern const struct DioramaGeneratedExactPatternV2 gDioramaExactPatternsV2[];
 extern const size_t gDioramaExactPatternV2Count;
-extern const struct DioramaGeneratedEventPresetV2 gDioramaEventPresetsV2[];
-extern const size_t gDioramaEventPresetV2Count;
 #endif

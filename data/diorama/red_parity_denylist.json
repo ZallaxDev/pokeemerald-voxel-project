@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "excludedRoots": ["map_editor"],
+  "symbols": [
+    "DioramaVolumeRun",
+    "ResolveAutomaticVolumes",
+    "DIORAMA_GENERATED_TERRAIN_AUTOMATIC",
+    "DIORAMA_GENERATED_TERRAIN_MEASURED",
+    "volumeTerrainMeasured",
+    "volumeRunRows",
+    "volumeNorthY",
+    "volumeSouthY",
+    "volumeTopMetatile",
+    "volumeBackMetatiles",
+    "volumeFrontMetatiles",
+    "DioramaGeneratedEventPresetV2",
+    "gDioramaEventPresetsV2",
+    "automatic blocked volume"
+  ],
+  "fields": ["terrainMode", "terrainAnchors", "tilesetTerrainDefaults", "eventPresets"],
+  "files": [
+    "TODOLIST_VOXEL_GLOBAL.md",
+    "tools/diorama_rules/terrain_volumes.py",
+    "tools/diorama_rules/terrain_topology.py",
+    "docs/diorama_g0_retired_prototypes.md",
+    "docs/diorama_g1_catalog.md",
+    "docs/diorama_g2_compositor.md",
+    "docs/diorama_g3_schema.md",
+    "docs/diorama_g4_occupancy.md",
+    "docs/diorama_g5_terrain.md"
+  ],
+  "generatedRecordFields": ["automatic", "measured", "volumeRunRows", "volumeNorthY", "volumeSouthY"]
+}

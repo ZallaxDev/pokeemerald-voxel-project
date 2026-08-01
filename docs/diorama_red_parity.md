@@ -372,7 +372,7 @@ El port debe separar modulos equivalentes a la referencia:
 | Analisis tipo `Structures` | `tools/diorama_rules/structures.py` |
 | Props y segmentacion | `tools/diorama_rules/pixel_objects.py` |
 | Edificios | `tools/diorama_rules/buildings.py` |
-| Perfil y precedencia | `tools/diorama_rules/profiles.py` y JSON G3 |
+| Perfil y precedencia | `tools/diorama_rules/profiles.py` y JSON autoritativo |
 | Survey reproducible | `tools/diorama_survey/` |
 | IR de ocupacion/shell | modelo Python comun y backend C existente |
 | Runtime | tablas C generadas y renderer que no reclasifica |

@@ -147,7 +147,6 @@ enum DioramaCliffCorner
 #define DIORAMA_MATERIAL_METATILE_SELF UINT16_C(0xFFFF)
 #define DIORAMA_MAX_VISUAL_SURFACES 3
 #define DIORAMA_BUILDING_MAX_FACADE_ROWS 4
-#define DIORAMA_VOLUME_MAX_ROWS 3
 #define DIORAMA_BUILDING_PIXELS_PER_CELL 16
 #define DIORAMA_BUILDING_MAX_PROFILE_COLUMNS (32 * DIORAMA_BUILDING_PIXELS_PER_CELL + 1)
 
@@ -236,17 +235,10 @@ struct DioramaResolvedCell
     uint8_t structureLocalX;
     uint8_t structureLocalY;
     uint8_t structureSouthFacadeRows;
-    uint8_t volumeRunRows;
-    uint8_t volumeTerrainMeasured;
-    uint16_t volumeTopMetatile;
-    uint16_t volumeBackMetatiles[DIORAMA_VOLUME_MAX_ROWS];
-    uint16_t volumeFrontMetatiles[DIORAMA_VOLUME_MAX_ROWS];
     uint8_t cliffEdgeMask;
     uint8_t cliffBaseMask;
     uint8_t cliffTransitionMask;
     uint8_t cliffCornerMask;
-    int16_t volumeNorthY;
-    int16_t volumeSouthY;
     float groundHeight;
     float topHeight;
     float featureHeight;

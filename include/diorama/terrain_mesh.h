@@ -85,7 +85,6 @@ struct DioramaTerrainCell
     uint8_t structureLocalX;
     uint8_t structureLocalY;
     uint8_t southFacadeCount;
-    uint8_t volumeMaterialCount;
     uint8_t cliffEdgeMask;
     uint8_t cliffBaseMask;
     uint8_t cliffTransitionMask;
@@ -101,7 +100,6 @@ struct DioramaTerrainCell
     struct DioramaTerrainMaterial underlayMaterials[DIORAMA_MATERIAL_FACE_COUNT];
     uint16_t foregroundAlpha[DIORAMA_VOXELS_PER_CELL];
     struct DioramaTerrainMaterial southFacadeMaterials[DIORAMA_BUILDING_MAX_FACADE_ROWS];
-    struct DioramaTerrainMaterial volumeMaterials[4][DIORAMA_VOLUME_MAX_ROWS];
 };
 
 struct DioramaTerrainHeightCell

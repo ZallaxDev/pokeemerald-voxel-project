@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "phases": [
+    {
+      "id": "R0",
+      "state": "approved",
+      "binarySha256": "d97ff131f89e0e73f0d423e6fd04fdc3d7a9b3a100b8ba7768efa13eb7b2f739",
+      "classicBinarySha256": "397453d71e4e23075e6b896eeb26cc27259d0ceecb9561a0c4e27b424c0fb12e",
+      "automaticTestedAtUtc": "2026-08-01T16:04:11Z",
+      "automaticCommands": [
+        "make -f Makefile_pc test-diorama-red-parity PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig",
+        "make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)",
+        "make -f Makefile_pc NATIVE_LINUX=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)"
+      ],
+      "manualScenarios": [
+        "R0-LITTLEROOT",
+        "R0-ROUTE101",
+        "R0-ROUTE104",
+        "R0-ROUTE115",
+        "R0-MT-CHIMNEY",
+        "R0-CLASSIC-SMOKE"
+      ],
+      "manualGuide": "docs/diorama_red_parity_manual_testing.md",
+      "tester": "usuario",
+      "testedAtUtc": "2026-08-01T16:29:51Z",
+      "approval": "Apruebo manualmente R0; he ejecutado los seis escenarios y sus pruebas de ida/vuelta. No hay ninguna estructura, absolutamente todo plano."
+    },
+    { "id": "R1", "state": "pending" },
+    { "id": "R2", "state": "pending" },
+    { "id": "R3", "state": "pending" },
+    { "id": "R4", "state": "pending" },
+    { "id": "R5", "state": "pending" },
+    { "id": "R6", "state": "pending" },
+    { "id": "R7", "state": "pending" },
+    { "id": "R8", "state": "pending" },
+    { "id": "R9", "state": "pending" },
+    { "id": "R10", "state": "pending" }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "scope": {
+    "maps": 518,
+    "layouts": 441,
+    "tilesets": 75,
+    "policy": "Los escenarios son muestras reproducibles de un proceso global; ningun mapa es un objetivo de implementacion ni una excepcion. R1 inventaria todos los mapas, layouts y tilesets antes de clasificar."
+  },
+  "scenarios": [
+    {
+      "id": "R0-LITTLEROOT",
+      "phase": "R0",
+      "renderer": "diorama",
+      "map": "MAP_LITTLEROOT_TOWN",
+      "layout": "LAYOUT_LITTLEROOT_TOWN",
+      "position": { "x": 10, "y": 10 },
+      "facing": "sur",
+      "pitch": 50.542,
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Carga una partida sin modificar en Villa Raiz, camina hasta (10,10), mira al sur, pulsa punto dos veces desde un arranque nuevo y desactiva el postprocesado.",
+      "expected": "Solo aparece el fallback plano neutral; no aparece ningun pin heredado, geometria por behavior ni columna dependiente del viewport.",
+      "roundTrip": "Entra en Ruta 101, vuelve a Villa Raiz y repite la captura."
+    },
+    {
+      "id": "R0-ROUTE101",
+      "phase": "R0",
+      "renderer": "diorama",
+      "map": "MAP_ROUTE101",
+      "layout": "LAYOUT_ROUTE101",
+      "position": { "x": 10, "y": 10 },
+      "facing": "norte",
+      "pitch": 50.542,
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Camina desde Villa Raiz hasta Ruta 101, situate en (10,10), mira al norte, pulsa punto dos veces desde un arranque nuevo y desactiva el postprocesado.",
+      "expected": "El arte bloqueado sin clasificar permanece plano; no aparece ningun volumen por IDs ni torre dependiente de camara.",
+      "roundTrip": "Vuelve a Villa Raiz, entra otra vez en Ruta 101 y repite la captura."
+    },
+    {
+      "id": "R0-ROUTE104",
+      "phase": "R0",
+      "renderer": "diorama",
+      "map": "MAP_ROUTE104",
+      "layout": "LAYOUT_ROUTE104",
+      "position": { "x": 20, "y": 42 },
+      "facing": "norte",
+      "pitch": 50.542,
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Carga una partida que pueda llegar a Ruta 104 sin teletransporte de debug, situate en (20,42), mira al norte, pulsa punto dos veces desde un arranque nuevo y desactiva el postprocesado.",
+      "expected": "El experimento antiguo de anchors por coordenada no aparece. Todo terreno sin resolver usa el mismo fallback plano neutral que los demas layouts.",
+      "roundTrip": "Cruza un limite de mapa, vuelve a Ruta 104 y repite la captura."
+    },
+    {
+      "id": "R0-ROUTE115",
+      "phase": "R0",
+      "renderer": "diorama",
+      "map": "MAP_ROUTE115",
+      "layout": "LAYOUT_ROUTE115",
+      "position": { "x": 18, "y": 41 },
+      "facing": "norte",
+      "pitch": 50.542,
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Carga una partida que pueda llegar a Ruta 115, situate en (18,41), mira al norte, pulsa punto dos veces desde un arranque nuevo y desactiva el postprocesado.",
+      "expected": "No existe perfil local, pin heredado, constraint de topologia ni record automatico; el contenido sin resolver permanece plano.",
+      "roundTrip": "Sal de Ruta 115 por una conexion, vuelve y repite la captura."
+    },
+    {
+      "id": "R0-MT-CHIMNEY",
+      "phase": "R0",
+      "renderer": "diorama",
+      "map": "MAP_MT_CHIMNEY",
+      "layout": "LAYOUT_MT_CHIMNEY",
+      "position": { "x": 20, "y": 23 },
+      "facing": "sur",
+      "pitch": 50.542,
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Carga una partida que pueda llegar al Monte Cenizo, situate en (20,23), mira al sur, pulsa punto dos veces desde un arranque nuevo y desactiva el postprocesado.",
+      "expected": "No quedan pins volcanicos ni constraints de topologia heredados; el arte bloqueado generico no se infiere como volumen.",
+      "roundTrip": "Sal del Monte Cenizo, vuelve y repite la captura."
+    },
+    {
+      "id": "R0-CLASSIC-SMOKE",
+      "phase": "R0",
+      "renderer": "classic",
+      "map": "MAP_LITTLEROOT_TOWN",
+      "layout": "LAYOUT_LITTLEROOT_TOWN",
+      "position": { "x": 10, "y": 10 },
+      "facing": "sur",
+      "pitch": 0,
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Arranca el binario classic sin NVDA, carga una partida en Villa Raiz y prueba movimiento, menu de inicio, un combate, guardado y carga.",
+      "expected": "El render software, movimiento, menus, combate, audio, guardado/carga y la ausencia segura de NVDA funcionan sin cambios.",
+      "roundTrip": "Vuelve del combate y del menu al overworld y confirma que el movimiento sigue funcionando."
+    }
+  ]
+}

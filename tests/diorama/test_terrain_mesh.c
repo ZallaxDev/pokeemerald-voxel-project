@@ -70,9 +70,9 @@ static void TestElevationNormalization(void)
     assert(DioramaTerrain_NormalizeElevation(12, MB_NORMAL) == 0.0f);
     assert(DioramaTerrain_NormalizeElevation(14, MB_NORMAL) == 0.0f);
     assert(DioramaTerrain_NormalizeElevation(0, MB_JUMP_SOUTH) == 0.0f);
-    assert(DioramaTerrain_NormalizeElevation(3, MB_POND_WATER) == DIORAMA_TERRAIN_WATER_HEIGHT);
-    assert(DioramaTerrain_NormalizeElevation(3, MB_BRIDGE_OVER_POND_MED) == 1.75f);
-    assert(DioramaTerrain_NormalizeElevation(3, MB_BRIDGE_OVER_POND_HIGH) == 2.75f);
+    assert(DioramaTerrain_NormalizeElevation(3, MB_POND_WATER) == 0.0f);
+    assert(DioramaTerrain_NormalizeElevation(3, MB_BRIDGE_OVER_POND_MED) == 0.0f);
+    assert(DioramaTerrain_NormalizeElevation(3, MB_BRIDGE_OVER_POND_HIGH) == 0.0f);
     assert(DioramaTerrain_GetElevationSemantics(0) == DIORAMA_ELEVATION_WILDCARD);
     assert(DioramaTerrain_GetElevationSemantics(3) == DIORAMA_ELEVATION_CONCRETE);
     assert(DioramaTerrain_GetElevationSemantics(15) == DIORAMA_ELEVATION_RETAIN);
@@ -407,7 +407,6 @@ static void TestCliffFaceBandsAndRamp(void)
     struct DioramaTerrainChunkInput input;
     struct DioramaTerrainMesh mesh;
     struct DioramaTerrainCell *center;
-    bool sawUpperBand = false;
 
     InitInput(&input, 3, MB_NORMAL);
     center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
@@ -418,21 +417,6 @@ static void TestCliffFaceBandsAndRamp(void)
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(mesh.sideFaceCount == 12);
     assert(mesh.bounds.maxY == 2.5f);
-
-    center->visualHeight = 3.0f;
-    center->volumeMaterialCount = 3;
-    for (int face = 0; face < 4; face++)
-        for (int band = 0; band < 3; band++)
-        {
-            center->volumeMaterials[face][band] = center->materials[face + 1];
-            center->volumeMaterials[face][band].u0 = 0.1f + band * 0.3f;
-            center->volumeMaterials[face][band].u1 = 0.2f + band * 0.3f;
-        }
-    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
-    assert(mesh.sideFaceCount == 12);
-    for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex++)
-        sawUpperBand |= sVertices[vertex].u >= 0.7f;
-    assert(sawUpperBand);
 
     InitInput(&input, 3, MB_NORMAL);
     center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];

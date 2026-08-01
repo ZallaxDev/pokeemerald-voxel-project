@@ -332,7 +332,6 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->structureRoofRows = resolvedCells[gridIndex].structureRoofRows;
             cell->structureLocalX = resolvedCells[gridIndex].structureLocalX;
             cell->structureLocalY = resolvedCells[gridIndex].structureLocalY;
-            cell->volumeMaterialCount = resolvedCells[gridIndex].volumeRunRows;
             cell->cliffEdgeMask = resolvedCells[gridIndex].cliffEdgeMask;
             cell->cliffBaseMask = resolvedCells[gridIndex].cliffBaseMask;
             cell->cliffTransitionMask = resolvedCells[gridIndex].cliffTransitionMask;
@@ -372,24 +371,6 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                      face <= DIORAMA_MATERIAL_FACE_WEST; face++)
                     SetTerrainMaterial(&cell->materials[face], source->metatileId,
                                         DIORAMA_MATERIAL_FOREGROUND);
-            }
-            else if (cell->shape == DIORAMA_SHAPE_CLIFF && cell->volumeMaterialCount != 0)
-            {
-                const struct DioramaResolvedCell *resolved = &resolvedCells[gridIndex];
-                uint8_t band;
-
-                SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP],
-                                   resolved->volumeTopMetatile, DIORAMA_MATERIAL_FULL);
-                for (band = 0; band < cell->volumeMaterialCount; band++)
-                {
-                    SetTerrainMaterial(&cell->volumeMaterials[0][band],
-                                       resolved->volumeBackMetatiles[band],
-                                       DIORAMA_MATERIAL_FULL);
-                    for (face = 1; face < 4; face++)
-                        SetTerrainMaterial(&cell->volumeMaterials[face][band],
-                                           resolved->volumeFrontMetatiles[band],
-                                           DIORAMA_MATERIAL_FULL);
-                }
             }
             else if (cell->shape == DIORAMA_SHAPE_CLIFF)
             {

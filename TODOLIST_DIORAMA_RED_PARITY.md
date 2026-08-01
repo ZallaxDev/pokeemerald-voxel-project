@@ -3,13 +3,13 @@
 ## Estado
 
 - Rama de trabajo: `feature/diorama-red-parity`.
-- Base congelada: `da18b4436` (`Complete G5 terrain authoring pipeline`).
+- Base historica inspeccionada: `da18b4436`; sus decisiones geometricas no son autoridad.
 - Referencia Rojo congelada: `b21fd46ea789a0b8cb99d2c7e0add5a007568a54`.
 - Especificacion: `docs/diorama_red_parity.md`.
 - Editor visual: fuera de alcance hasta terminar este TODO.
 - Fase activa: **R0**.
-- Ultima fase aprobada manualmente: ninguna.
-- G6 permanece aislada en el stash creado antes de esta rama y no se mezcla aqui.
+- Ultima fase aprobada manualmente: **R0**.
+- El stash anterior permanece aislado y no se mezcla aqui.
 
 ## Protocolo obligatorio de fases
 
@@ -18,7 +18,7 @@ Cada fase tiene cinco estados: `pending`, `implementation`, `automatic-passed`,
 
 R0 creara tres autoridades versionadas:
 
-- `data/diorama/red_parity_gates.json`: estado, commit implementado, hash del binario,
+- `data/diorama/red_parity_gates.json`: estado, hashes de binarios,
   comandos automaticos, escenarios manuales, tester, fecha UTC y aprobacion textual;
 - `data/diorama/red_parity_scenarios.json`: mapa/layout, coordenadas, facing, pitch,
   resolucion, setup y resultado esperado de cada escenario;
@@ -26,11 +26,17 @@ R0 creara tres autoridades versionadas:
   Emerald, divergencia, fixture y resultado esperado independiente.
 
 `check_red_parity_gate.py --phase Rn --require-approved-previous` bloqueara una fase si
-la anterior no esta aprobada. El commit de aprobacion solo puede modificar metadata del
-gate y debe apuntar al commit y binario realmente probados.
+la anterior no esta aprobada. Cada ciclo se entrega en un unico commit con implementacion,
+validacion y metadata de aprobacion; los hashes deben corresponder a los binarios probados.
 
 Reglas:
 
+- [ ] Las pruebas manuales las ejecuta exclusivamente el usuario. El agente prepara el
+      procedimiento, termina la validacion automatica y al cerrar cada ciclo indica en
+      espanol los pasos manuales vigentes; nunca infiere aprobacion por tests o capturas.
+- [ ] El procedimiento manual comun vive en
+      `docs/diorama_red_parity_manual_testing.md`; los escenarios concretos siguen siendo
+      autoridad machine-readable en `red_parity_scenarios.json`.
 - [ ] Solo puede existir una fase en `implementation` o `manual-pending`.
 - [ ] No se empieza codigo de la fase siguiente hasta que el usuario escriba una
       aprobacion explicita de la prueba manual de la fase actual.
@@ -39,8 +45,8 @@ Reglas:
 - [ ] Cada correccion se valida de nuevo desde el principio del gate de esa fase.
 - [ ] Cada fase entrega un procedimiento reproducible; no se acepta "se ve bien en mi
       partida" sin mapa, posicion, direccion, pitch y resultado esperado.
-- [ ] Los resultados manuales aprobados se registran en un manifest versionado con
-      fecha, commit, build y escenarios ejecutados.
+- [ ] Los resultados manuales aprobados se registran en el gate con fecha, commit,
+      build, tester y aprobacion textual.
 - [ ] Al sustituir una implementacion se eliminan en el mismo commit su codigo, flags,
       datos, tests, generated records y documentacion obsoleta.
 - [ ] No se permite codigo muerto, `#if 0`, aliases sin consumidor, dos resolvers o dos
@@ -50,8 +56,6 @@ Reglas:
       consideran residuo.
 - [ ] No se toca `map_editor/` durante estas fases.
 - [ ] No se recupera ni mezcla `stash@{0}` mientras este TODO este activo.
-- [ ] Los outputs locales viven en `build/diorama_survey/` y no se versionan; el manifest
-      aprobado solo guarda hashes que enlazan esos outputs con los escenarios versionados.
 - [ ] Cambiar codigo, reglas, assets fuente o un escenario invalida sus aprobaciones.
 - [ ] Antes de iniciar cada fase, sus ejemplos generales se convierten en scenario IDs
       exactos; el checker rechaza gates con mapas, objetos o edificios sin coordenadas.
@@ -84,60 +88,43 @@ Desde R2, toda fase que publique geometria runtime debe ademas garantizar:
 - IR compilado y consumido por runtime en esa misma fase, con paridad Python/C;
 - smoke de classic, input, save/load, audio, NVDA ausente, menus, combate y fallback.
 
-## Relacion con el roadmap global
-
-Este TODO sustituye, no duplica, las siguientes partes de
-`TODOLIST_VOXEL_GLOBAL.md`:
-
-| Fases R | Fases G sustituidas |
-|---|---|
-| R0-R6 | G5-G10 en clasificacion, claims, terreno, agua, vegetacion y props |
-| R7 | G11-G12 de edificios |
-| R8 | G14 de cache/chunks para esta arquitectura |
-| R9-R10 | G15-G18 de rollout, auditoria y cierre |
-
-G13 queda congelada: R1 aporta survey headless, pero no implementa editor. En R10 se
-retiraran del TODO global las secciones sustituidas y el siguiente trabajo sera una fase
-nueva de integracion del editor, no volver a ejecutar G6.
-
 ## R0: congelar autoridad y retirar residuos incompatibles
 
-**Estado:** `pending`
+**Estado:** `approved`
 
-**Objetivo:** empezar desde una baseline inequívoca: conservar perfiles manuales G5 y
-fallback, pero retirar detectores descartados o desactivados que competirian con el port
-de Rojo.
+**Objetivo:** empezar desde una baseline inequivoca y neutral: conservar infraestructura,
+atlas, snapshots, compositor, meshing y fallback, pero retirar toda decision geometrica
+del intento anterior que competiria con el port de Rojo.
 
 Implementacion:
 
-- [ ] Inventariar toda ruta actual que decide shape, height, plateau o volume.
-- [ ] Clasificar cada ruta como `keep`, `replace in Rn` o `delete now` con consumidor.
-- [ ] Eliminar la implementacion runtime antigua conservada bajo `#if 0`.
-- [ ] Separar de `terrain_volumes.py` la topologia/constraints manual que se conserva.
-- [ ] Retirar de produccion el detector residual que solo mide IDs norte-sur, junto con
+- [x] Inventariar toda ruta actual que decide shape, height, plateau o volume.
+- [x] Clasificar cada ruta como `keep`, `replace in Rn` o `delete now` con consumidor.
+- [x] Eliminar la implementacion runtime antigua conservada bajo `#if 0`.
+- [x] Eliminar el resolver de topologia/constraints del intento anterior.
+- [x] Retirar de produccion el detector residual que solo mide IDs norte-sur, junto con
       sus flags, records y tests exclusivos; R5 introducira un detector nuevo.
-- [ ] Eliminar flags y schema usados exclusivamente por ese detector.
-- [ ] Regenerar C sin records automaticos residuales.
-- [ ] Mantener pins y anchors manuales existentes solo donde tengan una prueba vigente.
-- [ ] Eliminar datos experimentales sin validacion o documentar su prueba vigente.
-- [ ] Confirmar que Route 115 no contiene perfil experimental oculto.
-- [ ] Crear un informe machine-readable de resolvers y precedencia; debe existir uno por
+- [x] Eliminar flags y schema usados exclusivamente por ese detector.
+- [x] Regenerar C sin records automaticos residuales.
+- [x] Eliminar pins, anchors, perfiles y reglas geometricas del intento anterior.
+- [x] Eliminar datos experimentales sin validacion.
+- [x] Confirmar que los 518 mapas carecen de perfiles experimentales heredados.
+- [x] Crear un informe machine-readable de resolvers y precedencia; debe existir uno por
       responsabilidad.
-- [ ] Crear los manifests de gates, escenarios y trazabilidad definidos arriba.
-- [ ] Crear el target `test-diorama-red-parity` sin dependencias de `map_editor/`.
-- [ ] Crear un runner minimo de capturas para los escenarios R0; R1 lo generalizara.
-- [ ] Fijar una denylist de simbolos, flags, campos, files y generated records retirados.
-- [ ] Sustituir el test que exige `pending-user-confirmation` por validacion de estados y
-      registros de aprobacion; migrar o retirar coherentemente `g5_profiles.json` y audit.
-- [ ] Actualizar G5 para declarar que la inferencia automatica anterior fue sustituida,
-      no completada.
+- [x] Crear los manifests de gates, escenarios y trazabilidad definidos arriba.
+- [x] Crear el target `test-diorama-red-parity` sin dependencias de `map_editor/`.
+- [x] Crear instrucciones manuales directas para los escenarios R0.
+- [x] Fijar una denylist de simbolos, flags, campos, files y generated records retirados.
+- [x] Sustituir el test de confirmacion heredado por validacion de estados y registros de
+      aprobacion; retirar el manifest y audit anteriores.
+- [x] Eliminar el roadmap y documentacion por fases del intento anterior.
 
 Validacion automatica especifica:
 
-- [ ] Buscar y rechazar `#if 0` dentro de modulos Diorama retirados.
-- [ ] Rechazar campos de schema sin consumidor.
-- [ ] `compile_rules.py --check` produce cero records marcados como automaticos antiguos.
-- [ ] Builds classic y Diorama pasan.
+- [x] Buscar y rechazar `#if 0` dentro de modulos Diorama retirados.
+- [x] Rechazar campos de schema sin consumidor.
+- [x] `compile_rules.py --check` produce cero records de terreno heredados.
+- [x] Builds classic y Diorama pasan.
 
 **Prueba manual obligatoria R0:**
 
@@ -380,7 +367,7 @@ Validacion automatica especifica:
 5. Probar pitches 15/35/50/75 y volver a cada mapa tras una transicion.
 
 **Gate R5:** el usuario aprueba la deteccion automatica general de alturas. Este gate es
-el cierre real de la parte automatica de terreno G5. Solo entonces empieza R6.
+el cierre real de la deteccion automatica de terreno. Solo entonces empieza R6.
 
 ## R6: topologia relativa y formas especiales de Rojo
 
@@ -559,9 +546,7 @@ Implementacion:
 - [ ] Eliminar profiles, masks, pins y templates sin placements o sin aprobacion.
 - [ ] Regenerar desde cero todos los artefactos C y catalogos.
 - [ ] Verificar que un checkout limpio reproduce hashes y builds.
-- [ ] Actualizar el plan global y cerrar G5 solo con aprobacion explicita.
-- [ ] Retirar o reescribir las secciones G5-G12 y G14-G18 sustituidas del TODO global
-      para que no queden dos roadmaps autoritativos.
+- [ ] Confirmar que este TODO es el unico roadmap autoritativo del sistema voxel.
 - [ ] Crear el TODO posterior de integracion del editor a partir del schema ya aprobado.
 - [ ] Documentar limitaciones reales y fallback, sin afirmar inferencia perfecta.
 
@@ -583,5 +568,4 @@ Validacion automatica especifica:
 
 **Gate R10:** el usuario declara explicitamente que el sistema automatico, el sistema de
 correcciones manuales y el procedimiento de validacion alcanzan paridad con Rojo. Solo
-entonces se puede iniciar la nueva fase de integracion del editor. No se vuelve a G6,
-porque sus responsabilidades quedaron absorbidas y auditadas por este TODO.
+entonces se puede iniciar la nueva fase de integracion del editor.

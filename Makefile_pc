@@ -170,7 +170,7 @@ MAKEFLAGS += --no-print-directory
 # Secondary expansion is required for dependency variables in object rules.
 .SECONDEXPANSION:
 
-.PHONY: all rom linux clean compare tidy mostlyclean libagbsyscall modern tidymodern tidynonmodern diorama-catalog test-diorama test-diorama-snapshot test-diorama-connection test-diorama-transition test-diorama-metatile test-diorama-metatile-golden test-diorama-terrain test-diorama-sprite test-diorama-weather test-diorama-ui test-diorama-rules
+.PHONY: all rom linux clean compare tidy mostlyclean libagbsyscall modern tidymodern tidynonmodern diorama-catalog test-diorama test-diorama-red-parity test-diorama-snapshot test-diorama-connection test-diorama-transition test-diorama-metatile test-diorama-metatile-golden test-diorama-terrain test-diorama-sprite test-diorama-weather test-diorama-ui test-diorama-rules
 
 linux:
 	$(MAKE) -f Makefile_pc NATIVE_LINUX=1 rom
@@ -192,6 +192,10 @@ DIORAMA_TEST_CC ?= gcc
 DIORAMA_TEST_PKG_CONFIG := PKG_CONFIG_LIBDIR="$(PKG_CONFIG_32_PATH)" pkg-config
 
 test-diorama: test-diorama-snapshot test-diorama-connection test-diorama-transition test-diorama-metatile test-diorama-metatile-golden test-diorama-terrain test-diorama-sprite test-diorama-weather test-diorama-ui test-diorama-rules
+
+test-diorama-red-parity: test-diorama
+	python3 tools/diorama_red_parity/test_gate.py
+	python3 tools/diorama_red_parity/check_red_parity_gate.py --phase R0 --require-approved-previous
 
 test-diorama-snapshot: tests/diorama/test_snapshot.c src/diorama/scene/snapshot_exchange.c include/diorama/scene_snapshot.h
 	mkdir -p $(dir $(DIORAMA_SNAPSHOT_TEST))
@@ -266,10 +270,6 @@ test-diorama-rules: tests/diorama/test_rules.c $(DIORAMA_RULE_TEST_DEPS)
 	python3 tools/diorama_rules/test_compile_rules.py
 	python3 tools/diorama_rules/test_catalog.py
 	python3 tools/diorama_rules/test_occupancy_model.py
-	python3 tools/diorama_rules/test_terrain_volumes.py
-	python3 tools/diorama_rules/test_g5_audit.py
-	python3 tools/diorama_rules/g5_audit.py --check --output build/diorama_catalog/g5_coverage.json
-	python3 map_editor/test_server.py
 	mkdir -p $(dir $(DIORAMA_RULES_TEST))
 	$(DIORAMA_TEST_CC) -m32 -std=gnu99 -Wall -Wextra -Werror -D ENABLE_DIORAMA -iquote include \
 		tests/diorama/test_rules.c src/diorama/rules.c \

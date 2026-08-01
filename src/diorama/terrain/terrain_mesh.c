@@ -231,7 +231,6 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         hash = HashByte(hash, cell->structureLocalX);
         hash = HashByte(hash, cell->structureLocalY);
         hash = HashByte(hash, cell->southFacadeCount);
-        hash = HashByte(hash, cell->volumeMaterialCount);
         hash = HashByte(hash, cell->cliffEdgeMask);
         hash = HashByte(hash, cell->cliffBaseMask);
         hash = HashByte(hash, cell->cliffTransitionMask);
@@ -272,12 +271,6 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
             hash = HashU16(hash, cell->southFacadeMaterials[row].metatileId);
             hash = HashByte(hash, cell->southFacadeMaterials[row].layer);
         }
-        for (unsigned face = 0; face < 4; face++)
-            for (unsigned row = 0; row < cell->volumeMaterialCount; row++)
-            {
-                hash = HashU16(hash, cell->volumeMaterials[face][row].metatileId);
-                hash = HashByte(hash, cell->volumeMaterials[face][row].layer);
-            }
     }
     return hash;
 }
@@ -898,17 +891,6 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                 band.vMax = band.vMin + DIORAMA_VOXELS_PER_CELL;
             else
                 band.vMax = bandEnd;
-            if (surface == 0 && cell->shape == DIORAMA_SHAPE_CLIFF
-             && cell->volumeMaterialCount != 0 && materialFace >= DIORAMA_MATERIAL_FACE_NORTH
-             && materialFace <= DIORAMA_MATERIAL_FACE_WEST)
-            {
-                unsigned bandIndex = band.vMin > 0
-                                   ? band.vMin / DIORAMA_VOXELS_PER_CELL : 0;
-
-                if (bandIndex >= cell->volumeMaterialCount)
-                    bandIndex = cell->volumeMaterialCount - 1;
-                sourceMaterial = &cell->volumeMaterials[materialFace - 1][bandIndex];
-            }
             FacePositions(&band, positions);
             FaceMaterial(sourceMaterial, &band, &material);
             if (cell->shape == DIORAMA_SHAPE_LEDGE && face->axis != 1)

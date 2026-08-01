@@ -14,7 +14,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
-from terrain_volumes import normalize_rule, resolve_layout_terrain
 
 
 SCHEMA_VERSION = 2
@@ -152,91 +151,6 @@ def _ground_policy(value: object, path: str) -> dict:
         _unknown(item, {"mode", "metatile"}, path)
         return {"mode": mode, "metatile": _integer(item.get("metatile"), f"{path}.metatile", 0, 1023)}
     raise RuleError(f"{path}.mode: must be 'automatic' or 'manual'")
-
-
-def _terrain_mode(value: object, path: str) -> str:
-    if value not in ("automatic", "manual"):
-        raise RuleError(f"{path}: must be 'automatic' or 'manual'")
-    return value
-
-
-def _terrain_anchors(values: object, path: str, layout: dict,
-                     cells: tuple[dict, ...]) -> list[dict]:
-    output, ids, claimed = [], set(), set()
-    for index, raw in enumerate(array(values, path)):
-        item_path = f"{path}[{index}]"
-        item = _object(raw, item_path)
-        _unknown(item, {"id", "x", "y", "level", "height", "expectedMetatile",
-                        "targets", "shape", "archetype", "terrainClass", "axis"}, item_path)
-        anchor_id = _identifier(item.get("id"), f"{item_path}.id")
-        if anchor_id in ids:
-            raise RuleError(f"{item_path}.id: duplicate terrain anchor {anchor_id}")
-        ids.add(anchor_id)
-        x = _integer(item.get("x"), f"{item_path}.x", 0, layout["width"] - 1)
-        y = _integer(item.get("y"), f"{item_path}.y", 0, layout["height"] - 1)
-        expected = _integer(item.get("expectedMetatile"),
-                            f"{item_path}.expectedMetatile", 0, 1023)
-        actual = cells[y * layout["width"] + x]["metatile"]
-        if expected != actual:
-            raise RuleError(f"{item_path}.expectedMetatile: expected {actual} at ({x}, {y})")
-        anchor = {"id": anchor_id, "x": x, "y": y,
-                  "level": _voxel_number(item.get("level"), f"{item_path}.level", -8, 8),
-                  "expectedMetatile": expected}
-        if "height" in item:
-            anchor["height"] = _voxel_number(item["height"], f"{item_path}.height", 0, 32)
-        if "archetype" in item:
-            if item["archetype"] not in ARCHETYPES:
-                raise RuleError(f"{item_path}.archetype: unknown archetype {item['archetype']!r}")
-            anchor["archetype"] = item["archetype"]
-        if "shape" in item:
-            if item["shape"] not in TERRAIN_SHAPES:
-                raise RuleError(f"{item_path}.shape: unknown shape {item['shape']!r}")
-            anchor["shape"] = item["shape"]
-        if "terrainClass" in item:
-            if item["terrainClass"] not in TERRAIN_CLASSES:
-                raise RuleError(f"{item_path}.terrainClass: unknown terrain class {item['terrainClass']!r}")
-            anchor["terrainClass"] = item["terrainClass"]
-        if "axis" in item:
-            if item["axis"] not in ("x", "z", "cross"):
-                raise RuleError(f"{item_path}.axis: must be x, z or cross")
-            anchor["axis"] = item["axis"]
-        targets = []
-        for target_index, raw_target in enumerate(array(item.get("targets", []),
-                                                        f"{item_path}.targets")):
-            target_path = f"{item_path}.targets[{target_index}]"
-            target = _object(raw_target, target_path)
-            _unknown(target, {"x", "y", "expectedMetatile"}, target_path)
-            target_x = _integer(target.get("x"), f"{target_path}.x", 0, layout["width"] - 1)
-            target_y = _integer(target.get("y"), f"{target_path}.y", 0, layout["height"] - 1)
-            target_expected = _integer(target.get("expectedMetatile"),
-                                       f"{target_path}.expectedMetatile", 0, 1023)
-            target_actual = cells[target_y * layout["width"] + target_x]["metatile"]
-            if target_expected != target_actual:
-                raise RuleError(f"{target_path}.expectedMetatile: expected {target_actual} "
-                                f"at ({target_x}, {target_y})")
-            coordinate = (target_x, target_y)
-            if coordinate in claimed:
-                raise RuleError(f"{target_path}: terrain anchor targets overlap at {coordinate}")
-            claimed.add(coordinate)
-            targets.append({"x": target_x, "y": target_y,
-                            "expectedMetatile": target_expected})
-        if targets:
-            if not all(field in anchor for field in
-                       ("shape", "archetype", "terrainClass", "axis")):
-                raise RuleError(f"{item_path}: targeted geometry requires shape, archetype, "
-                                "terrainClass and axis")
-            anchor["targets"] = sorted(targets, key=lambda target: (target["y"], target["x"]))
-        output.append(anchor)
-    return sorted(output, key=lambda item: item["id"])
-
-
-def _validate_tileset_pin_action(action: dict, path: str) -> None:
-    ground_offset = action.get("groundOffset", 0)
-    if ((action["archetype"] in {"ground", "cliff", "mound", "wall-volume"}
-         or action.get("shape") == "cliff")
-            and ground_offset != 0):
-        raise RuleError(f"{path}.groundOffset: reusable terrain cannot assign an "
-                        "absolute floor; layout topology derives visual levels")
 
 
 def _voxel_number(value: object, path: str, minimum: float = -8.0,
@@ -530,29 +444,6 @@ def _patterns(values: object, path: str, tilesets: dict[str, TilesetInfo], pools
     return sorted(output, key=lambda item: (-item["priority"], item["id"]))
 
 
-def _event_presets(values: object, path: str, pools: set[str], profiles: dict[str, dict]) -> list[dict]:
-    output, ids = [], set()
-    for index, raw in enumerate(array(values, path)):
-        item_path = f"{path}[{index}]"
-        item = _object(raw, item_path)
-        _unknown(item, {"id", "event", "action", "allowedUnused"}, item_path)
-        preset_id = _identifier(item.get("id"), f"{item_path}.id")
-        if preset_id in ids:
-            raise RuleError(f"{item_path}.id: duplicate preset {preset_id}")
-        ids.add(preset_id)
-        event = _object(item.get("event"), f"{item_path}.event")
-        _unknown(event, {"kind", "class"}, f"{item_path}.event")
-        if event.get("kind") not in EVENT_KINDS:
-            raise RuleError(f"{item_path}.event.kind: unknown event kind {event.get('kind')!r}")
-        normalized_event = {"kind": event["kind"]}
-        if "class" in event:
-            normalized_event["class"] = _identifier(event["class"], f"{item_path}.event.class")
-        output.append({"id": preset_id, "event": normalized_event,
-                       "action": _action(item.get("action"), f"{item_path}.action", pools, profiles),
-                       "allowedUnused": _allowance(item.get("allowedUnused"), f"{item_path}.allowedUnused")})
-    return sorted(output, key=lambda item: item["id"])
-
-
 def _load_cells(root: Path, layouts: list[dict], tilesets: dict[str, TilesetInfo],
                 behavior_names: dict[int, str]) -> tuple[dict[str, tuple[dict, ...]], Counter, Counter]:
     attributes = {}
@@ -606,8 +497,8 @@ def _event_class(kind: str, event: dict, cell: dict | None) -> str:
 
 
 def _events(root: Path, maps: list[dict], cells: dict[str, tuple[dict, ...]],
-            layouts_by_id: dict[str, dict]) -> tuple[dict[tuple[str, int, int], list[dict]], Counter]:
-    result, counts = defaultdict(list), Counter()
+            layouts_by_id: dict[str, dict]) -> dict[tuple[str, int, int], list[dict]]:
+    result = defaultdict(list)
     for map_row in maps:
         source = json.loads((root / "data/maps" / map_row["directory"] / "map.json").read_text(encoding="utf-8"))
         layout = layouts_by_id[map_row["layout"]]
@@ -622,9 +513,7 @@ def _events(root: Path, maps: list[dict], cells: dict[str, tuple[dict, ...]],
                     classification = _event_class(kind, event, cell)
                     normalized = {"kind": kind, "class": classification}
                     result[(map_row["symbol"], x, y)].append(normalized)
-                    counts[(kind, classification)] += 1
-                    counts[(kind, None)] += 1
-    return result, counts
+    return result
 
 
 def _matches_neighbor(rule: dict, cell: dict) -> bool:
@@ -747,19 +636,16 @@ def _validate_logical_ids(entries: list[tuple[str, str]]) -> None:
 
 
 def _parse_pin_files(root: Path, tilesets: dict[str, TilesetInfo], pools: set[str],
-                     profiles: dict[str, dict], pin_counts: Counter) -> tuple[list[dict], dict[str, str]]:
+                     profiles: dict[str, dict], pin_counts: Counter) -> list[dict]:
     output, seen = [], set()
-    modes = {symbol: "automatic" for symbol in tilesets}
     for path in sorted((root / "data/diorama/tilesets").glob("*.json")):
         data = load_json(path)
-        _unknown(data, {"schemaVersion", "kind", "tileset", "terrainMode", "pins"}, str(path))
+        _unknown(data, {"schemaVersion", "kind", "tileset", "pins"}, str(path))
         if data.get("kind") != "tileset":
             raise RuleError(f"{path}.kind: must be 'tileset'")
         symbol = data.get("tileset")
         if symbol not in tilesets:
             raise RuleError(f"{path}.tileset: unknown tileset {symbol!r}")
-        modes[symbol] = _terrain_mode(data.get("terrainMode", "automatic"),
-                                      f"{path}.terrainMode")
         for index, raw in enumerate(array(data.get("pins"), f"{path}.pins")):
             item_path = f"{path}.pins[{index}]"
             item = _object(raw, item_path)
@@ -774,11 +660,10 @@ def _parse_pin_files(root: Path, tilesets: dict[str, TilesetInfo], pools: set[st
             if not count and allowance is None:
                 raise RuleError(f"{item_path}: dead pin has no placements; add structured allowedUnused")
             action = _action(item.get("action"), f"{item_path}.action", pools, profiles)
-            _validate_tileset_pin_action(action, f"{item_path}.action")
             output.append({"tileset": symbol, "metatile": metatile,
                            "action": action,
                            "placementCount": count, "allowedUnused": allowance})
-    return sorted(output, key=lambda item: (item["tileset"], item["metatile"])), modes
+    return sorted(output, key=lambda item: (item["tileset"], item["metatile"]))
 
 
 def compile_data(root: Path) -> dict:
@@ -800,12 +685,11 @@ def compile_data(root: Path) -> dict:
     for row in maps:
         maps_by_layout[row["layout"]].append(row)
     cells, behavior_counts, pin_counts = _load_cells(root, layouts, tilesets, behavior_names)
-    event_cells, event_counts = _events(root, maps, cells, layouts_by_id)
+    event_cells = _events(root, maps, cells, layouts_by_id)
 
     source = load_json(rules_root / "defaults.json")
     _unknown(source, {"schemaVersion", "kind", "default", "semanticPools", "profiles",
-                      "tilesetTerrainDefaults",
-                      "behaviorRules", "contextualRules", "exactPatterns", "eventPresets",
+                      "behaviorRules", "contextualRules", "exactPatterns",
                       "mapDefault"}, "defaults")
     if source.get("kind") != "global":
         raise RuleError("defaults.kind: must be 'global'")
@@ -824,20 +708,6 @@ def compile_data(root: Path) -> dict:
     pools.sort(key=lambda item: item["id"])
     profiles, profiles_by_id = _profiles(source.get("profiles"), "defaults.profiles", tilesets)
     default_action = _action(source.get("default"), "defaults.default", set(pool_ids), profiles_by_id)
-    terrain_defaults = _object(source.get("tilesetTerrainDefaults"),
-                               "defaults.tilesetTerrainDefaults")
-    missing_defaults = set(tilesets) - set(terrain_defaults)
-    extra_defaults = set(terrain_defaults) - set(tilesets)
-    if missing_defaults or extra_defaults:
-        details = []
-        if missing_defaults:
-            details.append("missing " + ", ".join(sorted(missing_defaults)))
-        if extra_defaults:
-            details.append("unknown " + ", ".join(sorted(extra_defaults)))
-        raise RuleError("defaults.tilesetTerrainDefaults: " + "; ".join(details))
-    for symbol, terrain_class in terrain_defaults.items():
-        if terrain_class not in TERRAIN_CLASSES:
-            raise RuleError(f"defaults.tilesetTerrainDefaults.{symbol}: unknown terrain class {terrain_class!r}")
 
     behavior_rules = []
     seen_behaviors = set()
@@ -872,144 +742,20 @@ def compile_data(root: Path) -> dict:
         pattern["placementCount"] = _pattern_placements(pattern, layouts, cells)
         if not pattern["placementCount"] and pattern["allowedNoPlacements"] is None:
             raise RuleError(f"exact pattern {pattern['id']}: no placements; add structured allowedNoPlacements")
-    presets = _event_presets(source.get("eventPresets"), "defaults.eventPresets",
-                             set(pool_ids), profiles_by_id)
-    for preset in presets:
-        event = preset["event"]
-        preset["placementCount"] = event_counts[(event["kind"], event.get("class"))]
-        if not preset["placementCount"] and preset["allowedUnused"] is None:
-            raise RuleError(f"event preset {preset['id']}: dead preset has no placements; add structured allowedUnused")
-    pins, tileset_modes = _parse_pin_files(root, tilesets, set(pool_ids), profiles_by_id,
-                                           pin_counts)
+    pins = _parse_pin_files(root, tilesets, set(pool_ids), profiles_by_id, pin_counts)
 
     map_default = _object(source.get("mapDefault"), "defaults.mapDefault")
-    _unknown(map_default, {"supported", "reason", "groundPolicy", "camera", "terrainMode"},
+    _unknown(map_default, {"supported", "reason", "groundPolicy", "camera"},
              "defaults.mapDefault")
-    default_terrain_mode = _terrain_mode(map_default.get("terrainMode", "automatic"),
-                                         "defaults.mapDefault.terrainMode")
-    map_terrain_modes = {row["symbol"]: default_terrain_mode for row in maps}
     map_documents = {}
-    map_anchors = {}
     for path in sorted((rules_root / "maps").glob("*.json")):
         item = load_json(path)
         symbol = item.get("map")
-        if symbol not in map_terrain_modes:
+        if symbol not in maps_by_symbol:
             raise RuleError(f"{path}.map: unknown map {symbol!r}")
         if symbol in map_documents:
             raise RuleError(f"{path}.map: duplicate map {symbol!r}")
         map_documents[symbol] = (path, item)
-        map_terrain_modes[symbol] = _terrain_mode(item.get("terrainMode", default_terrain_mode),
-                                                   f"{path}.terrainMode")
-        map_row = maps_by_symbol[symbol]
-        layout = layouts_by_id[map_row["layout"]]
-        map_anchors[symbol] = _terrain_anchors(
-            item.get("terrainAnchors", []), f"{path}.terrainAnchors", layout,
-            cells[layout["id"]])
-    layout_terrain_modes = {}
-    for layout_symbol, layout_maps in maps_by_layout.items():
-        modes = {map_terrain_modes[row["symbol"]] for row in layout_maps}
-        if len(modes) != 1:
-            details = ", ".join(f"{row['symbol']}={map_terrain_modes[row['symbol']]}"
-                                for row in sorted(layout_maps, key=lambda item: item["symbol"]))
-            raise RuleError(f"{layout_symbol}: maps sharing one layout must use one terrainMode; "
-                            f"{details}")
-        layout_terrain_modes[layout_symbol] = modes.pop()
-
-    layout_anchors = {}
-    for layout_symbol, layout_maps in maps_by_layout.items():
-        configured = [map_anchors[row["symbol"]] for row in layout_maps
-                      if row["symbol"] in map_anchors]
-        signatures = {json.dumps(anchors, sort_keys=True, separators=(",", ":"))
-                      for anchors in configured}
-        if len(signatures) > 1:
-            raise RuleError(f"{layout_symbol}: maps sharing one layout must use identical terrainAnchors")
-        layout_anchors[layout_symbol] = configured[0] if configured else []
-
-    behavior_actions = {row["behavior"]: row["action"] for row in behavior_rules}
-    pin_actions = {(row["tileset"], row["metatile"]): row["action"] for row in pins}
-    terrain_records = {}
-    for layout in layouts:
-        layout_cells = list(cells[layout["id"]])
-        authored_cells = {}
-        for group, anchor in enumerate(layout_anchors.get(layout["id"], []), start=1):
-            payload = {key: anchor[key] for key in
-                       ("level", "height", "shape", "archetype", "terrainClass", "axis")
-                       if key in anchor}
-            payload["group"] = group
-            targets = anchor.get("targets", [{"x": anchor["x"], "y": anchor["y"]}])
-            for target in targets:
-                offset = target["y"] * layout["width"] + target["x"]
-                if offset in authored_cells:
-                    raise RuleError(f"{layout['id']}: terrain anchor targets overlap at "
-                                    f"({target['x']}, {target['y']})")
-                authored_cells[offset] = payload
-        try:
-            resolved = resolve_layout_terrain(
-                layout_cells, layout["width"], layout["height"], default_action,
-                terrain_defaults, behavior_actions, pin_actions,
-                [layout_terrain_modes.get(layout["id"], default_terrain_mode) == "automatic"
-                 and tileset_modes[cell["tileset"]] == "automatic"
-                 for cell in layout_cells],
-                authored_cells)
-        except ValueError as error:
-            raise RuleError(f"{layout['id']}: {error}") from error
-        records = []
-        for offset, (cell, resolution) in enumerate(zip(layout_cells, resolved)):
-            action = pin_actions.get((cell["tileset"], cell["localMetatile"]))
-            if action is None:
-                action = behavior_actions.get(cell["behavior"],
-                    {**default_action, "terrainClass": terrain_defaults[cell["tileset"]]})
-            base = normalize_rule(action)
-            rule = resolution["rule"]
-            automatic = resolution["source"] == "automatic blocked volume"
-            volume_top = cell["metatile"]
-            volume_back = [cell["metatile"]] * 3
-            volume_front = [cell["metatile"]] * 3
-            if automatic:
-                x, y = offset % layout["width"], offset // layout["width"]
-                north = rule["volumeNorthY"]
-                south = rule["volumeSouthY"]
-                extent = south - north + 1
-                top_y = north + (y - north) % min(extent, 2)
-                volume_top = layout_cells[top_y * layout["width"] + x]["metatile"]
-                for band in range(min(round(rule.get("height", 0)), 3)):
-                    back_y = min(north + band, south)
-                    front_y = max(south - band, north)
-                    volume_back[band] = layout_cells[back_y * layout["width"] + x]["metatile"]
-                    volume_front[band] = layout_cells[front_y * layout["width"] + x]["metatile"]
-            changed = (automatic
-                       or rule.get("shape") != base.get("shape")
-                       or rule.get("archetype") != base.get("archetype")
-                       or rule.get("terrainClass") != base.get("terrainClass")
-                       or rule.get("axis") != base.get("axis")
-                       or rule.get("groundHeight", 0) != base.get("groundHeight", 0)
-                       or rule.get("height", 0) != base.get("height", 0)
-                       or any(rule.get(name, 0) for name in
-                              ("cliffEdgeMask", "cliffBaseMask", "cliffTransitionMask",
-                               "cliffCornerMask")))
-            if not changed:
-                continue
-            records.append({
-                "cellOffset": offset, "expectedMetatile": cell["metatile"],
-                "shape": rule["shape"], "archetype": rule.get("archetype") or "ground",
-                "terrainClass": rule.get("terrainClass", "ground"),
-                "axis": rule.get("axis", "x"),
-                "groundQ16": round(rule.get("groundHeight", 0) * 16),
-                "heightQ16": round(rule.get("height", 0) * 16),
-                "volumeNorthY": rule.get("volumeNorthY", 0),
-                "volumeSouthY": rule.get("volumeSouthY", 0),
-                "volumeRunRows": round(rule.get("height", 0)) if automatic else 0,
-                "volumeTopMetatile": volume_top,
-                "volumeBackMetatiles": volume_back,
-                "volumeFrontMetatiles": volume_front,
-                "automatic": automatic,
-                "measured": bool(rule.get("volumeTerrainMeasured", False)),
-                "cliffEdgeMask": rule.get("cliffEdgeMask", 0),
-                "cliffBaseMask": rule.get("cliffBaseMask", 0),
-                "cliffTransitionMask": rule.get("cliffTransitionMask", 0),
-                "cliffCornerMask": rule.get("cliffCornerMask", 0),
-            })
-        terrain_records[layout["id"]] = records
 
     if not isinstance(map_default.get("supported"), bool):
         raise RuleError("defaults.mapDefault.supported: must be a boolean")
@@ -1029,8 +775,7 @@ def compile_data(root: Path) -> dict:
     local_patterns_by_map = {}
     for symbol, (path, item) in sorted(map_documents.items()):
         _unknown(item, {"schemaVersion", "kind", "map", "layout", "status", "camera",
-                        "groundPolicy", "terrainMode", "terrainAnchors",
-                        "contextualRules", "exactPatterns"}, str(path))
+                        "groundPolicy", "contextualRules", "exactPatterns"}, str(path))
         if item.get("kind") != "map":
             raise RuleError(f"{path}.kind: must be 'map'")
         if symbol not in maps_by_symbol or symbol in explicit_maps:
@@ -1061,21 +806,16 @@ def compile_data(root: Path) -> dict:
             if not pattern["placementCount"] and pattern["allowedNoPlacements"] is None:
                 raise RuleError(f"{path}: exact pattern {pattern['id']} has no placements")
         explicit_maps[symbol] = {"status": dict(status),
-                                  "camera": parse_camera(item.get("camera"), f"{path}.camera"),
-                                  "terrainMode": _terrain_mode(
-                                      item.get("terrainMode", default_terrain_mode),
-                                      f"{path}.terrainMode"),
-                                  "groundPolicy": _ground_policy(item.get("groundPolicy", {"mode": "automatic"}),
-                                                                 f"{path}.groundPolicy"),
-                                  "terrainAnchors": map_anchors[symbol],
-                                  "contextualRules": local_rules, "exactPatterns": local_patterns}
+                                   "camera": parse_camera(item.get("camera"), f"{path}.camera"),
+                                   "groundPolicy": _ground_policy(item.get("groundPolicy", {"mode": "automatic"}),
+                                                                  f"{path}.groundPolicy"),
+                                   "contextualRules": local_rules, "exactPatterns": local_patterns}
         local_patterns_by_map[symbol] = local_patterns
 
     logical_ids = [(item["id"], "semanticPools") for item in pools]
     logical_ids.extend((item["id"], "profiles") for item in profiles)
     logical_ids.extend((item["id"], "contextualRules") for item in contextual_rules)
     logical_ids.extend((item["id"], "exactPatterns") for item in patterns)
-    logical_ids.extend((item["id"], "eventPresets") for item in presets)
     for symbol, configured in explicit_maps.items():
         logical_ids.extend((item["id"], f"{symbol}.contextualRules")
                            for item in configured["contextualRules"])
@@ -1087,20 +827,16 @@ def compile_data(root: Path) -> dict:
 
     tileset_catalog = [{"id": tileset_ids[symbol], "symbol": symbol, "role": info.role,
                         "metatileCount": info.metatile_count,
-                        "terrainMode": tileset_modes[symbol],
-                        "terrainClass": terrain_defaults[symbol]}
+                        "terrainClass": "ground"}
                        for symbol, info in sorted(tilesets.items(), key=lambda item: tileset_ids[item[0]])]
-    record_offset = 0
     layout_catalog = []
     for layout in layouts:
-        records = terrain_records[layout["id"]]
         layout_catalog.append({"id": layout["numericId"], "symbol": layout["id"],
                         "primaryTilesetId": tileset_ids.get(layout["primary_tileset"], 0),
                         "secondaryTilesetId": tileset_ids.get(layout["secondary_tileset"], 0),
                         "width": layout["width"], "height": layout["height"],
-                        "terrainRecordOffset": record_offset,
-                        "terrainRecordCount": len(records), "terrainRecords": records})
-        record_offset += len(records)
+                        "terrainRecordOffset": 0,
+                        "terrainRecordCount": 0, "terrainRecords": []})
     map_catalog = []
     for row in sorted(maps, key=lambda item: (item["group"], item["number"])):
         configured = explicit_maps.get(row["symbol"])
@@ -1116,21 +852,18 @@ def compile_data(root: Path) -> dict:
                                    ("MAP_TYPE_INDOOR", "MAP_TYPE_SECRET_BASE") else "exterior"},
                                   f"{row['symbol']}.automaticCamera")
         ground = configured["groundPolicy"] if configured else default_ground
-        terrain_mode = configured["terrainMode"] if configured else default_terrain_mode
         map_catalog.append({"symbol": row["symbol"], "group": row["group"], "number": row["number"],
                             "layoutId": layouts_by_id[row["layout"]]["numericId"], "mapType": row["mapType"],
                             "supported": status["supported"], "unsupportedReason": status.get("reason"),
                              "camera": {"profile": camera[0], "pitchRadians": camera[1],
                                         "focalLength": camera[2]}, "groundPolicy": ground,
-                            "terrainMode": terrain_mode,
-                            "terrainAnchors": configured["terrainAnchors"] if configured else [],
                             "contextualRules": configured["contextualRules"] if configured else [],
                             "exactPatterns": configured["exactPatterns"] if configured else []})
     canonical = {"schemaVersion": SCHEMA_VERSION, "tilesets": tileset_catalog,
                  "layouts": layout_catalog, "pools": pools, "profiles": profiles,
-                 "default": default_action, "behaviorRules": behavior_rules,
-                 "tilesetPins": pins, "contextualRules": contextual_rules,
-                 "exactPatterns": patterns, "eventPresets": presets, "maps": map_catalog}
+                  "default": default_action, "behaviorRules": behavior_rules,
+                  "tilesetPins": pins, "contextualRules": contextual_rules,
+                  "exactPatterns": patterns, "maps": map_catalog}
     encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
     digest = hashlib.sha256(encoded).hexdigest()
     generation = int(digest[:8], 16) or 1
@@ -1156,9 +889,7 @@ def render_header() -> str:
 
 struct DioramaGeneratedTilesetV2 { uint8_t id, role, terrainClass; uint16_t metatileCount; const char *symbol; };
 struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount; const char *symbol; };
-struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile; int16_t groundQ16, heightQ16; uint16_t volumeNorthY, volumeSouthY, volumeTopMetatile, volumeBackMetatiles[3], volumeFrontMetatiles[3]; uint8_t shape, archetype, terrainClass, axis, volumeRunRows, flags, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; };
-#define DIORAMA_GENERATED_TERRAIN_AUTOMATIC (1u << 0)
-#define DIORAMA_GENERATED_TERRAIN_MEASURED  (1u << 1)
+struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile; int16_t groundQ16, heightQ16; uint8_t shape, archetype, terrainClass, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; };
 struct DioramaGeneratedMapV2 { uint8_t group, number, supported, cameraProfile, mapType, groundMode; uint16_t layoutId, groundMetatile, mapScopeId; uint32_t contextualRuleOffset, exactPatternOffset; uint16_t contextualRuleCount, exactPatternCount; float pitchRadians, focalLength; const char *symbol, *unsupportedReason; };
 struct DioramaGeneratedActionV2 { uint8_t archetypeId, poolId, profileId, axis, groundMode, terrainClass, shape; uint16_t groundMetatile, flags; float groundOffset, height; uint16_t faceMetatiles[6]; uint8_t faceLayers[6], faceRotations[6], faceFlags[6]; };
 struct DioramaGeneratedBehaviorRuleV2 { uint8_t behavior; uint32_t placementCount; const char *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
@@ -1171,7 +902,6 @@ struct DioramaGeneratedNeighborV2 { uint8_t direction, flags, behavior, layer, e
 struct DioramaGeneratedSelectorV2 { uint32_t tilesetOffset, metatileOffset, behaviorOffset, layerOffset, elevationOffset, mapTypeOffset, neighborOffset; uint16_t tilesetCount, metatileCount, behaviorCount, layerCount, elevationCount, mapTypeCount, neighborCount; uint8_t eventKind; const char *eventClass; };
 struct DioramaGeneratedContextualRuleV2 { uint16_t id, mapScopeId, selectorId; int16_t priority; uint32_t placementCount; const char *logicalId, *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
 struct DioramaGeneratedExactPatternV2 { uint16_t id, mapScopeId; uint8_t primaryTilesetId, secondaryTilesetId, width, height; int16_t priority; uint32_t cellOffset, claimOffset, placementCount; const char *logicalId, *allowedNoPlacementsReason; struct DioramaGeneratedActionV2 action; };
-struct DioramaGeneratedEventPresetV2 { uint16_t id; uint8_t eventKind; uint32_t placementCount; const char *logicalId, *eventClass, *allowedUnusedReason; struct DioramaGeneratedActionV2 action; };
 
 extern const char gDioramaRulesSha256[65];
 extern const uint32_t gDioramaRulesGeneration;
@@ -1212,8 +942,6 @@ extern const uint8_t gDioramaPatternClaimsV2[];
 extern const size_t gDioramaPatternCellV2Count, gDioramaPatternClaimV2Count;
 extern const struct DioramaGeneratedExactPatternV2 gDioramaExactPatternsV2[];
 extern const size_t gDioramaExactPatternV2Count;
-extern const struct DioramaGeneratedEventPresetV2 gDioramaEventPresetsV2[];
-extern const size_t gDioramaEventPresetV2Count;
 #endif
 """
 
@@ -1312,15 +1040,12 @@ def render_c(data: dict) -> str:
     terrain_rows = []
     for layout in data["layouts"]:
         for row in layout["terrainRecords"]:
-            flags = int(row["automatic"]) | (int(row["measured"]) << 1)
             terrain_rows.append(
                 f"{{ {row['cellOffset']}, {row['expectedMetatile']}, {row['groundQ16']}, "
-                f"{row['heightQ16']}, {row['volumeNorthY']}, {row['volumeSouthY']}, "
-                f"{row['volumeTopMetatile']}, {{ {', '.join(map(str, row['volumeBackMetatiles']))} }}, "
-                f"{{ {', '.join(map(str, row['volumeFrontMetatiles']))} }}, "
+                f"{row['heightQ16']}, "
                 f"{shapes[row['shape']]}, {archetypes[row['archetype']]}, "
                 f"{terrain_classes[row['terrainClass']]}, {axes[row['axis']]}, "
-                f"{row['volumeRunRows']}, {flags}, {row['cliffEdgeMask']}, "
+                f"{row['cliffEdgeMask']}, "
                 f"{row['cliffBaseMask']}, {row['cliffTransitionMask']}, "
                 f"{row['cliffCornerMask']} }}")
     table("struct DioramaGeneratedTerrainV2", "gDioramaTerrainV2", "gDioramaTerrainV2Count",
@@ -1439,13 +1164,6 @@ def render_c(data: dict) -> str:
           [str(value) for value in pattern_claims])
     table("struct DioramaGeneratedExactPatternV2", "gDioramaExactPatternsV2",
           "gDioramaExactPatternV2Count", pattern_rows)
-    preset_ids = {row["id"]: index for index, row in enumerate(data["eventPresets"], 1)}
-    table("struct DioramaGeneratedEventPresetV2", "gDioramaEventPresetsV2",
-          "gDioramaEventPresetV2Count",
-          [f"{{ {preset_ids[row['id']]}, {event_kinds[row['event']['kind']]}, {row['placementCount']}, "
-           f"{_c_string(row['id'])}, {_c_string(row['event'].get('class'))}, "
-           f"{_c_string((row['allowedUnused'] or {}).get('reason'))}, "
-           f"{_action_c(row['action'], archetypes, pools, profiles)} }}" for row in data["eventPresets"]])
     lines.extend(("#endif", ""))
     return "\n".join(lines)
 

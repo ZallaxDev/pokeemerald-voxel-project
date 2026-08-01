@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "responsibilities": [
+    {
+      "id": "flat-fallback",
+      "disposition": "keep-neutral-consumer",
+      "owner": "src/diorama/rules.c:ResolveBase",
+      "consumer": "src/diorama/rules.c:DioramaRules_ResolveCell"
+    },
+    {
+      "id": "base-shape",
+      "disposition": "replace-in-R2",
+      "owner": null,
+      "consumer": null
+    },
+    {
+      "id": "base-height",
+      "disposition": "replace-in-R2",
+      "owner": null,
+      "consumer": null
+    },
+    {
+      "id": "manual-relative-topology",
+      "disposition": "replace-in-R6",
+      "owner": null,
+      "consumer": null
+    },
+    {
+      "id": "static-runtime-override",
+      "disposition": "keep-neutral-consumer",
+      "owner": "src/diorama/rules.c:ApplyStaticTerrain",
+      "consumer": "src/diorama/rules.c:DioramaRules_ResolveGrid"
+    },
+    {
+      "id": "terrain-mesh",
+      "disposition": "keep-neutral-consumer",
+      "owner": "src/diorama/terrain/terrain_mesh.c:DioramaTerrain_BuildChunk",
+      "consumer": "src/diorama/gl/gl_terrain_renderer.c"
+    },
+    {
+      "id": "object-support-height",
+      "disposition": "keep-neutral-consumer",
+      "owner": "src/diorama/rules.c:DioramaRules_ObjectGroundHeight",
+      "consumer": "src/diorama/scene/sprite_frame.c"
+    },
+    {
+      "id": "generic-volume-detection",
+      "disposition": "replace-in-R5",
+      "owner": null,
+      "consumer": null
+    }
+  ]
+}
