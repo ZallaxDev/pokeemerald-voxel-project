@@ -38,7 +38,7 @@ def assert_generated_parity(testcase: unittest.TestCase, data=None):
                     "context:": 8, "animation:": 10}
     for line, (layout_id, record) in zip(output, expected):
         fields = line.split("\t")
-        testcase.assertEqual(len(fields), 27)
+        testcase.assertEqual(len(fields), 41)
         source_kind = next((value for prefix, value in source_kinds.items()
                             if record["source"].startswith(prefix)), 6)
         exact = [
@@ -58,6 +58,15 @@ def assert_generated_parity(testcase: unittest.TestCase, data=None):
             {"x": 0, "z": 1, "cross": 2}[record["axis"]],
             record["cliffEdgeMask"], record["cliffBaseMask"],
             record["cliffTransitionMask"], record["cliffCornerMask"],
+            record["claimOwner"], record["regionId"], record["structureId"],
+            record["structureTemplateId"], record["structureX"], record["structureY"],
+            record["structureWidth"], record["structureHeight"],
+            record["structureLocalX"], record["structureLocalY"],
+            {"none": 0, "template": 1, "authored-special": 2,
+             "prop-candidate": 3, "generic-volume": 4, "region": 5}[record["ownerKind"]],
+            int(record["doorFold"]),
+            {"none": 0, "transparent": 1, "black": 2}[record["voidKind"]],
+            record["structurePriority"],
         ]
         testcase.assertEqual(fields[12:], [str(value) for value in tail])
 

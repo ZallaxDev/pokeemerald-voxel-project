@@ -48,6 +48,24 @@
       "disposition": "replace-in-R5",
       "owner": null,
       "consumer": null
+    },
+    {
+      "id": "exact-structure-matching",
+      "disposition": "implemented-in-R3",
+      "owner": "tools/diorama_rules/structures.py:analyze_layout",
+      "consumer": "src/diorama/rules.c:ApplyStaticTerrain"
+    },
+    {
+      "id": "structure-claim-order",
+      "disposition": "implemented-in-R3",
+      "owner": "tools/diorama_rules/structures.py:analyze_layout",
+      "consumer": "src/diorama/gl/gl_terrain_renderer.c:DioramaGLTerrain_Sync"
+    },
+    {
+      "id": "visual-region-connectivity",
+      "disposition": "implemented-in-R3",
+      "owner": "tools/diorama_rules/structures.py:analyze_layout",
+      "consumer": "src/diorama/gl/gl_compositor.c:BuildDebugImage"
     }
   ]
 }

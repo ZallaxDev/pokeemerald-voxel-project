@@ -51,7 +51,7 @@ int main(void)
                       ? (int)(resolved.groundHeight * 16.0f)
                       : (int)(resolved.featureHeight * 16.0f);
 
-            printf("%u\t%u\t%u\t%u\t%u\t%s\t%d\t%s\t%s\t%u\t%s\t%.9g\t%u\t%s\t%u\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+            printf("%u\t%u\t%u\t%u\t%u\t%s\t%d\t%s\t%s\t%u\t%s\t%.9g\t%u\t%s\t%u\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%d\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%d\n",
                    layout->id, record->cellOffset, record->expectedMetatile,
                    record->mapGroup, record->mapNumber,
                    DioramaRules_ClassName(resolved.classifierClass), heightQ16,
@@ -64,7 +64,13 @@ int main(void)
                    resolved.baseMetatileId, resolved.shape, resolved.archetype,
                    resolved.terrainClass, resolved.source, resolved.planeAxis,
                    resolved.cliffEdgeMask, resolved.cliffBaseMask,
-                   resolved.cliffTransitionMask, resolved.cliffCornerMask);
+                   resolved.cliffTransitionMask, resolved.cliffCornerMask,
+                   resolved.claimOwner, resolved.regionId, resolved.structureId,
+                   resolved.structureTemplateId, resolved.structureX, resolved.structureY,
+                   resolved.structureWidth, resolved.structureHeight,
+                   resolved.structureLocalX, resolved.structureLocalY,
+                   resolved.structureOwnerKind, resolved.doorFold, resolved.voidKind,
+                   resolved.rulePriority);
         }
     }
     return 0;

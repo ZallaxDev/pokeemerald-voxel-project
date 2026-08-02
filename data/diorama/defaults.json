@@ -17,7 +17,70 @@
   },
   "behaviorRules": [],
   "contextualRules": [],
-  "exactPatterns": [],
+  "exactPatterns": [
+    {
+      "id": "petalburg-house-left-shell",
+      "dimensions": { "width": 5, "height": 5 },
+      "tilesets": { "primary": "gTileset_General", "secondary": "gTileset_Petalburg" },
+      "cells": [
+        [520, 521, 521, 521, 522],
+        [528, 529, 529, 529, 530],
+        [536, 537, 537, 537, 538],
+        [546, 562, 560, 576, 545],
+        [554, 570, 568, 584, 553]
+      ],
+      "priority": 300,
+      "claimMask": ["11111", "11111", "11111", "11111", "11111"],
+      "action": { "archetype": "building", "pool": "structure" }
+    },
+    {
+      "id": "petalburg-house-right-shell",
+      "dimensions": { "width": 5, "height": 5 },
+      "tilesets": { "primary": "gTileset_General", "secondary": "gTileset_Petalburg" },
+      "cells": [
+        [520, 521, 521, 521, 522],
+        [528, 529, 529, 529, 530],
+        [536, 537, 537, 537, 538],
+        [544, 576, 561, 562, 547],
+        [552, 584, 569, 570, 555]
+      ],
+      "priority": 300,
+      "claimMask": ["11111", "11111", "11111", "11111", "11111"],
+      "action": { "archetype": "building", "pool": "structure" }
+    },
+    {
+      "id": "petalburg-lab-shell",
+      "dimensions": { "width": 7, "height": 4 },
+      "tilesets": { "primary": "gTileset_General", "secondary": "gTileset_Petalburg" },
+      "cells": [
+        [524, 578, 579, 525, 525, 525, 526],
+        [532, 586, 587, 533, 533, 533, 534],
+        [532, 533, 533, 533, 533, 533, 534],
+        [542, 527, 527, 556, 577, 557, 543]
+      ],
+      "priority": 310,
+      "claimMask": ["1111111", "1111111", "1111111", "1111111"],
+      "action": { "archetype": "building", "pool": "structure" }
+    },
+    {
+      "id": "pokemon-center-service-counter",
+      "dimensions": { "width": 5, "height": 2 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_PokemonCenter" },
+      "cells": [[546, 547, 594, 595, 585], [554, 555, 519, 603, 593]],
+      "priority": 250,
+      "claimMask": ["11111", "11111"],
+      "action": { "archetype": "counter", "pool": "furniture" }
+    },
+    {
+      "id": "petalburg-isolated-signpost",
+      "dimensions": { "width": 3, "height": 3 },
+      "tilesets": { "primary": "gTileset_General", "secondary": "gTileset_Petalburg" },
+      "cells": [[1, 1, 1], [1, 3, 1], [1, 1, 1]],
+      "priority": 200,
+      "claimMask": ["000", "010", "000"],
+      "action": { "archetype": "signpost", "pool": "prop" }
+    }
+  ],
   "mapDefault": {
     "supported": true,
     "groundPolicy": { "mode": "automatic" },

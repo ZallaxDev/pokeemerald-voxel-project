@@ -14,8 +14,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
-from emerald_compositor import load_animation_slots
+from emerald_compositor import TilesetComposer, load_animation_slots
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
+from structures import analyze_layout
 from tile_shape import ClassificationError, TileShapeClassifier
 
 
@@ -46,6 +47,7 @@ EVENT_KINDS = ("object", "warp", "coordinate", "background")
 DIRECTIONS = ("n", "ne", "e", "se", "s", "sw", "w", "nw")
 CAMERAS = {"exterior": (40.542, 130.0), "interior": (60.0, 145.0)}
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9-]*$")
+_PIXEL_SUMMARY_CACHE: dict[Path, dict[str, tuple[dict, ...]]] = {}
 
 class RuleError(ValueError):
     pass
@@ -729,30 +731,118 @@ def _with_animation_provenance(shape: TileShape, cell: dict) -> TileShape:
                      shape.ambiguity, shape.prop_ground)
 
 
-def _apply_patterns(shapes: tuple[TileShape, ...], layout: dict,
-                    cells: tuple[dict, ...], patterns: list[dict]) -> tuple[TileShape, ...]:
-    output = list(shapes)
-    claims = {}
-    for pattern in patterns:
-        if (layout["primary_tileset"] != pattern["tilesets"]["primary"]
-                or layout["secondary_tileset"] != pattern["tilesets"]["secondary"]):
+def _visible_components(pixels: tuple) -> int:
+    pending = {index for index, pixel in enumerate(pixels) if pixel.visible}
+    components = 0
+    while pending:
+        components += 1
+        stack = [pending.pop()]
+        while stack:
+            index = stack.pop()
+            x, y = index % 16, index // 16
+            for neighbor in ((index - 1 if x else -1), (index + 1 if x < 15 else -1),
+                             (index - 16 if y else -1), (index + 16 if y < 15 else -1)):
+                if neighbor in pending:
+                    pending.remove(neighbor)
+                    stack.append(neighbor)
+    return components
+
+
+def _pixel_summaries(root: Path, layouts: list[dict], cells: dict[str, tuple[dict, ...]],
+                     tilesets: dict[str, TilesetInfo]) -> dict[str, tuple[dict, ...]]:
+    """Compose each logical metatile once per tileset pair with source-safe pixels."""
+    if root in _PIXEL_SUMMARY_CACHE:
+        return _PIXEL_SUMMARY_CACHE[root]
+    slots = load_animation_slots(root)
+    cache = {}
+    output = {}
+    for layout in layouts:
+        primary_symbol = layout["primary_tileset"]
+        secondary_symbol = layout["secondary_tileset"]
+        pair = (primary_symbol, secondary_symbol)
+        if pair not in cache:
+            if primary_symbol not in tilesets or secondary_symbol not in tilesets:
+                cache[pair] = (None, {})
+            else:
+                primary = tilesets[primary_symbol]
+                secondary = tilesets[secondary_symbol]
+                composer = TilesetComposer(
+                    root / primary.root, root / secondary.root,
+                    root / primary.metatiles_root, root / secondary.metatiles_root,
+                    slots.get(primary.callback, ()), slots.get(secondary.callback, ()),
+                    animation_frame=0)
+                cache[pair] = (composer, {})
+        composer, summaries = cache[pair]
+        rows = []
+        for cell in cells[layout["id"]]:
+            metatile = cell["metatile"]
+            if metatile not in summaries:
+                if composer is None:
+                    summaries[metatile] = {"resolved": False, "visible": 0,
+                                           "transparent": 256, "black": 0,
+                                           "components": 0, "signature": ""}
+                else:
+                    before = set(composer.missing_tile_details)
+                    full = composer.compose_metatile(metatile)[2]
+                    missing = set(composer.missing_tile_details) - before
+                    visible = sum(pixel.visible for pixel in full)
+                    black = sum(pixel.visible and pixel.rgba[:3] == (0, 0, 0)
+                                for pixel in full)
+                    rgba = bytes(channel for pixel in full for channel in pixel.rgba)
+                    summaries[metatile] = {
+                        "resolved": not missing, "visible": visible,
+                        "transparent": len(full) - visible, "black": black,
+                        "components": _visible_components(full),
+                        "signature": hashlib.sha256(rgba).hexdigest(),
+                    }
+            rows.append(summaries[metatile])
+        output[layout["id"]] = tuple(rows)
+    _PIXEL_SUMMARY_CACHE[root] = output
+    return output
+
+
+def _apply_derived_voids(shapes: tuple[TileShape, ...], analysis: dict) -> tuple[TileShape, ...]:
+    output = []
+    for shape, structural in zip(shapes, analysis["cells"]):
+        kind = structural["voidKind"]
+        if kind == "none":
+            output.append(shape)
             continue
-        width = pattern["dimensions"]["width"]
-        for x, y in _pattern_origins(pattern, layout, {layout["id"]: cells}):
-            for row, mask in enumerate(pattern["claimMask"]):
-                for column, claimed in enumerate(mask):
-                    if claimed != "1":
-                        continue
-                    offset = (y + row) * layout["width"] + x + column
-                    previous = claims.get(offset)
-                    key = (pattern["priority"], pattern["id"])
-                    if previous is None or key > previous:
-                        claims[offset] = key
-                        output[offset] = shape_from_action(
-                            pattern["action"], source=f"pattern:{pattern['id']}",
-                            authored=True, confidence=1.0,
-                            evidence=(f"pattern:{pattern['id']}",))
+        output.append(TileShape(
+            "void", 0.0, "flat", shape.pool, False, f"structure:void-{kind}", 1.0,
+            shape.evidence + (f"pixels:void-{kind}", "metadata:unauthored"), (),
+            shape.prop_ground))
     return tuple(output)
+
+
+def _structure_semantic(analysis: dict, offset: int) -> tuple:
+    cell = analysis["cells"][offset]
+    values = []
+    for field in ("owner", "region"):
+        local_id = cell[field]
+        if local_id is None:
+            values.append(None)
+            continue
+        candidate = analysis["candidates"][local_id - 1]
+        values.append(tuple((key, json.dumps(candidate[key], sort_keys=True,
+                                             separators=(",", ":")))
+                            for key in sorted(candidate) if key != "id"))
+    return tuple(values) + (cell["doorFold"], cell["voidKind"], cell["source"])
+
+
+def _register_candidates(analysis: dict, layout_id: int, map_group: int, map_number: int,
+                         catalog: list[dict], local_ids: set[int] | None = None) -> dict[int, int]:
+    mapping = {}
+    for candidate in analysis["candidates"]:
+        if local_ids is not None and candidate["id"] not in local_ids:
+            continue
+        global_id = len(catalog) + 1
+        if global_id > 0xFFFF:
+            raise RuleError("R3 structure candidate catalog exceeds uint16_t ownership")
+        mapping[candidate["id"]] = global_id
+        catalog.append({**candidate, "id": global_id, "layoutId": layout_id,
+                        "mapGroup": map_group, "mapNumber": map_number})
+    return mapping
 
 
 def _shape_geometry(class_name: str) -> tuple[str, str, str]:
@@ -777,12 +867,13 @@ def _evidence_flags(values: tuple[str, ...]) -> int:
                 ("metatile:", 1 << 3), ("behavior:", 1 << 4),
                 ("animation:", 1 << 5), ("collision:", 1 << 6),
                 ("elevation:", 1 << 7), ("layerType:", 1 << 8),
-                ("pattern:", 1 << 9))
+                ("pattern:", 1 << 9), ("pixels:", 1 << 10))
     return sum(flag for prefix, flag in prefixes if any(value.startswith(prefix) for value in values))
 
 
 def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
-                    map_group: int = 0xFF, map_number: int = 0xFF) -> dict:
+                    structure: dict, map_group: int = 0xFF,
+                    map_number: int = 0xFF) -> dict:
     geometry, archetype, terrain_class = _shape_geometry(shape.class_name)
     prop = shape.prop_ground.as_dict()
     return {
@@ -798,6 +889,30 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
         "shape": geometry, "archetype": archetype, "terrainClass": terrain_class,
         "axis": "x", "cliffEdgeMask": 0, "cliffBaseMask": 0,
         "cliffTransitionMask": 0, "cliffCornerMask": 0,
+        **structure,
+    }
+
+
+def _structure_fields(analysis: dict, mapping: dict[int, int], offset: int,
+                      layout_width: int) -> dict:
+    cell = analysis["cells"][offset]
+    owner = mapping.get(cell["owner"], 0)
+    region = mapping.get(cell["region"], 0)
+    local_id = cell["owner"] or cell["region"]
+    candidate = analysis["candidates"][local_id - 1] if local_id else None
+    bbox = candidate["bbox"] if candidate else {"x": 0, "y": 0, "width": 0, "height": 0}
+    x, y = offset % layout_width, offset // layout_width
+    return {
+        "claimOwner": owner, "regionId": region,
+        "structureId": owner or region,
+        "structureTemplateId": (owner if candidate and candidate["kind"] == "template" else 0),
+        "structureX": bbox["x"], "structureY": bbox["y"],
+        "structureWidth": bbox["width"], "structureHeight": bbox["height"],
+        "structureLocalX": x - bbox["x"] if candidate else 0,
+        "structureLocalY": y - bbox["y"] if candidate else 0,
+        "structurePriority": candidate["priority"] if candidate else -32768,
+        "ownerKind": candidate["kind"] if candidate else "none",
+        "doorFold": cell["doorFold"], "voidKind": cell["voidKind"],
     }
 
 
@@ -821,6 +936,7 @@ def compile_data(root: Path) -> dict:
         maps_by_layout[row["layout"]].append(row)
     cells, behavior_counts, pin_counts = _load_cells(root, layouts, tilesets, behavior_names)
     event_cells = _events(root, maps, cells, layouts_by_id)
+    pixel_summaries = _pixel_summaries(root, layouts, cells, tilesets)
 
     source = load_json(rules_root / "defaults.json")
     _unknown(source, {"schemaVersion", "kind", "default", "semanticPools", "profiles",
@@ -965,13 +1081,16 @@ def compile_data(root: Path) -> dict:
                         "terrainClass": "ground"}
                        for symbol, info in sorted(tilesets.items(), key=lambda item: tileset_ids[item[0]])]
     layout_catalog = []
+    structure_cell_offset = 0
     for layout in layouts:
         layout_catalog.append({"id": layout["numericId"], "symbol": layout["id"],
                         "primaryTilesetId": tileset_ids.get(layout["primary_tileset"], 0),
                         "secondaryTilesetId": tileset_ids.get(layout["secondary_tileset"], 0),
-                        "width": layout["width"], "height": layout["height"],
+                         "width": layout["width"], "height": layout["height"],
+                        "structureCellOffset": structure_cell_offset,
                         "terrainRecordOffset": 0,
                         "terrainRecordCount": 0, "terrainRecords": []})
+        structure_cell_offset += layout["width"] * layout["height"]
     map_catalog = []
     for row in sorted(maps, key=lambda item: (item["group"], item["number"])):
         configured = explicit_maps.get(row["symbol"])
@@ -1000,6 +1119,7 @@ def compile_data(root: Path) -> dict:
     evidence_details = set()
     source_names = set()
     terrain_offset = 0
+    structure_catalog = []
     global_classifier = TileShapeClassifier(
         contextual_rules=contextual_rules, tileset_pins=pins,
         behavior_rules=behavior_rules, default_action=default_action)
@@ -1009,11 +1129,18 @@ def compile_data(root: Path) -> dict:
         if layout_cells:
             wildcard = global_classifier.classify_layout(
                 layout_cells, layout["width"], layout["height"])
-            wildcard = _apply_patterns(wildcard, layout, layout_cells, patterns)
             wildcard = tuple(_with_animation_provenance(shape, cell)
                              for shape, cell in zip(wildcard, layout_cells))
+            wildcard_structures = analyze_layout(
+                layout, layout_cells, wildcard, patterns, pixel_summaries[layout["id"]])
+            wildcard = _apply_derived_voids(wildcard, wildcard_structures)
+            wildcard_mapping = _register_candidates(
+                wildcard_structures, layout["numericId"], 0xFF, 0xFF, structure_catalog)
             for offset, (cell, shape) in enumerate(zip(layout_cells, wildcard)):
-                records.append(_terrain_record(offset, cell, shape))
+                records.append(_terrain_record(
+                    offset, cell, shape,
+                    _structure_fields(wildcard_structures, wildcard_mapping, offset,
+                                      layout["width"])))
                 if not shape.authored and shape.confidence == 0.0:
                     ambiguity_counts[shape.ambiguity] += 1
                     ambiguity_flags[shape.ambiguity] |= _evidence_flags(shape.evidence)
@@ -1033,14 +1160,39 @@ def compile_data(root: Path) -> dict:
                     layout_cells, layout["width"], layout["height"],
                     map_type=map_row["mapType"], events=coordinate_events)
                 exact_patterns = patterns + (configured["exactPatterns"] if configured else [])
-                exact = _apply_patterns(exact, layout, layout_cells, exact_patterns)
                 exact = tuple(_with_animation_provenance(shape, cell)
                               for shape, cell in zip(exact, layout_cells))
+                map_events = {offset: values for (symbol, x, y), values in event_cells.items()
+                              if symbol == map_row["symbol"]
+                              for offset in (y * layout["width"] + x,)}
+                doors = frozenset(offset for offset, values in map_events.items()
+                                  if any(value["class"] == "door" for value in values))
+                exact_structures = analyze_layout(
+                    layout, layout_cells, exact, exact_patterns,
+                    pixel_summaries[layout["id"]], doors)
+                exact = _apply_derived_voids(exact, exact_structures)
                 scope = map_catalog_by_symbol[map_row["symbol"]]
+                changed_structure = {
+                    offset for offset in range(len(layout_cells))
+                    if _structure_semantic(exact_structures, offset)
+                    != _structure_semantic(wildcard_structures, offset)
+                }
+                needed = {local_id for offset in changed_structure
+                          for local_id in (exact_structures["cells"][offset]["owner"],
+                                           exact_structures["cells"][offset]["region"])
+                          if local_id is not None}
+                exact_mapping = _register_candidates(
+                    exact_structures, layout["numericId"], scope["group"], scope["number"],
+                    structure_catalog, needed)
                 for offset, (cell, shape, base) in enumerate(zip(layout_cells, exact, wildcard)):
-                    if shape.as_dict() == base.as_dict():
+                    if shape.as_dict() == base.as_dict() and offset not in changed_structure:
                         continue
-                    records.append(_terrain_record(offset, cell, shape,
+                    structure = (_structure_fields(exact_structures, exact_mapping, offset,
+                                                   layout["width"])
+                                 if offset in changed_structure else
+                                 _structure_fields(wildcard_structures, wildcard_mapping, offset,
+                                                   layout["width"]))
+                    records.append(_terrain_record(offset, cell, shape, structure,
                                                    scope["group"], scope["number"]))
                     if not shape.authored and shape.confidence == 0.0:
                         ambiguity_counts[shape.ambiguity] += 1
@@ -1069,6 +1221,7 @@ def compile_data(root: Path) -> dict:
                    "default": default_action, "behaviorRules": behavior_rules,
                    "tilesetPins": pins, "contextualRules": contextual_rules,
                    "exactPatterns": patterns, "maps": map_catalog,
+                   "structureCandidates": structure_catalog,
                    "evidenceDetails": evidence_catalog, "ambiguities": ambiguity_catalog,
                    "classifierSources": source_catalog}
     encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
@@ -1092,7 +1245,7 @@ def render_header() -> str:
 #include <stdint.h>
 
 struct DioramaGeneratedTilesetV2 { uint8_t id, role, terrainClass; uint16_t metatileCount; const char *symbol; };
-struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount; const char *symbol; };
+struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount, structureCellOffset; const char *symbol; };
 struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile, classId, sourceId, evidenceDetailsId, ambiguityDetailsId, propGroundMetatile, evidenceFlags, ambiguityFlags; int16_t heightQ16; uint8_t mapGroup, mapNumber, shape, archetype, terrainClass, artMode, pool, authored, sourceKind, propGroundMode, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; float confidence; };
 struct DioramaGeneratedClassifierSourceV2 { uint16_t id; const char *name; };
 struct DioramaGeneratedEvidenceV2 { uint16_t id; const char *details; };
@@ -1102,6 +1255,9 @@ struct DioramaGeneratedPoolV2 { uint16_t id; const char *logicalId, *description
 struct DioramaGeneratedProfileV2 { uint16_t id; uint8_t archetypeId; uint32_t maskOffset, sampleOffset; uint16_t maskCount, sampleCount; const char *logicalId; };
 struct DioramaGeneratedMaskV2 { uint16_t profileId; uint8_t kind, width, height; uint32_t rowOffset; uint16_t rowCount; };
 struct DioramaGeneratedSampleV2 { uint8_t tilesetId, layer; uint16_t metatile; };
+struct DioramaGeneratedStructureV2 { uint16_t id, layoutId; uint8_t mapGroup, mapNumber, kind, pool, classId, claimOnly; int16_t priority, x, y; uint8_t width, height; uint32_t cellOffset, cellCount, visiblePixels, transparentPixels, blackPixels, pixelComponents; const char *owner, *source, *evidence; };
+struct DioramaGeneratedStructureCellV2 { uint16_t claimOwner, regionId; uint8_t doorFold, voidKind; };
+struct DioramaGeneratedStructureOverrideV2 { uint16_t layoutId, expectedMetatile; uint32_t cellOffset; uint8_t mapGroup, mapNumber; struct DioramaGeneratedStructureCellV2 cell; };
 
 extern const char gDioramaRulesSha256[65];
 extern const uint32_t gDioramaRulesGeneration;
@@ -1129,6 +1285,14 @@ extern const uint64_t gDioramaMaskRowsV2[];
 extern const size_t gDioramaMaskRowV2Count;
 extern const struct DioramaGeneratedSampleV2 gDioramaSamplesV2[];
 extern const size_t gDioramaSampleV2Count;
+extern const struct DioramaGeneratedStructureV2 gDioramaStructuresV2[];
+extern const size_t gDioramaStructureV2Count;
+extern const uint32_t gDioramaStructureCellsV2[];
+extern const size_t gDioramaStructureCellV2Count;
+extern const struct DioramaGeneratedStructureCellV2 gDioramaStructureOwnersV2[];
+extern const size_t gDioramaStructureOwnerV2Count;
+extern const struct DioramaGeneratedStructureOverrideV2 gDioramaStructureOverridesV2[];
+extern const size_t gDioramaStructureOverrideV2Count;
 #endif
 """
 
@@ -1165,11 +1329,15 @@ def render_c(data: dict) -> str:
     table("struct DioramaGeneratedLayoutV2", "gDioramaLayoutsV2", "gDioramaLayoutV2Count",
           [f"{{ {row['id']}, {row['width']}, {row['height']}, {row['primaryTilesetId']}, "
            f"{row['secondaryTilesetId']}, {row['terrainRecordOffset']}, "
-           f"{row['terrainRecordCount']}, {_c_string(row['symbol'])} }}" for row in data["layouts"]])
+           f"{row['terrainRecordCount']}, {row['structureCellOffset']}, "
+           f"{_c_string(row['symbol'])} }}" for row in data["layouts"]])
     shapes = {name: index for index, name in enumerate(
         ("flat", "extruded", "cliff", "ledge", "stairs", "water", "bridge",
          "billboard", "cutout", "roof", "building-part", "hidden"))}
     axes = {"x": 0, "z": 1, "cross": 2}
+    owner_kinds = {"none": 0, "template": 1, "authored-special": 2,
+                   "prop-candidate": 3, "generic-volume": 4, "region": 5}
+    void_kinds = {"none": 0, "transparent": 1, "black": 2}
     def source_kind(name: str) -> int:
         if name.startswith("pin:"):
             return 1
@@ -1197,7 +1365,8 @@ def render_c(data: dict) -> str:
                 f"{axes[row['axis']]}, "
                 f"{row['cliffEdgeMask']}, "
                 f"{row['cliffBaseMask']}, {row['cliffTransitionMask']}, "
-                f"{row['cliffCornerMask']}, {row['confidence']:.6f}f }}")
+                f"{row['cliffCornerMask']}, "
+                f"{row['confidence']:.6f}f }}")
     table("struct DioramaGeneratedTerrainV2", "gDioramaTerrainV2", "gDioramaTerrainV2Count",
           terrain_rows)
     table("struct DioramaGeneratedClassifierSourceV2", "gDioramaClassifierSourcesV2",
@@ -1242,6 +1411,50 @@ def render_c(data: dict) -> str:
     table("uint64_t", "gDioramaMaskRowsV2", "gDioramaMaskRowV2Count",
           [f"UINT64_C(0x{value:X})" for value in mask_rows])
     table("struct DioramaGeneratedSampleV2", "gDioramaSamplesV2", "gDioramaSampleV2Count", samples)
+    structure_cells, structure_rows = [], []
+    for row in data["structureCandidates"]:
+        cell_offset = len(structure_cells)
+        structure_cells.extend(row["cells"])
+        pixels = row["pixels"]
+        bbox = row["bbox"]
+        structure_rows.append(
+            f"{{ {row['id']}, {row['layoutId']}, {row['mapGroup']}, {row['mapNumber']}, "
+            f"{owner_kinds[row['kind']]}, {pools[row['pool']]}, {class_ids[row['class']]}, "
+            f"{int(row['claimOnly'])}, {row['priority']}, {bbox['x']}, {bbox['y']}, "
+            f"{bbox['width']}, {bbox['height']}, {cell_offset}, {len(row['cells'])}, "
+            f"{pixels['visible']}, {pixels['transparent']}, {pixels['black']}, "
+            f"{pixels['components']}, {_c_string(row['owner'])}, {_c_string(row['source'])}, "
+            f"{_c_string('|'.join(row['evidence']))} }}")
+    table("struct DioramaGeneratedStructureV2", "gDioramaStructuresV2",
+          "gDioramaStructureV2Count", structure_rows)
+    packed_structure_cells = [", ".join(f"UINT32_C({value})" for value in
+                              structure_cells[index:index + 16])
+                              for index in range(0, len(structure_cells), 16)]
+    table("uint32_t", "gDioramaStructureCellsV2", "gDioramaStructureCellV2Count",
+          packed_structure_cells)
+    owner_rows, override_rows = [], []
+    for layout in data["layouts"]:
+        by_offset = {}
+        for row in layout["terrainRecords"]:
+            if row["mapGroup"] == 0xFF:
+                by_offset[row["cellOffset"]] = row
+            else:
+                override_rows.append(
+                    f"{{ {layout['id']}, {row['expectedMetatile']}, {row['cellOffset']}, "
+                    f"{row['mapGroup']}, {row['mapNumber']}, {{ {row['claimOwner']}, "
+                    f"{row['regionId']}, {int(row['doorFold'])}, {void_kinds[row['voidKind']]} }} }}")
+        if len(by_offset) != layout["width"] * layout["height"]:
+            raise RuleError(f"{layout['symbol']}: structure ownership is not layout-complete")
+        owner_rows.extend(
+            f"{{ {by_offset[offset]['claimOwner']}, {by_offset[offset]['regionId']}, "
+            f"{int(by_offset[offset]['doorFold'])}, {void_kinds[by_offset[offset]['voidKind']]} }}"
+            for offset in range(layout["width"] * layout["height"]))
+    packed_owner_rows = [", ".join(owner_rows[index:index + 16])
+                         for index in range(0, len(owner_rows), 16)]
+    table("struct DioramaGeneratedStructureCellV2", "gDioramaStructureOwnersV2",
+          "gDioramaStructureOwnerV2Count", packed_owner_rows)
+    table("struct DioramaGeneratedStructureOverrideV2", "gDioramaStructureOverridesV2",
+          "gDioramaStructureOverrideV2Count", override_rows)
     lines.extend(("#endif", ""))
     return "\n".join(lines)
 

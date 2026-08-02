@@ -13,6 +13,7 @@
 #include "diorama/gl_loader.h"
 #include "diorama/gl_object_renderer.h"
 #include "diorama/gl_terrain_renderer.h"
+#include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/metatile_atlas.h"
 #include "diorama/presentation_transition.h"
@@ -338,7 +339,7 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
     uint16_t i;
 
     memset(sDebugPixels, 0, sizeof(sDebugPixels));
-    FillRect(2, 2, 94, 154, RGBA(10, 14, 18, 220));
+    FillRect(2, 2, 122, 156, RGBA(10, 14, 18, 220));
     DrawValue(5, 5, "GEN:", snapshot->mapGeneration);
     DrawValue(5, 14, "CH:", metrics->activeChunks);
     DrawValue(5, 23, "VIS:", metrics->visibleChunks);
@@ -380,17 +381,28 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
     {
         const char *className = DioramaRules_ClassName(targetCell->classifierClass);
         const char *sourceName = DioramaRules_ClassifierSourceName(targetCell->classifierSource);
+        const struct DioramaGeneratedStructureV2 *structure =
+            DioramaRules_GetStructure(targetCell->structureId);
+        const char *ownerKind = DioramaRules_StructureKindName(targetCell->structureOwnerKind);
+        const char *structureSource = structure != NULL ? structure->source : "none";
         size_t sourceLength;
+        size_t structureSourceLength;
 
         SDL_snprintf(text, sizeof(text), "CLS:%s", className != NULL ? className : "ground");
         DrawText(5, 113, text, RGB(220, 230, 235));
         if (sourceName == NULL)
             sourceName = "fallback";
         sourceLength = strcspn(sourceName, ":");
-        SDL_snprintf(text, sizeof(text), "SRC:%.*s", (int)sourceLength, sourceName);
+        structureSourceLength = strcspn(structureSource, ":");
+        SDL_snprintf(text, sizeof(text), "SRC:%.*s/%.*s", (int)sourceLength, sourceName,
+                     (int)structureSourceLength, structureSource);
         DrawText(5, 122, text, RGB(220, 230, 235));
-        DrawValue(5, 131, "EVI:", targetCell->evidenceFlags);
-        DrawValue(5, 140, "AMB:", targetCell->ambiguityFlags != 0);
+        SDL_snprintf(text, sizeof(text), "OWN:%s", ownerKind != NULL ? ownerKind : "none");
+        DrawText(5, 131, text, RGB(220, 230, 235));
+        SDL_snprintf(text, sizeof(text), "CLM:%u RGN:%u", targetCell->claimOwner,
+                     targetCell->regionId);
+        DrawText(5, 140, text, RGB(220, 230, 235));
+        DrawValue(5, 149, "EVI:", targetCell->evidenceFlags);
     }
 
     glBindTexture(GL_TEXTURE_2D, sDebugTexture.id);

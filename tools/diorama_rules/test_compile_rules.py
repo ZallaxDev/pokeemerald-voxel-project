@@ -30,7 +30,8 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in self.data["tilesets"]], list(range(1, 76)))
         self.assertEqual(len(self.data["layouts"]), 441)
         self.assertEqual(sum(row["width"] * row["height"] for row in self.data["layouts"]),
-                         sum(row["terrainRecordCount"] for row in self.data["layouts"]))
+                         sum(record["mapGroup"] == 0xFF for row in self.data["layouts"]
+                             for record in row["terrainRecords"]))
         self.assertEqual([row["id"] for row in self.data["layouts"]], list(range(1, 442)))
         self.assertEqual(len(self.data["maps"]), 518)
         self.assertEqual(len(self.data["tilesets"]), 75)
@@ -60,9 +61,15 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertTrue(self.data["ambiguities"])
         self.assertEqual(render_c(self.data), render_c(compile_data(ROOT)))
 
-    def test_repository_has_authoritative_general_flower_pin(self):
-        for key in ("behaviorRules", "profiles", "contextualRules", "exactPatterns"):
+    def test_repository_has_authoritative_pin_and_r3_patterns(self):
+        for key in ("behaviorRules", "profiles", "contextualRules"):
             self.assertEqual(self.data[key], [])
+        self.assertEqual(
+            [(row["id"], row["placementCount"]) for row in self.data["exactPatterns"]],
+            [("petalburg-lab-shell", 1), ("petalburg-house-left-shell", 1),
+             ("petalburg-house-right-shell", 1),
+             ("pokemon-center-service-counter", 3),
+             ("petalburg-isolated-signpost", 2)])
         self.assertEqual(len(self.data["tilesetPins"]), 1)
         pin = self.data["tilesetPins"][0]
         self.assertEqual((pin["tileset"], pin["metatile"], pin["placementCount"]),
@@ -76,7 +83,8 @@ class DioramaRuleCompilerTests(unittest.TestCase):
     def test_sha256_is_canonical_and_covers_every_ir_section(self):
         canonical_keys = ("schemaVersion", "tilesets", "layouts", "pools", "profiles", "default",
                            "behaviorRules", "tilesetPins", "contextualRules", "exactPatterns",
-                           "maps", "evidenceDetails", "ambiguities", "classifierSources")
+                           "maps", "structureCandidates", "evidenceDetails", "ambiguities",
+                           "classifierSources")
         canonical = {key: self.data[key] for key in canonical_keys}
         encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"),
                              ensure_ascii=True).encode("ascii")
@@ -260,11 +268,13 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertIn("struct DioramaGeneratedTilesetV2", header)
         self.assertIn("struct DioramaGeneratedLayoutV2", header)
         self.assertIn("struct DioramaGeneratedTerrainV2", header)
+        self.assertIn("struct DioramaGeneratedStructureV2", header)
         self.assertIn("role, terrainClass", header)
         self.assertIn("struct DioramaGeneratedMapV2", header)
         self.assertTrue(all(f'"{row["symbol"]}"' in source for row in self.data["tilesets"]))
         self.assertIn("gDioramaTerrainV2Count", source)
         self.assertIn("gDioramaAmbiguitiesV2", source)
+        self.assertIn("gDioramaStructuresV2", source)
         self.assertIn(self.data["sha256"], source)
 
     def test_c_contract_excludes_compiler_only_precedence_tables(self):

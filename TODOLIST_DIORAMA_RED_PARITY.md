@@ -7,8 +7,8 @@
 - Referencia Rojo congelada: `b21fd46ea789a0b8cb99d2c7e0add5a007568a54`.
 - Especificacion: `docs/diorama_red_parity.md`.
 - Editor visual: fuera de alcance hasta terminar este TODO.
-- Fase activa: **R3** (`pending`).
-- Ultima fase aprobada manualmente: **R2**.
+- Fase activa: **R4** (`pending`).
+- Ultima fase aprobada manualmente: **R3**.
 - El stash anterior permanece aislado y no se mezcla aqui.
 
 ## Protocolo obligatorio de fases
@@ -251,36 +251,36 @@ y se comprobo en Ruta 101 que la esquina `(6,7)` resuelve como `LEDGE/BEHAVIOR`.
 
 ## R3: reclamacion, conectividad y orden `Structures`
 
-**Estado:** `pending`
+**Estado:** `approved`
 
 **Objetivo:** portar el esqueleto de `Structures.lua` sobre layouts completos, sin
 voxelizar props ni medir alturas todavia.
 
 Implementacion:
 
-- [ ] Crear IR de candidatos con owner, cells, pixels, bbox, class y evidence.
-- [ ] Implementar aqui el matcher minimo de matrices exactas necesario para que
+- [x] Crear IR de candidatos con owner, cells, pixels, bbox, class y evidence.
+- [x] Implementar aqui el matcher minimo de matrices exactas necesario para que
       edificios/estructuras queden reclamados antes de props y volumenes; R7 construira
       su shell completo.
-- [ ] Implementar claim masks y `first claim wins`.
-- [ ] Implementar prioridad determinista entre template, authored special, prop
+- [x] Implementar claim masks y `first claim wins`.
+- [x] Implementar prioridad determinista entre template, authored special, prop
       candidate y generic volume.
-- [ ] Detectar tiles void por fuente completamente transparente/negra, como Rojo, y
+- [x] Detectar tiles void por fuente completamente transparente/negra, como Rojo, y
       combinarlo con metadata Emerald; tratar el ring exterior como problema separado.
-- [ ] Implementar folding de puertas solo bajo reglas probadas.
-- [ ] Flood-fill de regiones visuales no reclamadas.
-- [ ] Separar conectividad de mapa y conectividad real de pixels.
-- [ ] Impedir fusion entre pools distintos.
-- [ ] Emitir overlays headless de region/claim/source.
-- [ ] Eliminar region builders anteriores sustituidos.
-- [ ] Compilar claims/owners al IR runtime y renderizar diagnostico con el mesher actual.
+- [x] Implementar folding de puertas solo bajo reglas probadas.
+- [x] Flood-fill de regiones visuales no reclamadas.
+- [x] Separar conectividad de mapa y conectividad real de pixels.
+- [x] Impedir fusion entre pools distintos.
+- [x] Emitir overlays headless de region/claim/source.
+- [x] Eliminar region builders anteriores sustituidos.
+- [x] Compilar claims/owners al IR runtime y renderizar diagnostico con el mesher actual.
 
 Validacion automatica especifica:
 
-- [ ] Claims independientes del orden de iteracion.
-- [ ] Ninguna celda reclamada llega a un detector posterior.
-- [ ] Componentes iguales con distinto pool permanecen separados.
-- [ ] Conectividad no cruza layouts o void no conectado.
+- [x] Claims independientes del orden de iteracion.
+- [x] Ninguna celda reclamada llega a un detector posterior.
+- [x] Componentes iguales con distinto pool permanecen separados.
+- [x] Conectividad no cruza layouts o void no conectado.
 
 **Prueba manual obligatoria R3:**
 
@@ -291,6 +291,12 @@ Validacion automatica especifica:
 5. Mover la camara y confirmar que los componentes no cambian.
 
 **Gate R3:** el usuario aprueba boundaries y orden de claims. Solo entonces empieza R4.
+
+Resultado del usuario: **APROBADO** (2026-08-02). La primera inspeccion en Villa Raiz
+detecto que `mapEditGeneration` global anulaba todos los owners tras cualquier mutacion
+anterior. Se corrigio para invalidar solo candidatos que contienen dirty cells, se repitio
+el gate automatico completo y el usuario valido `OWN:TEMPLATE`/`CLM` en `(5,9)` mirando
+al norte. El usuario dispenso los escenarios restantes y F5/F6 para este gate.
 
 ## R4: props automaticos y cutouts por pixel
 

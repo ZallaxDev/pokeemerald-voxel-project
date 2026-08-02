@@ -61,6 +61,36 @@ R2_CLASSIFIER_EVIDENCE = {
     "authoritativePinPlacements": 615,
     "flowerAnimationSources": 4,
 }
+R3_SCENARIOS = {
+    "R3-LITTLEROOT-CLAIMS", "R3-ROUTE115-REGIONS", "R3-FORTREE-CLAIMS",
+    "R3-POKEMON-CENTER-CLAIMS", "R3-CLASSIC-DIORAMA-REGRESSION-SMOKE",
+}
+R3_COMMANDS = list(R0_COMMANDS)
+R3_PITCHES = [0, 15, 35, 50, 75]
+R3_LOCATIONS = {
+    "R3-LITTLEROOT-CLAIMS": (
+        "MAP_LITTLEROOT_TOWN", "LAYOUT_LITTLEROOT_TOWN", {"x": 5, "y": 9}, "norte"),
+    "R3-ROUTE115-REGIONS": (
+        "MAP_ROUTE115", "LAYOUT_ROUTE115", {"x": 18, "y": 41}, "norte"),
+    "R3-FORTREE-CLAIMS": (
+        "MAP_FORTREE_CITY", "LAYOUT_FORTREE_CITY", {"x": 5, "y": 7}, "norte"),
+    "R3-POKEMON-CENTER-CLAIMS": (
+        "MAP_OLDALE_TOWN_POKEMON_CENTER_1F", "LAYOUT_POKEMON_CENTER_1F",
+        {"x": 7, "y": 7}, "norte"),
+    "R3-CLASSIC-DIORAMA-REGRESSION-SMOKE": (
+        "MAP_LITTLEROOT_TOWN", "LAYOUT_LITTLEROOT_TOWN", {"x": 10, "y": 10}, "sur"),
+}
+R3_STRUCTURE_EVIDENCE = {
+    "rulesSha256": "41833ce1b4d7de654ba744e77ec19ab737c94dced03afeb5a738e554580d4c31",
+    "compiledRecords": 324579,
+    "pythonCParityRecords": 324579,
+    "structureCandidates": 2923,
+    "templateClaims": 8,
+    "propCandidates": 634,
+    "regions": 2281,
+    "derivedVoidCells": 3863,
+    "doorFolds": 0,
+}
 
 
 def requires_r0_neutrality(gates: list[dict]) -> bool:
@@ -110,7 +140,7 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
                 if not re.fullmatch(r"[0-9a-f]{64}", phase[field]):
                     fail(f"{phase['id']} {field} is invalid")
     scenario_by_id = {scenario["id"]: scenario for scenario in scenarios}
-    required_scenarios = R0_SCENARIOS | R1_SCENARIOS | R2_SCENARIOS
+    required_scenarios = R0_SCENARIOS | R1_SCENARIOS | R2_SCENARIOS | R3_SCENARIOS
     if len(scenario_by_id) != len(scenarios) or not required_scenarios <= set(scenario_by_id):
         fail("required Red-parity scenarios are missing or duplicated")
     sys.path.insert(0, str(root / "tools/diorama_rules"))
@@ -258,6 +288,37 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
         }
         if pin_review.get("review") != expected_review:
             fail("R2 authoritative pin review does not cover its complete blast radius")
+    r3 = by_phase["R3"]
+    if r3["state"] != "pending":
+        if set(r3.get("manualScenarios", [])) != R3_SCENARIOS \
+                or len(r3["manualScenarios"]) != len(R3_SCENARIOS) \
+                or r3.get("automaticCommands") != R3_COMMANDS:
+            fail("R3 gate commands or scenarios do not match the phase contract")
+        if r3.get("manualGuide") != "docs/diorama_red_parity_manual_testing.md" \
+                or not (root / r3["manualGuide"]).is_file():
+            fail("R3 Spanish manual guide is missing")
+        if r3.get("gameplayAuthority") != "original-game-only-no-teleport":
+            fail("R3 must preserve original gameplay authority")
+        if r3["state"] in {"automatic-passed", "manual-pending", "approved"}:
+            for field in ("binarySha256", "classicBinarySha256"):
+                if not re.fullmatch(r"[0-9a-f]{64}", r3.get(field, "")):
+                    fail(f"R3 {field} is missing after automatic validation")
+            if not r3.get("automaticTestedAtUtc"):
+                fail("R3 automatic validation timestamp is missing")
+            if r3.get("structureEvidence") != R3_STRUCTURE_EVIDENCE:
+                fail("R3 compiled structure evidence does not match the validated corpus")
+        for scenario_id in R3_SCENARIOS:
+            scenario = scenario_by_id[scenario_id]
+            expected_map, expected_layout, expected_position, expected_facing = \
+                R3_LOCATIONS[scenario_id]
+            if scenario["phase"] != "R3" or scenario["renderer"] != "classic-and-diorama" \
+                    or scenario["map"] != expected_map \
+                    or scenario["layout"] != expected_layout \
+                    or scenario["position"] != expected_position \
+                    or scenario["facing"] != expected_facing \
+                    or scenario["pitch"] != R3_PITCHES \
+                    or scenario["resolution"] != {"width": 960, "height": 640}:
+                fail(f"{scenario_id} does not match the R3 capture contract")
     ids = [entry["id"] for entry in resolvers]
     if len(ids) != len(set(ids)):
         fail("resolver responsibilities must be unique")

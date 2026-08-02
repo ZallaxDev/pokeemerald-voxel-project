@@ -13,7 +13,7 @@
 #include "metatile_behavior.h"
 
 #define TERRAIN_CHUNK_CACHE_SIZE 36
-#define TERRAIN_DEBUG_MAX_VERTICES (TERRAIN_CHUNK_CACHE_SIZE * 8)
+#define TERRAIN_DEBUG_MAX_VERTICES ((TERRAIN_CHUNK_CACHE_SIZE + DIORAMA_MAX_VISIBLE_CELLS) * 8)
 
 struct GLTerrainChunk
 {
@@ -50,6 +50,7 @@ static uint32_t sMapGeneration;
 static uint32_t sMapEditGeneration;
 static uint32_t sRulesGeneration;
 static uint64_t sLastSyncSequence;
+static uint32_t sClaimDebugVertexCount;
 
 static const char sTerrainVertexShader[] =
     "#version 330 core\n"
@@ -322,6 +323,8 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->planeAxis = resolvedCells[gridIndex].planeAxis;
             cell->effectiveElevation = resolvedCells[gridIndex].effectiveElevation;
             cell->surfaceCount = resolvedCells[gridIndex].surfaceCount;
+            cell->claimOwner = resolvedCells[gridIndex].claimOwner;
+            cell->regionId = resolvedCells[gridIndex].regionId;
             cell->structureId = resolvedCells[gridIndex].structureId;
             cell->rulePriority = resolvedCells[gridIndex].rulePriority;
             cell->structureTemplateId = resolvedCells[gridIndex].structureTemplateId;
@@ -332,6 +335,9 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             cell->structureRoofRows = resolvedCells[gridIndex].structureRoofRows;
             cell->structureLocalX = resolvedCells[gridIndex].structureLocalX;
             cell->structureLocalY = resolvedCells[gridIndex].structureLocalY;
+            cell->structureOwnerKind = resolvedCells[gridIndex].structureOwnerKind;
+            cell->doorFold = resolvedCells[gridIndex].doorFold;
+            cell->voidKind = resolvedCells[gridIndex].voidKind;
             cell->cliffEdgeMask = resolvedCells[gridIndex].cliffEdgeMask;
             cell->cliffBaseMask = resolvedCells[gridIndex].cliffBaseMask;
             cell->cliffTransitionMask = resolvedCells[gridIndex].cliffTransitionMask;
@@ -496,6 +502,62 @@ bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
         sMapEditGeneration, snapshot->mapEditGeneration,
         snapshot->dirtyCellCount, snapshot->dirtyOverflow);
 
+    sClaimDebugVertexCount = 0;
+    for (i = 0; i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        const struct DioramaResolvedCell *resolved = &resolvedCells[i];
+        static const int8_t directions[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+        uint8_t direction;
+
+        if (resolved->structureId == 0 || resolved->shape == DIORAMA_SHAPE_HIDDEN)
+            continue;
+        for (direction = 0; direction < 4; direction++)
+        {
+            int gridX = cell->mapX + directions[direction][0] - snapshot->gridOriginX;
+            int gridY = cell->mapY + directions[direction][1] - snapshot->gridOriginY;
+            uint16_t neighborId = 0;
+            struct DioramaTerrainVertex *first;
+            struct DioramaTerrainVertex *second;
+            float x0 = cell->mapX;
+            float x1 = cell->mapX + 1.0f;
+            float z0 = cell->mapY;
+            float z1 = cell->mapY + 1.0f;
+            float y = resolved->topHeight + 0.04f;
+
+            if (gridX >= 0 && gridY >= 0 && gridX < DIORAMA_GRID_WIDTH
+             && gridY < DIORAMA_GRID_HEIGHT)
+            {
+                int neighbor = gridY * DIORAMA_GRID_WIDTH + gridX;
+                if (neighbor < snapshot->visibleCellCount
+                 && snapshot->cells[neighbor].mapX == cell->mapX + directions[direction][0]
+                 && snapshot->cells[neighbor].mapY == cell->mapY + directions[direction][1])
+                    neighborId = resolvedCells[neighbor].structureId;
+            }
+            if (neighborId == resolved->structureId
+             || sClaimDebugVertexCount + 2 > TERRAIN_DEBUG_MAX_VERTICES)
+                continue;
+            first = &sDebugVertices[sClaimDebugVertexCount++];
+            second = &sDebugVertices[sClaimDebugVertexCount++];
+            memset(first, 0, sizeof(*first));
+            memset(second, 0, sizeof(*second));
+            first->y = second->y = y;
+            first->shade = second->shade = 1.0f;
+            if (direction == 0 || direction == 2)
+            {
+                first->x = x0;
+                second->x = x1;
+                first->z = second->z = direction == 0 ? z0 : z1;
+            }
+            else
+            {
+                first->z = z0;
+                second->z = z1;
+                first->x = second->x = direction == 3 ? x0 : x1;
+            }
+        }
+    }
+
     sMetrics.rebuiltChunks = 0;
     if (snapshot->mapGeneration != sMapGeneration || rulesGeneration != sRulesGeneration)
     {
@@ -590,7 +652,7 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                            float cameraPitch, float focalLength,
                            float aspectCorrection, bool debug)
 {
-    uint32_t debugVertexCount = 0;
+    uint32_t debugVertexCount = sClaimDebugVertexCount;
     int i;
 
     sMetrics.visibleChunks = 0;

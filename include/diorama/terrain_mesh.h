@@ -74,6 +74,8 @@ struct DioramaTerrainCell
     uint8_t planeAxis;
     uint8_t effectiveElevation;
     uint8_t surfaceCount;
+    uint16_t claimOwner;
+    uint16_t regionId;
     uint16_t structureId;
     int16_t rulePriority;
     uint16_t structureTemplateId;
@@ -84,6 +86,9 @@ struct DioramaTerrainCell
     uint8_t structureRoofRows;
     uint8_t structureLocalX;
     uint8_t structureLocalY;
+    uint8_t structureOwnerKind;
+    uint8_t doorFold;
+    uint8_t voidKind;
     uint8_t southFacadeCount;
     uint8_t cliffEdgeMask;
     uint8_t cliffBaseMask;

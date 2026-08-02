@@ -116,7 +116,46 @@
         "La revision de Ruta 101 detecto y corrigio los ledges diagonales MB_JUMP_NORTHEAST, MB_JUMP_NORTHWEST, MB_JUMP_SOUTHEAST y MB_JUMP_SOUTHWEST."
       ]
     },
-    { "id": "R3", "state": "pending" },
+    {
+      "id": "R3",
+      "state": "approved",
+      "binarySha256": "c5c1fe2f56cd82fac6d7bf1e4838c9cfffd85f903b01e198f4a45c8ff65c206d",
+      "classicBinarySha256": "397453d71e4e23075e6b896eeb26cc27259d0ceecb9561a0c4e27b424c0fb12e",
+      "automaticTestedAtUtc": "2026-08-02T15:00:19Z",
+      "automaticCommands": [
+        "make -f Makefile_pc test-diorama-red-parity PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig",
+        "make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)",
+        "make -f Makefile_pc NATIVE_LINUX=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j$(nproc)"
+      ],
+      "manualScenarios": [
+        "R3-LITTLEROOT-CLAIMS",
+        "R3-ROUTE115-REGIONS",
+        "R3-FORTREE-CLAIMS",
+        "R3-POKEMON-CENTER-CLAIMS",
+        "R3-CLASSIC-DIORAMA-REGRESSION-SMOKE"
+      ],
+      "manualGuide": "docs/diorama_red_parity_manual_testing.md",
+      "gameplayAuthority": "original-game-only-no-teleport",
+      "structureEvidence": {
+        "rulesSha256": "41833ce1b4d7de654ba744e77ec19ab737c94dced03afeb5a738e554580d4c31",
+        "compiledRecords": 324579,
+        "pythonCParityRecords": 324579,
+        "structureCandidates": 2923,
+        "templateClaims": 8,
+        "propCandidates": 634,
+        "regions": 2281,
+        "derivedVoidCells": 3863,
+        "doorFolds": 0
+      },
+      "manualFindings": [
+        "R3-LITTLEROOT-CLAIMS fallo: en POS 5,9 mirando al norte, TGT 5,8 mostro OWN:NONE, CLM:0 y RGN:0 pese al template esperado.",
+        "Causa corregida: mapEditGeneration era global y desactivaba todos los owners; ahora solo una dirty cell perteneciente al candidato invalida el candidato completo.",
+        "El usuario valido visualmente la correccion en Villa Raiz y dio R3 por valida sin exigir F5, F6 ni los escenarios restantes."
+      ],
+      "tester": "usuario",
+      "testedAtUtc": "2026-08-02T15:11:50Z",
+      "approval": "Perfecto. Lo doy por valido."
+    },
     { "id": "R4", "state": "pending" },
     { "id": "R5", "state": "pending" },
     { "id": "R6", "state": "pending" },

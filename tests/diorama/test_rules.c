@@ -57,6 +57,7 @@ static void TestMapSupport(void)
     assert(gDioramaMapV2Count == 518);
     assert(gDioramaTerrainV2Count == 324579);
     assert(gDioramaAmbiguityV2Count == 95);
+    assert(gDioramaStructureV2Count == 2923);
     size_t terrainOffset = 0;
     for (size_t i = 0; i < gDioramaLayoutV2Count; i++)
     {
@@ -73,6 +74,50 @@ static void TestMapSupport(void)
     assert(DioramaRules_GetMapProfile(0, 10, 11, &profile));
     assert(DioramaRules_GetUnsupportedReason(0, 10, 11) == NULL);
     assert(DioramaRules_GetUnsupportedReason(0, 9, 10) == NULL);
+}
+
+static void TestCompiledStructureClaims(void)
+{
+    const struct DioramaGeneratedStructureV2 *structure;
+    struct DioramaResolvedCell resolved;
+    struct DioramaCellSnapshot cell;
+
+    cell = MakeCell(2, 4, 520, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.claimOwner != 0);
+    assert(resolved.structureOwnerKind == DIORAMA_OWNER_TEMPLATE);
+    assert(resolved.structureWidth == 5 && resolved.structureHeight == 5);
+    structure = DioramaRules_GetStructure(resolved.claimOwner);
+    assert(structure != NULL);
+    assert(strcmp(structure->owner, "petalburg-house-left-shell") == 0);
+
+    cell = MakeCell(15, 13, 3, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.claimOwner != 0);
+    assert(resolved.structureOwnerKind == DIORAMA_OWNER_TEMPLATE);
+    structure = DioramaRules_GetStructure(resolved.claimOwner);
+    assert(structure != NULL
+        && strcmp(structure->source, "pattern:petalburg-isolated-signpost") == 0);
+
+    sSnapshot.mapEditGeneration = 99;
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.claimOwner != 0);
+    sSnapshot.dirtyCellCount = 1;
+    sSnapshot.dirtyCells[0].mapX = 15 + sSnapshot.mapCoordinateOffset;
+    sSnapshot.dirtyCells[0].mapY = 13 + sSnapshot.mapCoordinateOffset;
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.claimOwner == 0 && resolved.regionId == 0);
+    sSnapshot.dirtyCellCount = 0;
+    sSnapshot.mapEditGeneration = 0;
+
+    sSnapshot.mapGroup = 1;
+    sSnapshot.mapNum = 0;
+    sSnapshot.mapLayoutId = 54;
+    cell = MakeCell(8, 0, 543, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.voidKind == DIORAMA_VOID_BLACK);
+    assert(resolved.shape == DIORAMA_SHAPE_HIDDEN);
+    InitLittleroot();
 }
 
 static void TestCompiledPinAndGuards(void)
@@ -199,7 +244,7 @@ static void TestGridAndConnectedCoordinates(void)
     DioramaRules_ResolveGrid(&sSnapshot, resolved);
     assert(resolved[0].source != DIORAMA_RULE_SOURCE_MAP);
     assert(resolved[1].source != DIORAMA_RULE_SOURCE_BUILDING);
-    assert(resolved[0].structureId == 0 && resolved[1].structureId == 0);
+    assert(resolved[0].claimOwner == 0 && resolved[1].claimOwner == 0);
 }
 
 static void TestContextualGameplayPlanes(void)
@@ -281,6 +326,7 @@ int main(void)
     InitLittleroot();
     TestMapSupport();
     TestCompiledPinAndGuards();
+    TestCompiledStructureClaims();
     TestNeutralFallbackWithoutCompiledRules();
     TestNominalFeatureHeights();
     TestGridAndConnectedCoordinates();

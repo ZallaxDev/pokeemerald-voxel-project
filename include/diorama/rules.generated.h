@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 struct DioramaGeneratedTilesetV2 { uint8_t id, role, terrainClass; uint16_t metatileCount; const char *symbol; };
-struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount; const char *symbol; };
+struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount, structureCellOffset; const char *symbol; };
 struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile, classId, sourceId, evidenceDetailsId, ambiguityDetailsId, propGroundMetatile, evidenceFlags, ambiguityFlags; int16_t heightQ16; uint8_t mapGroup, mapNumber, shape, archetype, terrainClass, artMode, pool, authored, sourceKind, propGroundMode, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; float confidence; };
 struct DioramaGeneratedClassifierSourceV2 { uint16_t id; const char *name; };
 struct DioramaGeneratedEvidenceV2 { uint16_t id; const char *details; };
@@ -15,6 +15,9 @@ struct DioramaGeneratedPoolV2 { uint16_t id; const char *logicalId, *description
 struct DioramaGeneratedProfileV2 { uint16_t id; uint8_t archetypeId; uint32_t maskOffset, sampleOffset; uint16_t maskCount, sampleCount; const char *logicalId; };
 struct DioramaGeneratedMaskV2 { uint16_t profileId; uint8_t kind, width, height; uint32_t rowOffset; uint16_t rowCount; };
 struct DioramaGeneratedSampleV2 { uint8_t tilesetId, layer; uint16_t metatile; };
+struct DioramaGeneratedStructureV2 { uint16_t id, layoutId; uint8_t mapGroup, mapNumber, kind, pool, classId, claimOnly; int16_t priority, x, y; uint8_t width, height; uint32_t cellOffset, cellCount, visiblePixels, transparentPixels, blackPixels, pixelComponents; const char *owner, *source, *evidence; };
+struct DioramaGeneratedStructureCellV2 { uint16_t claimOwner, regionId; uint8_t doorFold, voidKind; };
+struct DioramaGeneratedStructureOverrideV2 { uint16_t layoutId, expectedMetatile; uint32_t cellOffset; uint8_t mapGroup, mapNumber; struct DioramaGeneratedStructureCellV2 cell; };
 
 extern const char gDioramaRulesSha256[65];
 extern const uint32_t gDioramaRulesGeneration;
@@ -42,4 +45,12 @@ extern const uint64_t gDioramaMaskRowsV2[];
 extern const size_t gDioramaMaskRowV2Count;
 extern const struct DioramaGeneratedSampleV2 gDioramaSamplesV2[];
 extern const size_t gDioramaSampleV2Count;
+extern const struct DioramaGeneratedStructureV2 gDioramaStructuresV2[];
+extern const size_t gDioramaStructureV2Count;
+extern const uint32_t gDioramaStructureCellsV2[];
+extern const size_t gDioramaStructureCellV2Count;
+extern const struct DioramaGeneratedStructureCellV2 gDioramaStructureOwnersV2[];
+extern const size_t gDioramaStructureOwnerV2Count;
+extern const struct DioramaGeneratedStructureOverrideV2 gDioramaStructureOverridesV2[];
+extern const size_t gDioramaStructureOverrideV2Count;
 #endif

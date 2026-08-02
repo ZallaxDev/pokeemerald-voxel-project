@@ -6,6 +6,8 @@
 
 #include "diorama/scene_snapshot.h"
 
+struct DioramaGeneratedStructureV2;
+
 enum DioramaShape
 {
     DIORAMA_SHAPE_FLAT,
@@ -208,7 +210,25 @@ enum DioramaClassifierEvidence
     DIORAMA_EVIDENCE_COLLISION = 1u << 6,
     DIORAMA_EVIDENCE_ELEVATION = 1u << 7,
     DIORAMA_EVIDENCE_LAYER = 1u << 8,
-    DIORAMA_EVIDENCE_PATTERN = 1u << 9
+    DIORAMA_EVIDENCE_PATTERN = 1u << 9,
+    DIORAMA_EVIDENCE_PIXELS = 1u << 10
+};
+
+enum DioramaStructureOwnerKind
+{
+    DIORAMA_OWNER_NONE,
+    DIORAMA_OWNER_TEMPLATE,
+    DIORAMA_OWNER_AUTHORED_SPECIAL,
+    DIORAMA_OWNER_PROP_CANDIDATE,
+    DIORAMA_OWNER_GENERIC_VOLUME,
+    DIORAMA_OWNER_REGION
+};
+
+enum DioramaVoidKind
+{
+    DIORAMA_VOID_NONE,
+    DIORAMA_VOID_TRANSPARENT,
+    DIORAMA_VOID_BLACK
 };
 
 enum DioramaCameraProfile
@@ -259,6 +279,7 @@ struct DioramaResolvedCell
     uint16_t ambiguityDetailsId;
     float classifierConfidence;
     uint16_t claimOwner;
+    uint16_t regionId;
     int16_t rulePriority;
     uint16_t structureId;
     uint16_t structureTemplateId;
@@ -269,6 +290,9 @@ struct DioramaResolvedCell
     uint8_t structureRoofRows;
     uint8_t structureLocalX;
     uint8_t structureLocalY;
+    uint8_t structureOwnerKind;
+    uint8_t doorFold;
+    uint8_t voidKind;
     uint8_t structureSouthFacadeRows;
     uint8_t cliffEdgeMask;
     uint8_t cliffBaseMask;
@@ -356,6 +380,8 @@ const char *DioramaRules_ArtModeName(uint8_t artMode);
 const char *DioramaRules_ClassifierSourceName(uint16_t sourceId);
 const char *DioramaRules_EvidenceDetails(uint16_t detailsId);
 const char *DioramaRules_AmbiguityDetails(uint16_t detailsId);
+const struct DioramaGeneratedStructureV2 *DioramaRules_GetStructure(uint16_t id);
+const char *DioramaRules_StructureKindName(uint8_t kind);
 const struct DioramaGeneratedBuildingTemplate *DioramaRules_GetBuildingTemplate(uint16_t id);
 bool DioramaRules_IsMapSupported(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId);
 const char *DioramaRules_GetUnsupportedReason(uint8_t mapGroup, uint8_t mapNum,

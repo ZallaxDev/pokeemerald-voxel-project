@@ -56,6 +56,71 @@ static const struct DioramaGeneratedTerrainV2 *FindStaticTerrain(
     return NULL;
 }
 
+static const struct DioramaGeneratedStructureCellV2 *FindStaticStructure(
+    const struct DioramaGeneratedLayoutV2 *layout, uint32_t cellOffset,
+    uint16_t expectedMetatile, uint8_t mapGroup, uint8_t mapNum)
+{
+    size_t i;
+
+    for (i = 0; i < gDioramaStructureOverrideV2Count; i++)
+    {
+        const struct DioramaGeneratedStructureOverrideV2 *override =
+            &gDioramaStructureOverridesV2[i];
+
+        if (override->layoutId == layout->id && override->cellOffset == cellOffset
+         && override->expectedMetatile == expectedMetatile
+         && override->mapGroup == mapGroup && override->mapNumber == mapNum)
+            return &override->cell;
+    }
+    if (layout->structureCellOffset > gDioramaStructureOwnerV2Count
+     || cellOffset >= gDioramaStructureOwnerV2Count - layout->structureCellOffset)
+        return NULL;
+    return &gDioramaStructureOwnersV2[layout->structureCellOffset + cellOffset];
+}
+
+static bool StructureIsDirty(const struct DioramaSceneSnapshot *snapshot,
+                             const struct DioramaCellSnapshot *cell,
+                             const struct DioramaGeneratedStructureV2 *structure,
+                             const struct DioramaGeneratedLayoutV2 *layout)
+{
+    uint8_t dirtyIndex;
+
+    if (structure == NULL || cell->sourceMapGroup != snapshot->mapGroup
+     || cell->sourceMapNum != snapshot->mapNum)
+        return false;
+    if (snapshot->dirtyOverflow)
+        return true;
+    if (structure->cellOffset > gDioramaStructureCellV2Count
+     || structure->cellCount > gDioramaStructureCellV2Count - structure->cellOffset)
+        return true;
+    for (dirtyIndex = 0; dirtyIndex < snapshot->dirtyCellCount; dirtyIndex++)
+    {
+        int x = snapshot->dirtyCells[dirtyIndex].mapX - snapshot->mapCoordinateOffset;
+        int y = snapshot->dirtyCells[dirtyIndex].mapY - snapshot->mapCoordinateOffset;
+        uint32_t target;
+        uint32_t low = 0;
+        uint32_t high = structure->cellCount;
+
+        if (x < 0 || y < 0 || x >= layout->width || y >= layout->height)
+            continue;
+        target = (uint32_t)y * layout->width + x;
+        while (low < high)
+        {
+            uint32_t middle = low + (high - low) / 2;
+            uint32_t value = gDioramaStructureCellsV2[structure->cellOffset + middle];
+
+            if (value < target)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+        if (low < structure->cellCount
+         && gDioramaStructureCellsV2[structure->cellOffset + low] == target)
+            return true;
+    }
+    return false;
+}
+
 static void InitializeResolved(struct DioramaResolvedCell *resolved)
 {
     size_t i;
@@ -77,11 +142,14 @@ static void InitializeResolved(struct DioramaResolvedCell *resolved)
     }
 }
 
-static void ApplyStaticTerrain(const struct DioramaCellSnapshot *cell,
+static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
+                               const struct DioramaCellSnapshot *cell,
                                struct DioramaResolvedCell *resolved)
 {
     const struct DioramaGeneratedLayoutV2 *layout;
     const struct DioramaGeneratedTerrainV2 *record;
+    const struct DioramaGeneratedStructureCellV2 *structureCell;
+    const struct DioramaGeneratedStructureV2 *structure;
     uint32_t cellOffset;
 
     if (!(cell->flags & DIORAMA_CELL_SOURCE_VALID) || cell->sourceMapX < 0
@@ -122,6 +190,35 @@ static void ApplyStaticTerrain(const struct DioramaCellSnapshot *cell,
     resolved->cliffBaseMask = record->cliffBaseMask;
     resolved->cliffTransitionMask = record->cliffTransitionMask;
     resolved->cliffCornerMask = record->cliffCornerMask;
+    structureCell = FindStaticStructure(layout, cellOffset, cell->metatileId,
+                                        cell->sourceMapGroup, cell->sourceMapNum);
+    if (structureCell == NULL)
+        return;
+    resolved->voidKind = structureCell->voidKind;
+    if (!StructureIsDirty(snapshot, cell,
+                          DioramaRules_GetStructure(structureCell->claimOwner != 0
+                              ? structureCell->claimOwner : structureCell->regionId), layout))
+    {
+        resolved->claimOwner = structureCell->claimOwner;
+        resolved->regionId = structureCell->regionId;
+        resolved->structureId = resolved->claimOwner != 0
+                              ? resolved->claimOwner : resolved->regionId;
+        resolved->doorFold = structureCell->doorFold;
+        structure = DioramaRules_GetStructure(resolved->structureId);
+        if (structure != NULL)
+        {
+            resolved->structureTemplateId = structure->kind == DIORAMA_OWNER_TEMPLATE
+                                          ? structure->id : 0;
+            resolved->structureX = structure->x;
+            resolved->structureY = structure->y;
+            resolved->structureWidth = structure->width;
+            resolved->structureHeight = structure->height;
+            resolved->structureLocalX = cell->sourceMapX - structure->x;
+            resolved->structureLocalY = cell->sourceMapY - structure->y;
+            resolved->structureOwnerKind = structure->kind;
+            resolved->rulePriority = structure->priority;
+        }
+    }
 }
 
 static const struct DioramaGeneratedMapV2 *FindMap(uint8_t mapGroup, uint8_t mapNum,
@@ -328,6 +425,21 @@ const char *DioramaRules_AmbiguityDetails(uint16_t detailsId)
         ? gDioramaAmbiguitiesV2[detailsId - 1].details : NULL;
 }
 
+const struct DioramaGeneratedStructureV2 *DioramaRules_GetStructure(uint16_t id)
+{
+    return id != 0 && id <= gDioramaStructureV2Count
+        && gDioramaStructuresV2[id - 1].id == id ? &gDioramaStructuresV2[id - 1] : NULL;
+}
+
+const char *DioramaRules_StructureKindName(uint8_t kind)
+{
+    static const char *const sNames[] = {
+        "none", "template", "authored", "prop", "volume", "region"
+    };
+
+    return kind < sizeof(sNames) / sizeof(sNames[0]) ? sNames[kind] : NULL;
+}
+
 const struct DioramaGeneratedBuildingTemplate *DioramaRules_GetBuildingTemplate(uint16_t id)
 {
     (void)id;
@@ -376,7 +488,7 @@ bool DioramaRules_ResolveCell(const struct DioramaSceneSnapshot *snapshot,
     if (snapshot == NULL || cell == NULL || resolved == NULL)
         return false;
     InitializeResolved(resolved);
-    ApplyStaticTerrain(cell, resolved);
+    ApplyStaticTerrain(snapshot, cell, resolved);
     if (cell->collision != 0)
         resolved->evidenceFlags |= DIORAMA_EVIDENCE_COLLISION;
     if (cell->elevation != 0)
@@ -403,7 +515,7 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
 
         InitializeResolved(&resolvedCells[i]);
-        ApplyStaticTerrain(cell, &resolvedCells[i]);
+        ApplyStaticTerrain(snapshot, cell, &resolvedCells[i]);
         if (cell->collision != 0)
             resolvedCells[i].evidenceFlags |= DIORAMA_EVIDENCE_COLLISION;
         if (cell->elevation != 0)

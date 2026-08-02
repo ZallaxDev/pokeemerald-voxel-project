@@ -4,6 +4,12 @@ Las pruebas manuales las ejecuta exclusivamente el usuario. Al terminar cada cic
 agente debe indicar en espanol una lista breve con lugares, resultado esperado y
 comprobaciones. No se piden capturas, hashes, comandos auxiliares ni manifests locales.
 
+Desde R3, F6 no forma parte del gate salvo que una captura sea necesaria para documentar
+un defecto concreto. F5 solo se pide cuando comparar pitches fijos demuestra una propiedad
+geometrica u oclusion que no puede comprobarse moviendo la camara directamente. Cada fase
+debe eliminar pasos redundantes y conservar unicamente las inspecciones visuales y smokes
+funcionales que puedan detectar un fallo de esa fase.
+
 ## R0
 
 1. Ve a Villa Raiz, Ruta 101, Ruta 104, Ruta 115 y Monte Cenizo con Diorama activo.
@@ -60,3 +66,32 @@ El spike IA opcional consta como `not-run`, no es autoridad y no bloquea R2. Si 
 falla, indica scenario ID, vista, clase, source y evidencia observada. R2 solo puede
 aprobarse tras implementar y pasar las pruebas automaticas y despues de la aprobacion
 manual explicita del usuario.
+
+## R3
+
+R3 publica claims y regiones como diagnostico visual; edificios, mostradores y props
+siguen planos hasta sus fases geometricas. F3 dibuja boundaries cyan y muestra
+`OWN`, `CLM`, `RGN` y el source estructural junto al source del clasificador.
+
+1. Ejecuta `R3-LITTLEROOT-CLAIMS` en Villa Raiz, (5,9), mirando al norte. La casa
+   completa debe tener un unico template estable; la puerta sigue visible, transitable y
+   no adquiere altura. Revisa tambien las ocho apariciones exactas declaradas por el
+   catalogo: tres edificios de Villa Raiz, dos signposts y tres mostradores de Centro
+   Pokemon; no basta con el ancla.
+2. Ejecuta `R3-ROUTE115-REGIONS` en Ruta 115, (18,41), mirando al norte. Agua,
+   vegetacion y suelo no deben compartir region cuando difieren class o pool.
+3. Ejecuta `R3-FORTREE-CLAIMS` en Arborada, (5,7), mirando al norte. Entra y sal del
+   Centro Pokemon y confirma que puertas y pasarelas no rompen fachadas ni cambian los
+   componentes.
+4. Ejecuta `R3-POKEMON-CENTER-CLAIMS` en el Centro Pokemon de Pueblo Escaso, (7,7),
+   mirando al norte. El mostrador debe ser un template furniture separado del suelo y de
+   la enfermera, que sigue siendo un sprite billboard.
+5. En los cuatro escenarios recorre `flat`, `v15`, `v35`, `v50` y `v75`, mueve la
+   camara y repite tras el round trip normal. Boundaries, `CLM`, `RGN`, `OWN` y source no
+   deben depender del pitch, viewport o orden de visita.
+6. Ejecuta `R3-CLASSIC-DIORAMA-REGRESSION-SMOKE` sin NVDA. Comprueba movimiento,
+   input, audio, save/load, resize, fullscreen, menus, combate y fallback 2D.
+
+La comprobacion principal es visual. Si algo falla, indica scenario ID, coordenada,
+pitch y los valores `OWN/CLM/RGN/SRC`. R3 solo se aprueba cuando el usuario lo declara
+explicitamente despues de estas pruebas.

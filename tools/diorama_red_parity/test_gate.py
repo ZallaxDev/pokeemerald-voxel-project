@@ -29,6 +29,9 @@ class RedParityGateTests(unittest.TestCase):
     def test_r2_full_metadata_contract_is_valid(self) -> None:
         validate(ROOT, "R2", True)
 
+    def test_r3_full_metadata_contract_is_valid(self) -> None:
+        validate(ROOT, "R3", True)
+
     def test_r0_neutrality_expires_when_r2_starts(self) -> None:
         pending = [{"state": "approved"}, {"state": "approved"},
                    {"state": "pending"}, {"state": "pending"}]

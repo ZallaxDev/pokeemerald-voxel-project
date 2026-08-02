@@ -195,6 +195,82 @@
       "setup": "Sin NVDA y sin teletransporte, arranca primero classic y despues Diorama con la misma partida. Desde Villa Raiz (10,10), prueba movimiento, input, audio, guardado/carga, resize, fullscreen, menu y un combate.",
       "expected": "Classic conserva el render software. Diorama conserva movimiento, input, audio y save; menus, combate y escenas no overworld usan el fallback 2D sin mezclar compositores ni alterar gameplay.",
       "roundTrip": "Vuelve del combate y los menus al mismo punto sin teletransporte, cruza a Ruta 101 y regresa; ambos binarios mantienen input, audio, save/load y presentacion estable."
+    },
+    {
+      "id": "R3-LITTLEROOT-CLAIMS",
+      "phase": "R3",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_LITTLEROOT_TOWN",
+      "layout": "LAYOUT_LITTLEROOT_TOWN",
+      "position": { "x": 5, "y": 9 },
+      "facing": "norte",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Llega andando a Villa Raiz, situate frente a la puerta de la casa en (5,9), mira al norte, desactiva el postprocesado y activa F3. Recorre flat, v15, v35, v50 y v75.",
+      "expected": "El contorno cyan y CLM/OWN delimitan la casa completa como template antes que el signpost, la flor y las regiones de suelo. La puerta sigue visible y transitable; R3 no eleva ni voxeliza el edificio.",
+      "roundTrip": "Entra en la casa por la puerta normal, vuelve a (5,9), repite las vistas y mueve la camara; owner, region y boundaries no cambian.",
+      "review": {
+        "kind": "exact-template-blast-radius",
+        "anchorOnly": false,
+        "scope": "all-eight-catalog-placements",
+        "requiredOutputs": ["owner", "claim", "region", "source", "bbox", "cells", "pixels", "evidence"]
+      }
+    },
+    {
+      "id": "R3-ROUTE115-REGIONS",
+      "phase": "R3",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_ROUTE115",
+      "layout": "LAYOUT_ROUTE115",
+      "position": { "x": 18, "y": 41 },
+      "facing": "norte",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Llega a Ruta 115 por gameplay normal, situate en (18,41), mira al norte, desactiva el postprocesado y activa F3 en las cinco vistas.",
+      "expected": "Agua, vegetacion authored y suelo muestran regiones separadas por class/pool. El arte ambiguo permanece plano y ningun boundary atraviesa el borde del layout ni cambia con el viewport.",
+      "roundTrip": "Cruza una conexion, vuelve andando a (18,41), cambia pitch y mueve la camara; CLM/RGN y los contornos deben ser identicos."
+    },
+    {
+      "id": "R3-FORTREE-CLAIMS",
+      "phase": "R3",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_FORTREE_CITY",
+      "layout": "LAYOUT_FORTREE_CITY",
+      "position": { "x": 5, "y": 7 },
+      "facing": "norte",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Llega andando a Arborada, situate en (5,7) frente al Centro Pokemon, mira al norte, desactiva el postprocesado y activa F3.",
+      "expected": "Las regiones de suelo, vegetacion y estructuras fiables permanecen separadas y estables. Las pasarelas y puertas walkable no abren agujeros nuevos ni desaparecen; el contenido ambiguo sigue plano.",
+      "roundTrip": "Entra y sal del Centro Pokemon, vuelve a (5,7), recorre los pitches y desplaza la camara; los componentes no se renumeran ni cambian de forma."
+    },
+    {
+      "id": "R3-POKEMON-CENTER-CLAIMS",
+      "phase": "R3",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_OLDALE_TOWN_POKEMON_CENTER_1F",
+      "layout": "LAYOUT_POKEMON_CENTER_1F",
+      "position": { "x": 7, "y": 7 },
+      "facing": "norte",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Entra andando en el Centro Pokemon de Pueblo Escaso, situate en (7,7), mira al norte, desactiva el postprocesado y activa F3 en flat y los cuatro pitches Diorama.",
+      "expected": "El mostrador exacto forma un template furniture independiente del suelo y de los sprites. La enfermera permanece billboard del juego; el claim no crea altura ni altera interaccion o collision.",
+      "roundTrip": "Sal al pueblo, vuelve al Centro Pokemon y a (7,7), mueve la camara y repite las cinco vistas; template, region y source se mantienen."
+    },
+    {
+      "id": "R3-CLASSIC-DIORAMA-REGRESSION-SMOKE",
+      "phase": "R3",
+      "renderer": "classic-and-diorama",
+      "map": "MAP_LITTLEROOT_TOWN",
+      "layout": "LAYOUT_LITTLEROOT_TOWN",
+      "position": { "x": 10, "y": 10 },
+      "facing": "sur",
+      "pitch": [0, 15, 35, 50, 75],
+      "resolution": { "width": 960, "height": 640 },
+      "setup": "Sin NVDA, arranca classic y Diorama con la misma partida. Prueba movimiento, input, audio, save/load, resize, fullscreen, menu y un combate; vuelve despues al overworld.",
+      "expected": "Classic permanece software. Diorama usa claims solo como diagnostico inmutable, conserva gameplay original y mantiene fallback 2D en menus, combate y escenas no overworld.",
+      "roundTrip": "Cruza a Ruta 101 y vuelve a Villa Raiz; repite F3 y confirma que no hay pop-in persistente, cambio de componentes ni regresion funcional."
     }
   ]
 }
