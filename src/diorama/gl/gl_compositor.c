@@ -402,7 +402,14 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
         SDL_snprintf(text, sizeof(text), "CLM:%u RGN:%u", targetCell->claimOwner,
                      targetCell->regionId);
         DrawText(5, 140, text, RGB(220, 230, 235));
-        DrawValue(5, 149, "EVI:", targetCell->evidenceFlags);
+        if (targetCell->pixelObjectId != 0)
+        {
+            SDL_snprintf(text, sizeof(text), "PX:%u G:%u", targetCell->pixelObjectId,
+                         targetCell->baseMetatileId);
+            DrawText(5, 149, text, RGB(220, 230, 235));
+        }
+        else
+            DrawValue(5, 149, "EVI:", targetCell->evidenceFlags);
     }
 
     glBindTexture(GL_TEXTURE_2D, sDebugTexture.id);

@@ -91,6 +91,60 @@ R3_STRUCTURE_EVIDENCE = {
     "derivedVoidCells": 3863,
     "doorFolds": 0,
 }
+R4_SCENARIOS = {
+    "R4-LITTLEROOT-SIGN", "R4-OLDALE-HOUSE1-PLANTS",
+    "R4-BRENDAN-HOUSE-TV-SUPPORT", "R4-MAUVILLE-HOUSE1-STOOLS",
+    "R4-DEWFORD-HALL-RELIEF", "R4-OLDALE-SIGN-SHARED-TILESET",
+    "R4-ROUTE104-CUT-TREE-BILLBOARD", "R4-FIERY-PATH-BOULDER-BILLBOARD",
+    "R4-CLASSIC-DIORAMA-REGRESSION-SMOKE",
+}
+R4_COMMANDS = list(R0_COMMANDS)
+R4_PITCHES = [0, 15, 35, 50, 75]
+R4_LOCATIONS = {
+    "R4-LITTLEROOT-SIGN": ("MAP_LITTLEROOT_TOWN", "LAYOUT_LITTLEROOT_TOWN",
+                             {"x": 15, "y": 14}, "norte"),
+    "R4-OLDALE-HOUSE1-PLANTS": ("MAP_OLDALE_TOWN_HOUSE1", "LAYOUT_HOUSE1",
+                                  {"x": 8, "y": 3}, "norte"),
+    "R4-BRENDAN-HOUSE-TV-SUPPORT": ("MAP_LITTLEROOT_TOWN_BRENDANS_HOUSE_1F",
+                                      "LAYOUT_LITTLEROOT_TOWN_BRENDANS_HOUSE_1F",
+                                      {"x": 5, "y": 4}, "oeste"),
+    "R4-MAUVILLE-HOUSE1-STOOLS": ("MAP_MAUVILLE_CITY_HOUSE1", "LAYOUT_HOUSE2",
+                                    {"x": 7, "y": 6}, "norte"),
+    "R4-DEWFORD-HALL-RELIEF": ("MAP_DEWFORD_TOWN_HALL", "LAYOUT_DEWFORD_TOWN_HALL",
+                                 {"x": 3, "y": 6}, "norte"),
+    "R4-OLDALE-SIGN-SHARED-TILESET": ("MAP_OLDALE_TOWN", "LAYOUT_OLDALE_TOWN",
+                                        {"x": 11, "y": 10}, "norte"),
+    "R4-ROUTE104-CUT-TREE-BILLBOARD": ("MAP_ROUTE104", "LAYOUT_ROUTE104",
+                                         {"x": 34, "y": 22}, "este"),
+    "R4-FIERY-PATH-BOULDER-BILLBOARD": ("MAP_FIERY_PATH", "LAYOUT_FIERY_PATH",
+                                          {"x": 7, "y": 11}, "este"),
+    "R4-CLASSIC-DIORAMA-REGRESSION-SMOKE": ("MAP_LITTLEROOT_TOWN",
+                                               "LAYOUT_LITTLEROOT_TOWN",
+                                               {"x": 10, "y": 10}, "sur"),
+}
+R4_PIXEL_OBJECT_EVIDENCE = {
+    "rulesSha256": "c78c4030e5913997e48126f529aeccc7aa73070a9337e6b2531fd4d1ed2b4a6e",
+    "compiledRecords": 325276,
+    "pythonCParityRecords": 325276,
+    "structureCandidates": 2959,
+    "pixelObjects": 31,
+    "cutouts": 30,
+    "reliefs": 1,
+    "sourcePixels": 6364,
+    "maskRows": 592,
+    "authoredSupports": 2,
+    "replacementGroundObjects": 7,
+    "sourceBaseObjects": 24,
+    "goldenMasks": 7,
+    "colorDistance": 7,
+    "blackMaxChannel": 90,
+    "darkMaxChannel": 150,
+    "lightMaxChannel": 220,
+    "maxUprightHeight": 64,
+    "maxSolidRatio": 0.82,
+    "repetitiveRowRatio": 0.75,
+    "reliefDepthQ32": 10,
+}
 
 
 def requires_r0_neutrality(gates: list[dict]) -> bool:
@@ -140,7 +194,8 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
                 if not re.fullmatch(r"[0-9a-f]{64}", phase[field]):
                     fail(f"{phase['id']} {field} is invalid")
     scenario_by_id = {scenario["id"]: scenario for scenario in scenarios}
-    required_scenarios = R0_SCENARIOS | R1_SCENARIOS | R2_SCENARIOS | R3_SCENARIOS
+    required_scenarios = (R0_SCENARIOS | R1_SCENARIOS | R2_SCENARIOS | R3_SCENARIOS
+                          | R4_SCENARIOS)
     if len(scenario_by_id) != len(scenarios) or not required_scenarios <= set(scenario_by_id):
         fail("required Red-parity scenarios are missing or duplicated")
     sys.path.insert(0, str(root / "tools/diorama_rules"))
@@ -319,6 +374,37 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
                     or scenario["pitch"] != R3_PITCHES \
                     or scenario["resolution"] != {"width": 960, "height": 640}:
                 fail(f"{scenario_id} does not match the R3 capture contract")
+    r4 = by_phase["R4"]
+    if r4["state"] != "pending":
+        if set(r4.get("manualScenarios", [])) != R4_SCENARIOS \
+                or len(r4["manualScenarios"]) != len(R4_SCENARIOS) \
+                or r4.get("automaticCommands") != R4_COMMANDS:
+            fail("R4 gate commands or scenarios do not match the phase contract")
+        if r4.get("manualGuide") != "docs/diorama_red_parity_manual_testing.md" \
+                or not (root / r4["manualGuide"]).is_file():
+            fail("R4 Spanish manual guide is missing")
+        if r4.get("gameplayAuthority") != "original-game-only-no-teleport":
+            fail("R4 must preserve original gameplay authority")
+        if r4["state"] in {"automatic-passed", "manual-pending", "approved"}:
+            for field in ("binarySha256", "classicBinarySha256"):
+                if not re.fullmatch(r"[0-9a-f]{64}", r4.get(field, "")):
+                    fail(f"R4 {field} is missing after automatic validation")
+            if not r4.get("automaticTestedAtUtc"):
+                fail("R4 automatic evidence is incomplete")
+            if r4.get("pixelObjectEvidence") != R4_PIXEL_OBJECT_EVIDENCE:
+                fail("R4 pixel-object evidence does not match the validated corpus")
+        for scenario_id in R4_SCENARIOS:
+            scenario = scenario_by_id[scenario_id]
+            expected_map, expected_layout, expected_position, expected_facing = \
+                R4_LOCATIONS[scenario_id]
+            if scenario["phase"] != "R4" or scenario["renderer"] != "classic-and-diorama" \
+                    or scenario["map"] != expected_map \
+                    or scenario["layout"] != expected_layout \
+                    or scenario["position"] != expected_position \
+                    or scenario["facing"] != expected_facing \
+                    or scenario["pitch"] != R4_PITCHES \
+                    or scenario["resolution"] != {"width": 960, "height": 640}:
+                fail(f"{scenario_id} does not match the R4 capture contract")
     ids = [entry["id"] for entry in resolvers]
     if len(ids) != len(set(ids)):
         fail("resolver responsibilities must be unique")

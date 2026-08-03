@@ -8,6 +8,7 @@
 #include "diorama/gl_loader.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/metatile_atlas.h"
+#include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/terrain_mesh.h"
 #include "metatile_behavior.h"
@@ -59,6 +60,7 @@ static const char sTerrainVertexShader[] =
     "layout(location = 2) in float vertexShade;\n"
     "layout(location = 3) in float vertexTextureLayer;\n"
     "layout(location = 4) in float vertexReflectionMask;\n"
+    "layout(location = 5) in vec4 vertexColor;\n"
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
@@ -67,6 +69,7 @@ static const char sTerrainVertexShader[] =
     "out float shade;\n"
     "flat out int textureLayer;\n"
     "out float reflectionMask;\n"
+    "out vec4 pixelColor;\n"
     "void main() {\n"
     "  const float cameraHeight = 16.0;\n"
     "  const float cameraTargetVertical = -0.458944;\n"
@@ -88,6 +91,7 @@ static const char sTerrainVertexShader[] =
     "  shade = vertexShade;\n"
     "  textureLayer = int(vertexTextureLayer);\n"
     "  reflectionMask = vertexReflectionMask;\n"
+    "  pixelColor = vertexColor;\n"
     "}\n";
 
 static const char sTerrainFragmentShader[] =
@@ -96,6 +100,7 @@ static const char sTerrainFragmentShader[] =
     "in float shade;\n"
     "flat in int textureLayer;\n"
     "in float reflectionMask;\n"
+    "in vec4 pixelColor;\n"
     "out vec4 color;\n"
     "uniform sampler2D image;\n"
     "uniform sampler2D baseImage;\n"
@@ -107,9 +112,14 @@ static const char sTerrainFragmentShader[] =
     "    if (reflectionMask < 0.5 || texture(foregroundImage, uv).a >= 0.5) discard;\n"
     "    color = vec4(1.0); return;\n"
     "  }\n"
+    "  if (renderPass == 2) {\n"
+    "    if (textureLayer != 3) discard;\n"
+    "    color = vec4(1.0); return;\n"
+    "  }\n"
     "  if (debugColor.a >= 0.0) { color = debugColor; return; }\n"
     "  vec4 texel = textureLayer == 1 ? texture(baseImage, uv)\n"
-    "             : (textureLayer == 2 ? texture(foregroundImage, uv) : texture(image, uv));\n"
+    "             : (textureLayer == 2 ? texture(foregroundImage, uv)\n"
+    "             : (textureLayer == 3 ? pixelColor : texture(image, uv)));\n"
     "  if (texel.a < 0.5) discard;\n"
     "  color = vec4(texel.rgb * shade, texel.a);\n"
     "}\n";
@@ -198,6 +208,10 @@ static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
     dglVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE,
                            sizeof(struct DioramaTerrainVertex),
                            (void *)offsetof(struct DioramaTerrainVertex, reflectionMask));
+    dglEnableVertexAttribArray(5);
+    dglVertexAttribPointer(5, 4, GL_UNSIGNED_BYTE, GL_TRUE,
+                           sizeof(struct DioramaTerrainVertex),
+                           (void *)offsetof(struct DioramaTerrainVertex, color));
 }
 
 static struct GLTerrainChunk *FindChunk(int chunkX, int chunkY)
@@ -264,6 +278,123 @@ static void SetTerrainMaterialTransformed(struct DioramaTerrainMaterial *materia
     SetTerrainMaterial(material, metatileId, layer);
     material->rotation = rotation;
     material->flags = flags;
+}
+
+static uint32_t PixelColor(const struct DioramaSceneSnapshot *snapshot,
+                           const struct DioramaGeneratedPixelV2 *pixel)
+{
+    uint8_t colorIndex = DioramaMetatile_DecodePixel(
+        snapshot->tileGraphics, pixel->expectedTileEntry,
+        pixel->sourceX & 7, pixel->sourceY & 7);
+    uint8_t palette = pixel->expectedTileEntry >> 12;
+    uint32_t argb;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+
+    if (colorIndex == 0 || palette >= 16)
+        return 0;
+    argb = DioramaMetatile_ConvertColor(
+        snapshot->fadedPalette[palette * 16 + colorIndex], false);
+    red = (argb >> 16) & 0xFF;
+    green = (argb >> 8) & 0xFF;
+    blue = argb & 0xFF;
+    return red | ((uint32_t)green << 8) | ((uint32_t)blue << 16) | UINT32_C(0xFF000000);
+}
+
+static bool AppendPixelObjects(const struct DioramaSceneSnapshot *snapshot,
+                               const struct DioramaResolvedCell *resolvedCells,
+                               int chunkX, int chunkY,
+                               struct DioramaTerrainChunkInput *input)
+{
+    size_t objectIndex;
+
+    for (objectIndex = 0; objectIndex < gDioramaPixelObjectV2Count; objectIndex++)
+    {
+        const struct DioramaGeneratedPixelObjectV2 *object = &gDioramaPixelObjectsV2[objectIndex];
+        const struct DioramaGeneratedPixelV2 *pixels;
+        const struct DioramaCellSnapshot *anchor = NULL;
+        const struct DioramaResolvedCell *anchorResolved = NULL;
+        bool supportActive;
+        size_t pixelCount;
+        size_t pixelIndex;
+        int index;
+        int translationX;
+        int translationY;
+
+        for (index = 0; index < snapshot->visibleCellCount; index++)
+            if (resolvedCells[index].pixelObjectId == object->id)
+            {
+                anchor = &snapshot->cells[index];
+                anchorResolved = &resolvedCells[index];
+                break;
+            }
+        if (anchor == NULL || !(anchor->flags & DIORAMA_CELL_SOURCE_VALID))
+            continue;
+        if (object->layoutId != anchor->sourceLayoutId
+         || !((object->mapGroup == UINT8_MAX && object->mapNumber == UINT8_MAX)
+           || (object->mapGroup == anchor->sourceMapGroup
+            && object->mapNumber == anchor->sourceMapNum)))
+            continue;
+        supportActive = object->supportStructureId == 0;
+        for (index = 0; !supportActive && index < snapshot->visibleCellCount; index++)
+            supportActive = resolvedCells[index].structureId == object->supportStructureId;
+        if (!supportActive)
+            continue;
+        translationX = anchor->mapX - anchor->sourceMapX;
+        translationY = anchor->mapY - anchor->sourceMapY;
+        pixels = DioramaRules_GetPixelObjectPixels(object, &pixelCount);
+        if (pixels == NULL)
+            return false;
+        for (pixelIndex = 0; pixelIndex < pixelCount; pixelIndex++)
+        {
+            const struct DioramaGeneratedPixelV2 *sourcePixel = &pixels[pixelIndex];
+            int sourceX = sourcePixel->sourceCellOffset
+                        % gDioramaLayoutsV2[object->layoutId - 1].width;
+            int sourceY = sourcePixel->sourceCellOffset
+                        / gDioramaLayoutsV2[object->layoutId - 1].width;
+            const struct DioramaCellSnapshot *sourceCell = FindSnapshotCell(
+                snapshot, sourceX + translationX, sourceY + translationY);
+            int32_t xQ32 = sourcePixel->xQ32 + translationX * 32;
+            int32_t zQ32 = sourcePixel->zQ32 + translationY * 32;
+            int ownerChunkX = DioramaTerrain_FloorDiv(
+                xQ32 + sourcePixel->sizeXQ32 / 2, DIORAMA_TERRAIN_CHUNK_SIZE * 32);
+            int ownerChunkY = DioramaTerrain_FloorDiv(
+                zQ32 + sourcePixel->sizeZQ32 / 2, DIORAMA_TERRAIN_CHUNK_SIZE * 32);
+            struct DioramaTerrainPixelPrimitive *target;
+            uint32_t color;
+
+            if (ownerChunkX != chunkX || ownerChunkY != chunkY)
+                continue;
+            if (sourceCell == NULL || sourceCell->sourceLayoutId != object->layoutId
+             || sourceCell->metatileId != sourcePixel->expectedMetatile)
+                continue;
+            color = PixelColor(snapshot, sourcePixel);
+            if (color == 0)
+                continue;
+            if (input->pixelCount >= DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES)
+                return false;
+            target = &input->pixels[input->pixelCount++];
+            target->xQ32 = xQ32;
+            target->yQ32 = sourcePixel->yQ32 + object->supportOffsetQ16 * 2
+                         + (int32_t)(anchorResolved->groundHeight * 32.0f);
+            target->zQ32 = zQ32;
+            target->rgba = color;
+            target->sourceCellOffset = sourcePixel->sourceCellOffset;
+            target->objectId = object->id;
+            target->structureId = object->structureId;
+            target->expectedMetatile = sourcePixel->expectedMetatile;
+            target->expectedTileEntry = sourcePixel->expectedTileEntry;
+            target->sizeXQ32 = sourcePixel->sizeXQ32;
+            target->sizeYQ32 = sourcePixel->sizeYQ32;
+            target->sizeZQ32 = sourcePixel->sizeZQ32;
+            target->sourceLayer = sourcePixel->sourceLayer;
+            target->sourceX = sourcePixel->sourceX;
+            target->sourceY = sourcePixel->sourceY;
+            target->kind = object->kind;
+        }
+    }
+    return true;
 }
 
 static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
@@ -357,11 +488,25 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
             for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
             {
                 uint16_t materialId = resolvedCells[gridIndex].materials[face].metatileId;
+                uint8_t materialLayer = resolvedCells[gridIndex].materials[face].layer;
+
+                if (resolvedCells[gridIndex].pixelObjectId != 0
+                 && resolvedCells[gridIndex].groundMode == DIORAMA_PIXEL_GROUND_SOURCE_BASE)
+                {
+                    materialId = source->metatileId;
+                    materialLayer = DIORAMA_MATERIAL_BASE;
+                }
+                else if (resolvedCells[gridIndex].pixelObjectId != 0
+                      && resolvedCells[gridIndex].baseMetatileId != DIORAMA_MATERIAL_METATILE_SELF)
+                {
+                    materialId = resolvedCells[gridIndex].baseMetatileId;
+                    materialLayer = DIORAMA_MATERIAL_FULL;
+                }
                 if (materialId == DIORAMA_MATERIAL_METATILE_SELF)
                     materialId = source->metatileId;
                 SetTerrainMaterialTransformed(
                     &cell->materials[face], materialId,
-                    resolvedCells[gridIndex].materials[face].layer,
+                    materialLayer,
                     resolvedCells[gridIndex].materials[face].rotation,
                     resolvedCells[gridIndex].materials[face].flags);
                 SetTerrainMaterial(&cell->underlayMaterials[face], source->metatileId,
@@ -424,7 +569,7 @@ static bool BuildInput(const struct DioramaSceneSnapshot *snapshot,
                 hasInterior = true;
         }
     }
-    return hasInterior;
+    return hasInterior && AppendPixelObjects(snapshot, resolvedCells, chunkX, chunkY, input);
 }
 
 static bool UploadChunk(struct GLTerrainChunk *chunk,
@@ -488,7 +633,7 @@ void DioramaGLTerrain_Reset(void)
 bool DioramaGLTerrain_Sync(const struct DioramaSceneSnapshot *snapshot,
                            const struct DioramaResolvedCell *resolvedCells)
 {
-    struct DioramaTerrainChunkInput input;
+    static struct DioramaTerrainChunkInput input;
     int minChunkX;
     int maxChunkX;
     int minChunkY;
@@ -707,12 +852,27 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     if (debug)
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     glEnable(GL_STENCIL_TEST);
-    glStencilMask(0xFF);
-    glStencilFunc(GL_ALWAYS, 1, 0xFF);
+    glStencilMask(0x01);
+    glStencilFunc(GL_ALWAYS, 1, 0x01);
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     glDepthMask(GL_FALSE);
     dglUniform1i(sRenderPassLocation, 1);
+    for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
+    {
+        struct GLTerrainChunk *chunk = &sChunks[i];
+
+        if (!chunk->active
+         || !DioramaTerrain_IsBoundsVisible(&chunk->mesh.bounds, cameraX, cameraZ,
+                                             cameraPitch, focalLength))
+            continue;
+        dglBindVertexArray(chunk->vertexArray);
+        glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.vertexCount);
+        sMetrics.drawCalls++;
+    }
+    glStencilMask(0x02);
+    glStencilFunc(GL_ALWAYS, 2, 0x02);
+    dglUniform1i(sRenderPassLocation, 2);
     for (i = 0; i < TERRAIN_CHUNK_CACHE_SIZE; i++)
     {
         struct GLTerrainChunk *chunk = &sChunks[i];

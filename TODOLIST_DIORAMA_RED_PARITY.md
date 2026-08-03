@@ -7,7 +7,7 @@
 - Referencia Rojo congelada: `b21fd46ea789a0b8cb99d2c7e0add5a007568a54`.
 - Especificacion: `docs/diorama_red_parity.md`.
 - Editor visual: fuera de alcance hasta terminar este TODO.
-- Fase activa: **R4** (`pending`).
+- Fase activa: **R4** (`implementation`).
 - Ultima fase aprobada manualmente: **R3**.
 - El stash anterior permanece aislado y no se mezcla aqui.
 
@@ -42,7 +42,14 @@ Reglas:
       aprobacion explicita de la prueba manual de la fase actual.
 - [ ] Un test automatico no sustituye el gate manual.
 - [ ] Si la prueba manual falla, la fase vuelve a `implementation`.
-- [ ] Cada correccion se valida de nuevo desde el principio del gate de esa fase.
+- [ ] Durante `implementation`, cada correccion visual ejecuta solo tests focalizados, un
+      build Diorama y una comprobacion manual reducida del objeto afectado.
+- [ ] La suite completa, paridad global, build classic, hashes y smoke amplio se ejecutan
+      una sola vez cuando el usuario confirma que existe un candidato visual correcto.
+- [ ] Si ese cierre descubre una regresion, se vuelve a `implementation`, se invalidan
+      hashes/evidencia y se recupera el ciclo focalizado; no se repite todo tras cada intento.
+- [ ] Tests, paridad, masks golden y builds prueban contratos tecnicos, nunca correccion
+      visual. Una mask golden puede congelar un error y no cuenta como aprobacion.
 - [ ] Cada fase entrega un procedimiento reproducible; no se acepta "se ve bien en mi
       partida" sin mapa, posicion, direccion, pitch y resultado esperado.
 - [ ] Los resultados manuales aprobados se registran en el gate con fecha, commit,
@@ -60,7 +67,8 @@ Reglas:
 - [ ] Antes de iniciar cada fase, sus ejemplos generales se convierten en scenario IDs
       exactos; el checker rechaza gates con mapas, objetos o edificios sin coordenadas.
 
-Verificacion automatica minima comun a todas las fases de codigo:
+Verificacion automatica de cierre comun a todas las fases de codigo, solo despues de que
+el usuario acepte el candidato visual reducido:
 
 ```bash
 make -f Makefile_pc test-diorama-red-parity \
@@ -77,6 +85,10 @@ El target `test-diorama-red-parity` se crea en R0 y excluye completamente
 `map_editor/test_server.py`. Hasta entonces R0 ejecutara directamente las pruebas
 headless de reglas, compositor, occupancy, terrain, runtime y survey. El editor queda
 congelado e incompatible con schemas intermedios hasta una fase posterior a R10.
+
+Durante iteracion no se ejecuta este bloque. Se usa el test unitario directamente
+relacionado con el cambio y el build Diorama incremental. El objetivo de ese ciclo es
+obtener evidencia visual rapidamente, no producir hashes ni declarar el gate listo.
 
 Desde R2, toda fase que publique geometria runtime debe ademas garantizar:
 
@@ -300,32 +312,32 @@ al norte. El usuario dispenso los escenarios restantes y F5/F6 para este gate.
 
 ## R4: props automaticos y cutouts por pixel
 
-**Estado:** `pending`
+**Estado:** `implementation`
 
 **Objetivo:** reproducir `extractObjects`, billboards forzados, reliefs y soporte sobre
 objetos sin convertir arte ambiguo en cajas.
 
 Implementacion:
 
-- [ ] Componer region con apron y provenance.
-- [ ] Estimar fondo desde suelo vecino compatible.
-- [ ] Flood-fill de fondo y separar componentes foreground.
-- [ ] Implementar thresholds configurables y justificados por fixtures Emerald.
-- [ ] Rechazar regiones altas/repetitivas que no sean props.
-- [ ] Implementar los modos de outline/clase de Rojo cuando el flood sea ambiguo; una
+- [x] Componer region con apron y provenance.
+- [x] Estimar fondo desde suelo vecino compatible.
+- [x] Flood-fill de fondo y separar componentes foreground.
+- [x] Implementar thresholds configurables y justificados por fixtures Emerald.
+- [x] Rechazar regiones altas/repetitivas que no sean props.
+- [x] Implementar los modos de outline/clase de Rojo cuando el flood sea ambiguo; una
       prop edge-to-edge debe cambiar de clase o quedar sin soportar, no usar mask extra.
-- [ ] Generar un prisma por pixel con texel original.
-- [ ] Apoyar componentes en sus pies y sobre soportes authored.
-- [ ] Implementar `propGround` por votacion y override manual.
-- [ ] Implementar `relief` horizontal y pools separados.
-- [ ] No modificar sprites de personajes, que siguen como billboards.
-- [ ] Compilar cutouts/reliefs al IR runtime y demostrar paridad Python/C en esta fase.
+- [x] Generar un prisma por pixel con texel original.
+- [ ] Apoyar componentes en sus pies y sobre soportes authored con resultado visual correcto.
+- [x] Implementar `propGround` por votacion y override manual.
+- [x] Implementar `relief` horizontal perceptible y pools separados.
+- [x] No modificar sprites de personajes, que siguen como billboards.
+- [x] Compilar cutouts/reliefs al IR runtime y demostrar paridad Python/C en esta fase.
 
 Validacion automatica especifica:
 
-- [ ] Masks golden pixel a pixel.
-- [ ] Cada voxel visible tiene provenance valida.
-- [ ] Ningun foreground perdido o fondo incluido en fixtures aprobados.
+- [x] Masks golden pixel a pixel.
+- [x] Cada voxel visible tiene provenance valida.
+- [ ] Ningun foreground perdido o fondo incluido en la comprobacion visual.
 - [ ] Prop sobre mesa conserva altura y no pinta suelo a traves del soporte.
 
 **Prueba manual obligatoria R4:**
@@ -337,6 +349,76 @@ Validacion automatica especifica:
 5. Probar otro mapa que comparta cada tileset modificado.
 
 **Gate R4:** el usuario aprueba masks, soporte y ground replacement. Solo entonces R5.
+
+La segunda prueba visual confirma los carteles 3D de Villa Raiz, pero la TV solo muestra
+perspectiva en la franja superior trasera: pantalla y pie siguen planos. Plantas,
+taburetes y relief tambien siguen planos. R4 vuelve a `implementation`; la evidencia y
+los hashes del candidato anterior quedan invalidados. Las siguientes correcciones usan
+solo test focalizado, build Diorama y escenario visual reducido hasta que el usuario
+confirme un candidato correcto.
+
+Candidato visual actual: `console` opaco conserva los 256 pixels de pantalla, cuerpo y
+pie en vez de los 3 pixels supervivientes del flood anterior; su profundidad es 8 Q32.
+Plantas/taburetes layered usan 6 Q32 y el relief 12 Q32. Solo se ejecutaron los tests
+focalizados de extractor/terrain y el build Diorama incremental, sin cierre global.
+
+La revision siguiente aprobo visualmente las dos plantas cubiertas de Oldale House1 y la
+mesa de Dewford Hall; la tercera planta queda aceptada para cobertura posterior. En la TV,
+el bloque principal ya es correcto, pero soporte y pieza trasera estaban a altura cero.
+Elevar solo las tres filas de `578` a 25 Q16 fallo: quedaron separadas una celda por
+detras y la base siguio plana. La composicion fuente confirma que `513` es suelo, `2` es
+el bloque principal y `578` contiene la extension superior. El candidato actual colapsa
+ambas celdas en un plano: `2` ocupa altura 0..1 y `578` ocupa 1..1.1875 tras desplazarse
+una celda en profundidad. Falta su comprobacion visual reducida.
+
+La siguiente revision confirmo la union superior, pero la base azul seguia plana y la
+profundidad era insuficiente. El mapa revelo la tercera celda omitida: `586` en la casa de
+Brendan y `691` en la de May. El candidato actual extrae solo sus ocho filas de objeto,
+excluye el overlay de suelo y apila base/cuerpo/extension a 0..0.5, 0.5..1.5 y
+1.5..1.6875 sobre un plano comun, con profundidad 0.5 para las tres piezas.
+
+La TV completa queda aprobada visualmente en la siguiente revision. Se detectan dos
+regresiones: la sustitucion de la base elimina el borde azul de la alfombra y los sprites
+ganan la oclusion aunque esten detras de TV, carteles, sillas o mesas. El candidato actual
+usa `574`/`696` como residuales exactos del suelo con alfombra y elimina el bias artificial
+del shader de sprites; falta comprobar visualmente suelo y oclusion.
+
+El residual `574` se mostro negro en runtime. El candidato siguiente usa `513`, el mismo
+suelo visible en `(5,4)`, bajo la base de ambas TVs; geometria y oclusion no cambian.
+
+Sin bias de sprites, una silla de profundidad 0.5 tapa al NPC sentado en la misma celda.
+El candidato siguiente usa `0.00025`, aproximadamente media celda de prioridad visual,
+en vez del `0.0008` original que atravesaba objetos separados por una celda completa.
+
+La coordenada de suelo correcta es `(5,5)`: metatile `558`; para May se usa el equivalente
+`689`. El bias `0.00025` solo libero la parte inferior del NPC y respaldo/TV siguieron
+tapando sprites de la misma celda. El candidato con `0.0005` corrige las sillas, pero con
+perspectiva baja el personaje aun atraviesa visualmente la TV al compartir su celda; con
+perspectiva alta se ordena bien. El candidato actual conserva `0.0005` como bias general y
+usa `0.0008` solo cuando el sprite ocupa una celda reclamada por un pixel object. Esto cubre
+el grosor frontal de la TV a bajo angulo sin dar esa prioridad a sprites situados en otra
+celda detras del mueble.
+
+La comprobacion siguiente invalida ese criterio: la TV sigue cruzando el sprite al bajar
+la perspectiva y personajes realmente detras de carteles pasan a dibujarse por encima.
+Se retira el `0.0008` condicionado y se restaura `0.0005` global mientras se separa la
+necesidad especifica de los taburetes del orden correcto de TV y carteles.
+
+El criterio confirmado es el orden de la cuadricula: un personaje situado detras debe
+quedar oculto por los pixels solapados de TV o cartel independientemente del pitch. El
+nuevo candidato elimina el bias global y lo convierte en `spriteDepthBias` authored;
+solo los dos patrones de taburete usan `0.0005` para conservar al NPC sentado. TV,
+carteles y el resto de pixel objects usan cero y dependen del depth buffer compartido.
+
+La comprobacion posterior confirma el orden trasero, pero delante la TV y los carteles
+ocultan la cabeza del jugador. El depth continuo no puede representar el orden discreto
+de la cuadricula para un billboard alto a todos los pitches. El candidato actual marca
+solo los pixels visibles de pixel objects en el bit 2 del stencil y repinta sobre esa
+mascara los sprites cuya celda esta inmediatamente al sur. El suelo y otros volumenes no
+entran en la mascara; los sprites al norte no reciben el segundo pase.
+
+El usuario aprueba finalmente TV, taburetes, carteles de Villa Raiz y el cartel compartido
+de Pueblo Escaso, y dispensa pruebas o cierre automatico adicionales para este commit.
 
 ## R5: volumenes genericos y alturas repeat-aware
 

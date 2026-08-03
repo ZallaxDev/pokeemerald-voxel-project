@@ -13,12 +13,14 @@
 #define DIORAMA_TERRAIN_MAX_SURFACES DIORAMA_MAX_VISUAL_SURFACES
 #define DIORAMA_TERRAIN_PIXEL_COLUMNS (DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL * DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL)
 #define DIORAMA_TERRAIN_MAX_FACES (DIORAMA_TERRAIN_PIXEL_COLUMNS * DIORAMA_OCCUPANCY_FACE_COUNT * DIORAMA_TERRAIN_MAX_SURFACES)
-#define DIORAMA_TERRAIN_MAX_VERTICES (DIORAMA_TERRAIN_MAX_FACES * 6)
+#define DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES 4096
+#define DIORAMA_TERRAIN_MAX_VERTICES ((DIORAMA_TERRAIN_MAX_FACES + DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES * 6) * 6)
 #define DIORAMA_TERRAIN_LEDGE_HEIGHT 0.375f
 #define DIORAMA_TERRAIN_WATER_HEIGHT -0.125f
 #define DIORAMA_TERRAIN_TEXTURE_FULL 0.0f
 #define DIORAMA_TERRAIN_TEXTURE_BASE 1.0f
 #define DIORAMA_TERRAIN_TEXTURE_FOREGROUND 2.0f
+#define DIORAMA_TERRAIN_TEXTURE_VERTEX_COLOR 3.0f
 
 enum DioramaTerrainFace
 {
@@ -115,13 +117,35 @@ struct DioramaTerrainHeightCell
     uint8_t rawElevation;
 };
 
+struct DioramaTerrainPixelPrimitive
+{
+    int32_t xQ32;
+    int32_t yQ32;
+    int32_t zQ32;
+    uint32_t rgba;
+    uint32_t sourceCellOffset;
+    uint16_t objectId;
+    uint16_t structureId;
+    uint16_t expectedMetatile;
+    uint16_t expectedTileEntry;
+    uint8_t sizeXQ32;
+    uint8_t sizeYQ32;
+    uint8_t sizeZQ32;
+    uint8_t sourceLayer;
+    uint8_t sourceX;
+    uint8_t sourceY;
+    uint8_t kind;
+};
+
 struct DioramaTerrainChunkInput
 {
     int16_t chunkX;
     int16_t chunkY;
     uint32_t mapGeneration;
     uint32_t rulesGeneration;
+    uint32_t pixelCount;
     struct DioramaTerrainCell cells[DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE];
+    struct DioramaTerrainPixelPrimitive pixels[DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES];
 };
 
 struct DioramaTerrainVertex
@@ -134,6 +158,7 @@ struct DioramaTerrainVertex
     float shade;
     float textureLayer;
     float reflectionMask;
+    uint32_t color;
 };
 
 struct DioramaTerrainBounds

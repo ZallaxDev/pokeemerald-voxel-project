@@ -50,7 +50,7 @@ static const struct DioramaTerrainCell *GetCell(const struct DioramaTerrainChunk
 static bool AppendVertex(struct DioramaTerrainVertex *vertices, uint32_t capacity,
                           uint32_t *count, float x, float y, float z,
                           float u, float v, float shade, float textureLayer,
-                          float reflectionMask)
+                          float reflectionMask, uint32_t color)
 {
     struct DioramaTerrainVertex *vertex;
 
@@ -65,6 +65,7 @@ static bool AppendVertex(struct DioramaTerrainVertex *vertices, uint32_t capacit
     vertex->shade = shade;
     vertex->textureLayer = textureLayer;
     vertex->reflectionMask = reflectionMask;
+    vertex->color = color;
     return true;
 }
 
@@ -102,7 +103,8 @@ static bool AppendQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
 
         if (!AppendVertex(vertices, capacity, count,
                           positions[corner][0], positions[corner][1], positions[corner][2],
-                          u, v, shade, material->layer, reflectionMask))
+                          u, v, shade, material->layer, reflectionMask,
+                          UINT32_C(0xFFFFFFFF)))
             return false;
     }
     return true;
@@ -271,6 +273,28 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
             hash = HashU16(hash, cell->southFacadeMaterials[row].metatileId);
             hash = HashByte(hash, cell->southFacadeMaterials[row].layer);
         }
+    }
+    hash = HashU32(hash, input->pixelCount);
+    for (i = 0; i < input->pixelCount && i < DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES; i++)
+    {
+        const struct DioramaTerrainPixelPrimitive *pixel = &input->pixels[i];
+
+        hash = HashU32(hash, pixel->xQ32);
+        hash = HashU32(hash, pixel->yQ32);
+        hash = HashU32(hash, pixel->zQ32);
+        hash = HashU32(hash, pixel->rgba);
+        hash = HashU32(hash, pixel->sourceCellOffset);
+        hash = HashU16(hash, pixel->objectId);
+        hash = HashU16(hash, pixel->structureId);
+        hash = HashU16(hash, pixel->expectedMetatile);
+        hash = HashU16(hash, pixel->expectedTileEntry);
+        hash = HashByte(hash, pixel->sizeXQ32);
+        hash = HashByte(hash, pixel->sizeYQ32);
+        hash = HashByte(hash, pixel->sizeZQ32);
+        hash = HashByte(hash, pixel->sourceLayer);
+        hash = HashByte(hash, pixel->sourceX);
+        hash = HashByte(hash, pixel->sourceY);
+        hash = HashByte(hash, pixel->kind);
     }
     return hash;
 }
@@ -771,6 +795,71 @@ static void FacePositions(const struct DioramaShellFace *face, float positions[4
     }
 }
 
+static bool AppendPixelQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                            uint32_t *count, const float positions[4][3], float shade,
+                            uint32_t color)
+{
+    static const uint8_t order[6] = {0, 1, 2, 0, 2, 3};
+    int i;
+
+    for (i = 0; i < 6; i++)
+    {
+        int corner = order[i];
+
+        if (!AppendVertex(vertices, capacity, count,
+                          positions[corner][0], positions[corner][1], positions[corner][2],
+                          0.0f, 0.0f, shade, DIORAMA_TERRAIN_TEXTURE_VERTEX_COLOR,
+                          0.0f, color))
+            return false;
+    }
+    return true;
+}
+
+static bool AppendPixelPrimitives(const struct DioramaTerrainChunkInput *input,
+                                  struct DioramaTerrainVertex *vertices,
+                                  uint32_t capacity, uint32_t *count,
+                                  struct DioramaTerrainMesh *mesh)
+{
+    uint32_t index;
+
+    if (input->pixelCount > DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES)
+        return false;
+    for (index = 0; index < input->pixelCount; index++)
+    {
+        const struct DioramaTerrainPixelPrimitive *pixel = &input->pixels[index];
+        float left = (pixel->xQ32 - 16) / 32.0f;
+        float right = (pixel->xQ32 + pixel->sizeXQ32 - 16) / 32.0f;
+        float bottom = pixel->yQ32 / 32.0f;
+        float top = (pixel->yQ32 + pixel->sizeYQ32) / 32.0f;
+        float north = -(pixel->zQ32 - 16) / 32.0f;
+        float south = -(pixel->zQ32 + pixel->sizeZQ32 - 16) / 32.0f;
+        const float quads[6][4][3] = {
+            {{left, top, north}, {right, top, north}, {right, top, south}, {left, top, south}},
+            {{left, bottom, south}, {right, bottom, south}, {right, bottom, north}, {left, bottom, north}},
+            {{left, top, north}, {right, top, north}, {right, bottom, north}, {left, bottom, north}},
+            {{right, top, north}, {right, top, south}, {right, bottom, south}, {right, bottom, north}},
+            {{right, top, south}, {left, top, south}, {left, bottom, south}, {right, bottom, south}},
+            {{left, top, south}, {left, top, north}, {left, bottom, north}, {left, bottom, south}},
+        };
+        /* Both artwork faces preserve the source texel; only prism depth is shaded. */
+        static const float shades[6] = {1.0f, 0.58f, 1.0f, 0.68f, 1.0f, 0.68f};
+        int face;
+
+        for (face = 0; face < 6; face++)
+            if (!AppendPixelQuad(vertices, capacity, count, quads[face],
+                                 shades[face], pixel->rgba))
+                return false;
+        if (left < mesh->bounds.minX) mesh->bounds.minX = left;
+        if (right > mesh->bounds.maxX) mesh->bounds.maxX = right;
+        if (bottom < mesh->bounds.minY) mesh->bounds.minY = bottom;
+        if (top > mesh->bounds.maxY) mesh->bounds.maxY = top;
+        if (south < mesh->bounds.minZ) mesh->bounds.minZ = south;
+        if (north > mesh->bounds.maxZ) mesh->bounds.maxZ = north;
+        mesh->featureFaceCount += 6;
+    }
+    return true;
+}
+
 static void FaceMaterial(const struct DioramaTerrainMaterial *source,
                          const struct DioramaShellFace *face,
                          struct DioramaTerrainMaterial *output)
@@ -955,6 +1044,9 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
         } while (face->axis != 1 && band.vMin < bandEnd);
     }
 
+    if (!AppendPixelPrimitives(input, vertices, vertexCapacity, &vertexCount, mesh))
+        return false;
+
     mesh->vertexCount = vertexCount;
     mesh->faceCount = mesh->topFaceCount + mesh->bottomFaceCount
                     + mesh->sideFaceCount + mesh->featureFaceCount;
@@ -971,6 +1063,7 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].shade);
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].textureLayer);
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].reflectionMask);
+        mesh->geometryHash = HashU32(mesh->geometryHash, vertices[i].color);
     }
     return true;
 }

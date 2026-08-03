@@ -7,6 +7,7 @@
 
 #include "diorama/gl_loader.h"
 #include "diorama/gl_object_renderer.h"
+#include "diorama/rules.generated.h"
 #include "diorama/rules.h"
 #include "diorama/sprite_frame.h"
 
@@ -47,6 +48,8 @@ struct ObjectRenderItem
     int16_t previousAttachedOffsetY;
     int16_t attachedOffsetX;
     int16_t attachedOffsetY;
+    float depthBias;
+    bool drawOverPixelObjects;
 };
 
 static struct SpriteTextureCacheEntry sTextureCache[SPRITE_TEXTURE_CACHE_SIZE];
@@ -71,6 +74,7 @@ static GLint sAspectCorrectionLocation;
 static GLint sImageLocation;
 static GLint sDrawModeLocation;
 static GLint sAnimationTimeLocation;
+static GLint sDepthBiasLocation;
 
 static const char sObjectVertexShader[] =
     "#version 330 core\n"
@@ -80,6 +84,7 @@ static const char sObjectVertexShader[] =
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
     "uniform float aspectCorrection;\n"
+    "uniform float depthBias;\n"
     "out vec2 uv;\n"
     "void main() {\n"
     "  const float cameraHeight = 16.0;\n"
@@ -97,7 +102,7 @@ static const char sObjectVertexShader[] =
     "  float clipY = -0.04 * depth + vertical * focalLength * 2.0 / 160.0;\n"
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
-    "  gl_Position = vec4(clipX, clipY, clipZ - 0.0008 * depth, depth);\n"
+    "  gl_Position = vec4(clipX, clipY, clipZ - depthBias * depth, depth);\n"
     "  uv = texCoord;\n"
     "}\n";
 
@@ -175,10 +180,44 @@ static bool CreateProgram(void)
     sImageLocation = dglGetUniformLocation(sProgram, "image");
     sDrawModeLocation = dglGetUniformLocation(sProgram, "drawMode");
     sAnimationTimeLocation = dglGetUniformLocation(sProgram, "animationTime");
+    sDepthBiasLocation = dglGetUniformLocation(sProgram, "depthBias");
     return sCameraLocation >= 0 && sCameraPitchLocation >= 0
         && sFocalLengthLocation >= 0 && sAspectCorrectionLocation >= 0
         && sImageLocation >= 0
-        && sDrawModeLocation >= 0 && sAnimationTimeLocation >= 0;
+        && sDrawModeLocation >= 0 && sAnimationTimeLocation >= 0
+        && sDepthBiasLocation >= 0;
+}
+
+static float ResolveDepthBias(const struct DioramaSceneSnapshot *snapshot,
+                              const struct DioramaResolvedCell *resolvedCells,
+                              const struct DioramaObjectSnapshot *object)
+{
+    int i;
+
+    for (i = 0; i < snapshot->visibleCellCount; i++)
+        if (snapshot->cells[i].mapX == object->currentMapX
+         && snapshot->cells[i].mapY == object->currentMapY)
+        {
+            const struct DioramaGeneratedPixelObjectV2 *pixelObject =
+                DioramaRules_GetPixelObject(resolvedCells[i].pixelObjectId);
+
+            return pixelObject == NULL ? 0.0f
+                 : pixelObject->spriteDepthBiasMillionths / 1000000.0f;
+        }
+    return 0.0f;
+}
+
+static bool IsInFrontOfPixelObject(const struct DioramaSceneSnapshot *snapshot,
+                                   const struct DioramaResolvedCell *resolvedCells,
+                                   const struct DioramaObjectSnapshot *object)
+{
+    int i;
+
+    for (i = 0; i < snapshot->visibleCellCount; i++)
+        if (snapshot->cells[i].mapX == object->currentMapX
+         && snapshot->cells[i].mapY == object->currentMapY - 1)
+            return resolvedCells[i].pixelObjectId != 0;
+    return false;
 }
 
 static void ClearTextureCache(void)
@@ -352,6 +391,8 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
         item->texture = texture->texture;
         item->width = texture->width;
         item->height = texture->height;
+        item->depthBias = ResolveDepthBias(snapshot, resolvedCells, object);
+        item->drawOverPixelObjects = IsInFrontOfPixelObject(snapshot, resolvedCells, object);
         if ((object->flags & DIORAMA_OBJECT_REFLECTION) && !object->reflectionHidden)
         {
             struct DioramaObjectSnapshot reflection = *object;
@@ -410,6 +451,8 @@ bool DioramaGLObjects_Sync(const struct DioramaSceneSnapshot *snapshot,
         item->previousPose = nextItems[playerItem].previousPose;
         item->currentPose = nextItems[playerItem].currentPose;
         item->interpolate = nextItems[playerItem].interpolate;
+        item->depthBias = nextItems[playerItem].depthBias;
+        item->drawOverPixelObjects = nextItems[playerItem].drawOverPixelObjects;
         item->attachedToPlayer = true;
         item->previousAttachedOffsetX = snapshot->surfBlobOffsetX;
         item->previousAttachedOffsetY = snapshot->surfBlobOffsetY;
@@ -481,6 +524,7 @@ static void DrawBillboard(const struct ObjectRenderItem *item, struct DioramaSpr
     };
 
     glBindTexture(GL_TEXTURE_2D, item->texture);
+    dglUniform1f(sDepthBiasLocation, item->depthBias);
     UploadAndDraw(vertices);
 }
 
@@ -569,6 +613,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1f(sAnimationTimeLocation, (float)fmod(
         (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), 120.0));
     dglActiveTexture(GL_TEXTURE0);
+    dglUniform1f(sDepthBiasLocation, 0.0f);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_FALSE);
@@ -577,7 +622,7 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
     dglUniform1i(sDrawModeLocation, 2);
     glEnable(GL_STENCIL_TEST);
     glStencilMask(0x00);
-    glStencilFunc(GL_EQUAL, 1, 0xFF);
+    glStencilFunc(GL_EQUAL, 1, 0x01);
     glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
     for (i = 0; i < sItemCount; i++)
     {
@@ -609,6 +654,19 @@ void DioramaGLObjects_Draw(float frameAlpha, float cameraX, float cameraZ,
         int index = order[i];
         DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
     }
+    glEnable(GL_STENCIL_TEST);
+    glStencilMask(0x00);
+    glStencilFunc(GL_EQUAL, 2, 0x02);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    glDisable(GL_DEPTH_TEST);
+    for (i = 0; i < sItemCount; i++)
+    {
+        int index = order[i];
+
+        if (sItems[index].drawOverPixelObjects)
+            DrawBillboard(&sItems[index], poses[index], pitchSin, pitchCos);
+    }
+    glDisable(GL_STENCIL_TEST);
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
 }

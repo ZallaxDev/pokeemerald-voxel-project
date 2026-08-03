@@ -4,6 +4,23 @@ Las pruebas manuales las ejecuta exclusivamente el usuario. Al terminar cada cic
 agente debe indicar en espanol una lista breve con lugares, resultado esperado y
 comprobaciones. No se piden capturas, hashes, comandos auxiliares ni manifests locales.
 
+## Flujo permanente de validacion
+
+La validacion visual precede al cierre automatico completo:
+
+1. Mientras una fase esta en `implementation`, se corrige un unico objeto o clase.
+2. El agente ejecuta solo sus tests focalizados y genera un build Diorama incremental.
+3. El usuario comprueba un escenario visual reducido y comunica el resultado.
+4. Si falla, la fase sigue en `implementation`; no se ejecutan suite global, build classic,
+   hashes ni smoke completo.
+5. Cuando el usuario confirma que el candidato reducido se ve correctamente, se ejecutan
+   una vez la suite completa, paridad global, builds classic/Diorama y smoke final.
+6. Solo despues se pasa a `manual-pending` y se solicita la aprobacion explicita del gate.
+
+Los tests automaticos verifican contratos tecnicos, no apariencia. En particular, una
+mask golden solo detecta cambios en una mascara y puede conservar una mascara equivocada;
+no demuestra volumen, orientacion, profundidad, visibilidad ni fidelidad 3D.
+
 Desde R3, F6 no forma parte del gate salvo que una captura sea necesaria para documentar
 un defecto concreto. F5 solo se pide cuando comparar pitches fijos demuestra una propiedad
 geometrica u oclusion que no puede comprobarse moviendo la camara directamente. Cada fase
@@ -95,3 +112,31 @@ siguen planos hasta sus fases geometricas. F3 dibuja boundaries cyan y muestra
 La comprobacion principal es visual. Si algo falla, indica scenario ID, coordenada,
 pitch y los valores `OWN/CLM/RGN/SRC`. R3 solo se aprueba cuando el usuario lo declara
 explicitamente despues de estas pruebas.
+
+## R4
+
+F3 muestra `PX:<id> G:<metatile>` cuando la celda objetivo pertenece a un objeto pixel
+compilado. `PX` debe desaparecer junto con el claim si una mutacion invalida el candidato.
+
+1. Ejecuta `R4-LITTLEROOT-SIGN` y `R4-OLDALE-SIGN-SHARED-TILESET`. Compara `flat` con
+   los pitches mediante F5 porque aqui el grosor, los pies y la silueta son evidencia
+   geometrica concreta. Ambos carteles deben compartir mask y suelo `G:1`.
+2. Ejecuta `R4-OLDALE-HOUSE1-PLANTS` y `R4-MAUVILLE-HOUSE1-STOOLS`. Mueve la camara
+   alrededor de los objetos; usa F5 solo si necesitas fijar una oclusion. Cada componente
+   conserva sus propios pies y no se fusiona con el objeto vecino.
+3. Ejecuta `R4-BRENDAN-HOUSE-TV-SUPPORT`. Revisa con F5 los pixels blancos/grises
+   encerrados, la base a altura de mesa y la ausencia de suelo visible a traves del
+   soporte. Sube y baja de planta para repetir la publicacion del IR.
+4. Ejecuta `R4-DEWFORD-HALL-RELIEF`. La mesa edge-to-edge debe ser un relief horizontal
+   poco profundo, nunca un billboard o caja vertical. Comprueba despues las casas que
+   comparten `gTileset_GenericBuilding`.
+5. Ejecuta `R4-ROUTE104-CUT-TREE-BILLBOARD` y
+   `R4-FIERY-PATH-BOULDER-BILLBOARD`. Usa Cut y Strength mediante gameplay normal. El
+   arbol desaparece y la roca se mueve como object billboards sin geometria estatica
+   residual.
+6. Ejecuta `R4-CLASSIC-DIORAMA-REGRESSION-SMOKE` sin NVDA. Prueba movimiento, audio,
+   save/load, resize, fullscreen, menus, combate y fallback 2D.
+
+F6 solo se usa para documentar un defecto concreto. Si algo falla, indica scenario ID,
+coordenada, pitch y `PX/G`; R4 solo se aprueba tras declarar explicitamente que masks,
+soporte y ground replacement son correctos.

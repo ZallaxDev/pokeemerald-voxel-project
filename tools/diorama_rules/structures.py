@@ -109,8 +109,15 @@ def analyze_layout(layout: dict, cells: tuple[dict, ...], shapes: tuple[TileShap
     cell_sources = [str(_shape_value(shape, "source", "source")) for shape in shapes]
 
     def add_candidate(owner: str, kind: str, priority: int, offsets: list[int],
-                      class_name: str, pool: str, evidence: set[str], source: str,
-                      claim_only: bool = False, *, region: bool = False) -> int:
+                       class_name: str, pool: str, evidence: set[str], source: str,
+                       claim_only: bool = False, *, region: bool = False,
+                       prop_ground: dict | None = None,
+                       object_offset_q16: int | None = None,
+                       object_depth_offset_q32: int = 0,
+                       object_thickness_q32: int | None = None,
+                        object_pixel_rows: list[int] | None = None,
+                        object_ground_mode: str | None = None,
+                        sprite_depth_bias_millionths: int = 0) -> int:
         ordered = sorted(offsets)
         candidate_id = len(candidates) + 1
         candidates.append({
@@ -118,6 +125,12 @@ def analyze_layout(layout: dict, cells: tuple[dict, ...], shapes: tuple[TileShap
             "cells": ordered, "pixels": _pixels(ordered, pixel_summaries),
             "bbox": _bbox(ordered, width), "class": class_name, "pool": pool,
             "evidence": sorted(evidence), "source": source, "claimOnly": claim_only,
+            "propGround": prop_ground, "objectOffsetQ16": object_offset_q16,
+            "objectDepthOffsetQ32": object_depth_offset_q32,
+            "objectThicknessQ32": object_thickness_q32,
+            "objectPixelRows": object_pixel_rows,
+            "objectGroundMode": object_ground_mode,
+            "spriteDepthBiasMillionths": sprite_depth_bias_millionths,
         })
         target = regions if region else owners
         for offset in ordered:
@@ -148,7 +161,18 @@ def analyze_layout(layout: dict, cells: tuple[dict, ...], shapes: tuple[TileShap
                 add_candidate(str(pattern["id"]), "template", STAGE_PRIORITY_TEMPLATE,
                               claimed, class_name, str(action.get("pool", "structure")),
                               {source}, source,
-                              bool(action.get("claimOnly", False) or class_name == "claim-only"))
+                              bool(action.get("claimOnly", False) or class_name == "claim-only"),
+                              prop_ground=action.get("groundPolicy"),
+                              object_offset_q16=(round(float(action["groundOffset"]) * 16)
+                                  if "groundOffset" in action else None),
+                              object_depth_offset_q32=round(
+                                  float(action.get("depthOffset", 0)) * 32),
+                              object_thickness_q32=(round(float(action["thickness"]) * 32)
+                                  if "thickness" in action else None),
+                              object_pixel_rows=action.get("pixelRows"),
+                               object_ground_mode=action.get("objectGroundMode"),
+                               sprite_depth_bias_millionths=round(
+                                   float(action.get("spriteDepthBias", 0)) * 1000000))
 
     def flood_available(start: int, predicate: Callable[[int], bool]) -> list[int]:
         queue, found = deque((start,)), []

@@ -66,6 +66,30 @@
       "disposition": "implemented-in-R3",
       "owner": "tools/diorama_rules/structures.py:analyze_layout",
       "consumer": "src/diorama/gl/gl_compositor.c:BuildDebugImage"
+    },
+    {
+      "id": "pixel-object-segmentation",
+      "disposition": "implemented-in-R4",
+      "owner": "tools/diorama_rules/pixel_objects.py:extract_candidate",
+      "consumer": "tools/diorama_rules/compile_rules.py:compile_data"
+    },
+    {
+      "id": "prop-ground-resolution",
+      "disposition": "implemented-in-R4",
+      "owner": "tools/diorama_rules/pixel_objects.py:_ground_vote",
+      "consumer": "src/diorama/gl/gl_terrain_renderer.c:BuildInput"
+    },
+    {
+      "id": "pixel-object-support",
+      "disposition": "implemented-in-R4",
+      "owner": "tools/diorama_rules/pixel_objects.py:extract_layout",
+      "consumer": "src/diorama/gl/gl_terrain_renderer.c:AppendPixelObjects"
+    },
+    {
+      "id": "cutout-relief-geometry",
+      "disposition": "implemented-in-R4",
+      "owner": "src/diorama/terrain/terrain_mesh.c:AppendPixelPrimitives",
+      "consumer": "src/diorama/gl/gl_terrain_renderer.c"
     }
   ]
 }

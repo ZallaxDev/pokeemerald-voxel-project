@@ -3,13 +3,16 @@
 import copy
 import hashlib
 import json
+import struct
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from compile_rules import (ARCHETYPES, RuleError, _action, _ground_policy, _mask,
-                             _pattern_placements, _patterns, _profiles, _selector,
-                             _validate_logical_ids, _validate_pattern_claim_overlaps,
+                              _pattern_placements, _patterns, _profiles, _selector,
+                              _validate_logical_ids, _validate_pattern_claim_overlaps,
+                              _validate_pixel_object_catalog,
                              compile_data, load_json, parse_camera, render_c, render_header)
 from migrate_v1_to_v2 import MigrationError, migrate_document
 
@@ -61,7 +64,7 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertTrue(self.data["ambiguities"])
         self.assertEqual(render_c(self.data), render_c(compile_data(ROOT)))
 
-    def test_repository_has_authoritative_pin_and_r3_patterns(self):
+    def test_repository_has_authoritative_pin_and_r3_r4_patterns(self):
         for key in ("behaviorRules", "profiles", "contextualRules"):
             self.assertEqual(self.data[key], [])
         self.assertEqual(
@@ -69,6 +72,14 @@ class DioramaRuleCompilerTests(unittest.TestCase):
             [("petalburg-lab-shell", 1), ("petalburg-house-left-shell", 1),
              ("petalburg-house-right-shell", 1),
              ("pokemon-center-service-counter", 3),
+             ("generic-building-potted-plant", 5),
+             ("brendan-tv-support", 1),
+             ("may-tv-support", 1),
+             ("brendan-tv-cutout", 1),
+             ("may-tv-cutout", 1),
+             ("generic-building-left-stool", 6),
+             ("generic-building-right-stool", 10),
+             ("generic-building-table-relief", 1),
              ("petalburg-isolated-signpost", 2)])
         self.assertEqual(len(self.data["tilesetPins"]), 1)
         pin = self.data["tilesetPins"][0]
@@ -83,7 +94,8 @@ class DioramaRuleCompilerTests(unittest.TestCase):
     def test_sha256_is_canonical_and_covers_every_ir_section(self):
         canonical_keys = ("schemaVersion", "tilesets", "layouts", "pools", "profiles", "default",
                            "behaviorRules", "tilesetPins", "contextualRules", "exactPatterns",
-                           "maps", "structureCandidates", "evidenceDetails", "ambiguities",
+                           "maps", "structureCandidates", "pixelObjects",
+                           "evidenceDetails", "ambiguities",
                            "classifierSources")
         canonical = {key: self.data[key] for key in canonical_keys}
         encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"),
@@ -243,6 +255,14 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         with self.assertRaisesRegex(RuleError, "unknown fields"):
             _ground_policy({"mode": "automatic", "metatile": 1}, "ground")
 
+    def test_pixel_object_abi_limits_are_rejected_at_compile_time(self):
+        with self.assertRaisesRegex(RuleError, "dimensions exceed"):
+            _validate_pixel_object_catalog([{
+                "id": 1, "layoutId": 1, "mapGroup": 255, "mapNumber": 255,
+                "width": 256, "height": 1, "supportOffsetQ16": 0,
+                "maskRows": [1], "pixels": [],
+            }])
+
     def test_camera_ranges(self):
         profile, pitch, focal = parse_camera(
             {"profile": "interior", "pitch": 55, "focalLength": 150}, "test")
@@ -269,12 +289,54 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertIn("struct DioramaGeneratedLayoutV2", header)
         self.assertIn("struct DioramaGeneratedTerrainV2", header)
         self.assertIn("struct DioramaGeneratedStructureV2", header)
+        self.assertIn("struct DioramaGeneratedPixelObjectV2", header)
+        self.assertIn("struct DioramaGeneratedPixelV2", header)
         self.assertIn("role, terrainClass", header)
         self.assertIn("struct DioramaGeneratedMapV2", header)
         self.assertTrue(all(f'"{row["symbol"]}"' in source for row in self.data["tilesets"]))
         self.assertIn("gDioramaTerrainV2Count", source)
         self.assertIn("gDioramaAmbiguitiesV2", source)
         self.assertIn("gDioramaStructuresV2", source)
+        self.assertIn("gDioramaPixelObjectsV2", source)
+        self.assertIn("gDioramaPixelMaskRowsV2", source)
+        self.assertGreater(len(self.data["pixelObjects"]), 0)
+        self.assertTrue(all(pixel["sourceColor"] != 0
+                            for obj in self.data["pixelObjects"] for pixel in obj["pixels"]))
+        supported = [obj for obj in self.data["pixelObjects"] if obj["supportStructureId"]]
+        self.assertEqual(len(supported), 2)
+        self.assertTrue(all(obj["class"] == "console" and obj["supportOffsetQ16"] == 12
+                            and obj["groundMode"] == "replacement"
+                            and obj["groundMetatile"] == 513 for obj in supported))
+        structures = {row["id"]: row for row in self.data["structureCandidates"]}
+        mask_goldens = Counter()
+        for obj in self.data["pixelObjects"]:
+            mask_hash = hashlib.sha256(b"".join(
+                struct.pack("<Q", row) for row in obj["maskRows"])).hexdigest()
+            mask_goldens[(structures[obj["structureId"]]["owner"], obj["groundMode"],
+                          obj["groundMetatile"], bool(obj["supportStructureId"]),
+                          mask_hash)] += 1
+        self.assertEqual(mask_goldens, Counter({
+            ("petalburg-isolated-signpost", "replacement", 1, False,
+             "d48f1e20b24a2549f329db82dfe0399a852945cc3585be861290e5d5e4bfbc3f"): 2,
+            ("event:background-sign", "replacement", 1, False,
+             "d48f1e20b24a2549f329db82dfe0399a852945cc3585be861290e5d5e4bfbc3f"): 3,
+            ("brendan-tv-cutout", "replacement", 513, True,
+             "0efca5a034af598fd64bf87ffcbcc300a9d2fbcd77475eaa5c16bad4a397ea67"): 1,
+            ("may-tv-cutout", "replacement", 513, True,
+             "0efca5a034af598fd64bf87ffcbcc300a9d2fbcd77475eaa5c16bad4a397ea67"): 1,
+            ("brendan-tv-support", "source-base", 0xFFFF, False,
+             "077af72744ba6ac7056fd27e228770687db42b56fa17bbeb0a1bc399d3925a1b"): 1,
+            ("may-tv-support", "source-base", 0xFFFF, False,
+             "077af72744ba6ac7056fd27e228770687db42b56fa17bbeb0a1bc399d3925a1b"): 1,
+            ("generic-building-potted-plant", "source-base", 0xFFFF, False,
+             "d444d1b17085ac9d0f7adfb5f55e82a229f32e59e3147ab1b098c1739a64e0e9"): 5,
+            ("generic-building-left-stool", "source-base", 0xFFFF, False,
+             "e5760e791385a5e2cdac53907b27ace89dcdcb58207dc558702a30943fa76962"): 6,
+            ("generic-building-right-stool", "source-base", 0xFFFF, False,
+             "56b7e3207c6d8a42fcbeeea10bcbf7960018769b89881ced169fac99493f473e"): 10,
+            ("generic-building-table-relief", "source-base", 0xFFFF, False,
+             "0a219127e3a3ae24590df9a9737fa4e3cc702caa48d947ec7d4d726e1634f88e"): 1,
+        }))
         self.assertIn(self.data["sha256"], source)
 
     def test_c_contract_excludes_compiler_only_precedence_tables(self):

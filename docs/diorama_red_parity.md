@@ -38,6 +38,25 @@ perfil manual corrige interpretaciones ambiguas. Su resultado maduro incluye cas
 3.000 lineas de perfil, alrededor de 1.190 tiles fijados manualmente y plantillas
 exactas de edificios. La paridad no se alcanzara fingiendo que esa curacion no existe.
 
+### 1.1 Autoridad y orden de validacion
+
+La correccion visual solo puede establecerla el usuario observando el renderer. Tests,
+paridad Python/C, provenance, masks golden y builds prueban contratos tecnicos, pero no
+demuestran que una forma tenga volumen visible, orientacion correcta, profundidad
+suficiente o una composicion fiel. Una expectativa automatica incorrecta puede preservar
+el mismo fallo indefinidamente.
+
+Por ello toda fase geometrica aplica siempre este orden:
+
+1. Iterar sobre un objeto o clase con tests focalizados y build Diorama incremental.
+2. Obtener una comprobacion visual reducida del usuario mientras la fase sigue en
+   `implementation`.
+3. Repetir el ciclo reducido si falla, sin suite global, build classic ni hashes.
+4. Solo tras confirmacion visual del candidato ejecutar la validacion automatica completa,
+   ambos builds y el smoke de cierre.
+5. Pasar a `manual-pending` y solicitar la aprobacion final; cualquier regresion devuelve
+   la fase a `implementation` e invalida toda evidencia del candidato.
+
 ## 2. Fuentes de autoridad de Rojo
 
 | Pieza | Responsabilidad exacta |

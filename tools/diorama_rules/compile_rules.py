@@ -16,6 +16,7 @@ from pathlib import Path
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
 from emerald_compositor import TilesetComposer, load_animation_slots
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
+from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
 from tile_shape import ClassificationError, TileShapeClassifier
 
@@ -171,7 +172,8 @@ def _voxel_number(value: object, path: str, minimum: float = -8.0,
 def _action(value: object, path: str, pools: set[str], profiles: dict[str, dict]) -> dict:
     item = _object(value, path)
     _unknown(item, {"archetype", "pool", "profile", "axis", "shape", "terrainClass",
-                    "groundOffset", "height",
+                    "groundOffset", "depthOffset", "thickness", "pixelRows",
+                    "objectGroundMode", "spriteDepthBias", "height",
                     "groundPolicy", "faces"}, path)
     archetype = item.get("archetype")
     if archetype not in ARCHETYPES:
@@ -207,6 +209,26 @@ def _action(value: object, path: str, pools: set[str], profiles: dict[str, dict]
         output["axis"] = item["axis"]
     if "groundOffset" in item:
         output["groundOffset"] = _voxel_number(item["groundOffset"], f"{path}.groundOffset")
+    if "depthOffset" in item:
+        output["depthOffset"] = _voxel_number(item["depthOffset"], f"{path}.depthOffset")
+    if "thickness" in item:
+        output["thickness"] = _voxel_number(item["thickness"], f"{path}.thickness", 0.0, 1.0)
+    if "pixelRows" in item:
+        rows = array(item["pixelRows"], f"{path}.pixelRows")
+        if len(rows) != 2:
+            raise RuleError(f"{path}.pixelRows: expected [start, end]")
+        start = _integer(rows[0], f"{path}.pixelRows[0]", 0, 15)
+        end = _integer(rows[1], f"{path}.pixelRows[1]", 1, 16)
+        if start >= end:
+            raise RuleError(f"{path}.pixelRows: start must be less than end")
+        output["pixelRows"] = [start, end]
+    if "objectGroundMode" in item:
+        if item["objectGroundMode"] not in ("replacement", "source-base"):
+            raise RuleError(f"{path}.objectGroundMode: must be replacement or source-base")
+        output["objectGroundMode"] = item["objectGroundMode"]
+    if "spriteDepthBias" in item:
+        output["spriteDepthBias"] = number(
+            item["spriteDepthBias"], f"{path}.spriteDepthBias", 0.0, 0.01)
     if "height" in item:
         output["height"] = _voxel_number(item["height"], f"{path}.height", 0.0, 32.0)
     if "groundPolicy" in item:
@@ -778,22 +800,24 @@ def _pixel_summaries(root: Path, layouts: list[dict], cells: dict[str, tuple[dic
             metatile = cell["metatile"]
             if metatile not in summaries:
                 if composer is None:
-                    summaries[metatile] = {"resolved": False, "visible": 0,
+                    summaries[metatile] = {"metatile": metatile, "resolved": False, "visible": 0,
                                            "transparent": 256, "black": 0,
                                            "components": 0, "signature": ""}
                 else:
                     before = set(composer.missing_tile_details)
-                    full = composer.compose_metatile(metatile)[2]
+                    layers = composer.compose_metatile(metatile)
+                    full = layers[2]
                     missing = set(composer.missing_tile_details) - before
                     visible = sum(pixel.visible for pixel in full)
                     black = sum(pixel.visible and pixel.rgba[:3] == (0, 0, 0)
                                 for pixel in full)
                     rgba = bytes(channel for pixel in full for channel in pixel.rgba)
                     summaries[metatile] = {
-                        "resolved": not missing, "visible": visible,
+                        "metatile": metatile, "resolved": not missing, "visible": visible,
                         "transparent": len(full) - visible, "black": black,
                         "components": _visible_components(full),
                         "signature": hashlib.sha256(rgba).hexdigest(),
+                        "layers": layers,
                     }
             rows.append(summaries[metatile])
         output[layout["id"]] = tuple(rows)
@@ -845,6 +869,70 @@ def _register_candidates(analysis: dict, layout_id: int, map_group: int, map_num
     return mapping
 
 
+def _register_pixel_objects(extracted: list[dict], mapping: dict[int, int], layout_id: int,
+                            map_group: int, map_number: int, catalog: list[dict]) -> None:
+    for item in extracted:
+        structure_id = mapping.get(item["structureId"])
+        if structure_id is None:
+            continue
+        object_id = len(catalog) + 1
+        if object_id > 0xFFFF:
+            raise RuleError("R4 pixel object catalog exceeds uint16_t ownership")
+        catalog.append({**item, "id": object_id, "structureId": structure_id,
+                        "supportStructureId": mapping.get(item["supportStructureId"], 0),
+                        "layoutId": layout_id, "mapGroup": map_group,
+                        "mapNumber": map_number})
+
+
+def _validate_pixel_object_catalog(catalog: list[dict]) -> None:
+    by_scope: defaultdict[tuple[int, int, int], list[dict]] = defaultdict(list)
+    for obj in catalog:
+        if not 1 <= obj["width"] <= 64 or not 1 <= obj["height"] <= 0xFF:
+            raise RuleError(f"R4 pixel object {obj['id']} dimensions exceed generated ABI")
+        if not 0 <= obj["componentCount"] <= 0xFF:
+            raise RuleError(f"R4 pixel object {obj['id']} component count exceeds generated ABI")
+        if not -0x8000 <= obj["supportOffsetQ16"] <= 0x7FFF:
+            raise RuleError(f"R4 pixel object {obj['id']} support exceeds generated ABI")
+        if not 0 <= obj["spriteDepthBiasMillionths"] <= 10000:
+            raise RuleError(f"R4 pixel object {obj['id']} sprite bias exceeds generated ABI")
+        if len(obj["maskRows"]) != obj["height"]:
+            raise RuleError(f"R4 pixel object {obj['id']} mask height is inconsistent")
+        if any(not 0 <= row < 1 << obj["width"] for row in obj["maskRows"]):
+            raise RuleError(f"R4 pixel object {obj['id']} mask row exceeds uint64_t width")
+        by_scope[(obj["layoutId"], obj["mapGroup"], obj["mapNumber"])].extend(obj["pixels"])
+        for pixel in obj["pixels"]:
+            for field in ("xQ32", "yQ32", "zQ32"):
+                if not -0x8000 <= pixel[field] <= 0x7FFF:
+                    raise RuleError(f"R4 pixel object {obj['id']} {field} exceeds int16_t")
+            for field in ("sizeXQ32", "sizeYQ32", "sizeZQ32", "sourceLayer",
+                          "sourceSubtile", "sourcePalette", "sourceColor", "sourceU",
+                          "sourceV", "sourceX", "sourceY", "component"):
+                if not 0 <= pixel[field] <= 0xFF:
+                    raise RuleError(f"R4 pixel object {obj['id']} {field} exceeds uint8_t")
+    # Connections translate source maps by whole cells. Test every modulo-eight
+    # translation because chunk ownership can change even though object geometry cannot.
+    validation_scopes = []
+    for scope, scoped_pixels in by_scope.items():
+        pixels = list(scoped_pixels)
+        if scope[1:] != (0xFF, 0xFF):
+            pixels.extend(by_scope.get((scope[0], 0xFF, 0xFF), ()))
+        validation_scopes.append((scope, pixels))
+    for scope, pixels in validation_scopes:
+        for shift_y in range(8):
+            for shift_x in range(8):
+                chunk_counts: Counter[tuple[int, int]] = Counter()
+                for pixel in pixels:
+                    chunk = ((pixel["xQ32"] + shift_x * 32
+                              + pixel["sizeXQ32"] // 2) // (8 * 32),
+                             (pixel["zQ32"] + shift_y * 32
+                              + pixel["sizeZQ32"] // 2) // (8 * 32))
+                    chunk_counts[chunk] += 1
+                    if chunk_counts[chunk] > 4096:
+                        raise RuleError(
+                            f"R4 pixel primitives exceed runtime chunk capacity at "
+                            f"{scope + chunk} after modulo translation {shift_x},{shift_y}")
+
+
 def _shape_geometry(class_name: str) -> tuple[str, str, str]:
     if class_name == "void" or class_name == "claim-only":
         return "hidden", class_name, "void"
@@ -859,6 +947,10 @@ def _shape_geometry(class_name: str) -> tuple[str, str, str]:
         return "cliff", archetype, "rock"
     if class_name in ("bridge", "deck", "rail", "support"):
         return "bridge", class_name, "wood"
+    if class_name in UPRIGHT_PIXEL_CLASSES:
+        return "flat", class_name, "ground"
+    if class_name == "relief":
+        return "flat", class_name, "ground"
     return "flat", class_name if class_name in ARCHETYPES else "ground", "ground"
 
 
@@ -1120,6 +1212,7 @@ def compile_data(root: Path) -> dict:
     source_names = set()
     terrain_offset = 0
     structure_catalog = []
+    pixel_object_catalog = []
     global_classifier = TileShapeClassifier(
         contextual_rules=contextual_rules, tileset_pins=pins,
         behavior_rules=behavior_rules, default_action=default_action)
@@ -1136,6 +1229,10 @@ def compile_data(root: Path) -> dict:
             wildcard = _apply_derived_voids(wildcard, wildcard_structures)
             wildcard_mapping = _register_candidates(
                 wildcard_structures, layout["numericId"], 0xFF, 0xFF, structure_catalog)
+            _register_pixel_objects(extract_layout(
+                wildcard_structures, layout_cells, wildcard,
+                pixel_summaries[layout["id"]], layout["width"], layout["height"]),
+                wildcard_mapping, layout["numericId"], 0xFF, 0xFF, pixel_object_catalog)
             for offset, (cell, shape) in enumerate(zip(layout_cells, wildcard)):
                 records.append(_terrain_record(
                     offset, cell, shape,
@@ -1167,9 +1264,17 @@ def compile_data(root: Path) -> dict:
                               for offset in (y * layout["width"] + x,)}
                 doors = frozenset(offset for offset, values in map_events.items()
                                   if any(value["class"] == "door" for value in values))
+                sign_events = ({offset: {"class": "signpost", "pool": "prop",
+                                         "source": "event:background-sign",
+                                         "evidence": ["event:background-sign"]}
+                                for offset, values in map_events.items()
+                                if any(value["kind"] == "background"
+                                       and value["class"] == "sign" for value in values)}
+                               if map_row["symbol"] in ("MAP_LITTLEROOT_TOWN",
+                                                        "MAP_OLDALE_TOWN") else {})
                 exact_structures = analyze_layout(
                     layout, layout_cells, exact, exact_patterns,
-                    pixel_summaries[layout["id"]], doors)
+                    pixel_summaries[layout["id"]], doors, sign_events)
                 exact = _apply_derived_voids(exact, exact_structures)
                 scope = map_catalog_by_symbol[map_row["symbol"]]
                 changed_structure = {
@@ -1184,6 +1289,11 @@ def compile_data(root: Path) -> dict:
                 exact_mapping = _register_candidates(
                     exact_structures, layout["numericId"], scope["group"], scope["number"],
                     structure_catalog, needed)
+                _register_pixel_objects(extract_layout(
+                    exact_structures, layout_cells, exact,
+                    pixel_summaries[layout["id"]], layout["width"], layout["height"]),
+                    exact_mapping, layout["numericId"], scope["group"], scope["number"],
+                    pixel_object_catalog)
                 for offset, (cell, shape, base) in enumerate(zip(layout_cells, exact, wildcard)):
                     if shape.as_dict() == base.as_dict() and offset not in changed_structure:
                         continue
@@ -1207,6 +1317,7 @@ def compile_data(root: Path) -> dict:
         catalog_row["terrainRecordCount"] = len(records)
         catalog_row["terrainRecords"] = records
         terrain_offset += len(records)
+    _validate_pixel_object_catalog(pixel_object_catalog)
     evidence_catalog = [{"id": index, "details": list(details)}
                         for index, details in enumerate(sorted(evidence_details), 1)]
     ambiguity_catalog = [
@@ -1222,6 +1333,7 @@ def compile_data(root: Path) -> dict:
                    "tilesetPins": pins, "contextualRules": contextual_rules,
                    "exactPatterns": patterns, "maps": map_catalog,
                    "structureCandidates": structure_catalog,
+                   "pixelObjects": pixel_object_catalog,
                    "evidenceDetails": evidence_catalog, "ambiguities": ambiguity_catalog,
                    "classifierSources": source_catalog}
     encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
@@ -1258,6 +1370,8 @@ struct DioramaGeneratedSampleV2 { uint8_t tilesetId, layer; uint16_t metatile; }
 struct DioramaGeneratedStructureV2 { uint16_t id, layoutId; uint8_t mapGroup, mapNumber, kind, pool, classId, claimOnly; int16_t priority, x, y; uint8_t width, height; uint32_t cellOffset, cellCount, visiblePixels, transparentPixels, blackPixels, pixelComponents; const char *owner, *source, *evidence; };
 struct DioramaGeneratedStructureCellV2 { uint16_t claimOwner, regionId; uint8_t doorFold, voidKind; };
 struct DioramaGeneratedStructureOverrideV2 { uint16_t layoutId, expectedMetatile; uint32_t cellOffset; uint8_t mapGroup, mapNumber; struct DioramaGeneratedStructureCellV2 cell; };
+struct DioramaGeneratedPixelObjectV2 { uint16_t id, structureId, supportStructureId, layoutId, groundMetatile, spriteDepthBiasMillionths; uint8_t mapGroup, mapNumber, kind, pool, classId, componentCount, width, height, groundMode; int16_t supportOffsetQ16; uint32_t pixelOffset, pixelCount, maskOffset, maskCount; };
+struct DioramaGeneratedPixelV2 { uint32_t sourceCellOffset; uint16_t expectedMetatile, expectedTileEntry, sourceTile; int16_t xQ32, yQ32, zQ32; uint8_t sizeXQ32, sizeYQ32, sizeZQ32, sourceLayer, sourceSubtile, sourcePalette, sourceColor, sourceU, sourceV, sourceX, sourceY, component; };
 
 extern const char gDioramaRulesSha256[65];
 extern const uint32_t gDioramaRulesGeneration;
@@ -1293,6 +1407,12 @@ extern const struct DioramaGeneratedStructureCellV2 gDioramaStructureOwnersV2[];
 extern const size_t gDioramaStructureOwnerV2Count;
 extern const struct DioramaGeneratedStructureOverrideV2 gDioramaStructureOverridesV2[];
 extern const size_t gDioramaStructureOverrideV2Count;
+extern const struct DioramaGeneratedPixelObjectV2 gDioramaPixelObjectsV2[];
+extern const size_t gDioramaPixelObjectV2Count;
+extern const struct DioramaGeneratedPixelV2 gDioramaPixelsV2[];
+extern const size_t gDioramaPixelV2Count;
+extern const uint64_t gDioramaPixelMaskRowsV2[];
+extern const size_t gDioramaPixelMaskRowV2Count;
 #endif
 """
 
@@ -1455,6 +1575,38 @@ def render_c(data: dict) -> str:
           "gDioramaStructureOwnerV2Count", packed_owner_rows)
     table("struct DioramaGeneratedStructureOverrideV2", "gDioramaStructureOverridesV2",
           "gDioramaStructureOverrideV2Count", override_rows)
+    pixel_rows, object_rows, pixel_mask_rows = [], [], []
+    pixel_kinds = {"cutout": 1, "relief": 2}
+    pixel_ground_modes = {"replacement": 1, "source-base": 2}
+    for row in data["pixelObjects"]:
+        pixel_offset = len(pixel_rows)
+        mask_offset = len(pixel_mask_rows)
+        pixel_mask_rows.extend(row["maskRows"])
+        for pixel in row["pixels"]:
+            pixel_rows.append(
+                f"{{ {pixel['sourceCellOffset']}, {pixel['expectedMetatile']}, "
+                f"{pixel['expectedTileEntry']}, {pixel['sourceTile']}, "
+                f"{pixel['xQ32']}, {pixel['yQ32']}, {pixel['zQ32']}, "
+                f"{pixel['sizeXQ32']}, {pixel['sizeYQ32']}, {pixel['sizeZQ32']}, "
+                f"{pixel['sourceLayer']}, {pixel['sourceSubtile']}, "
+                f"{pixel['sourcePalette']}, {pixel['sourceColor']}, "
+                f"{pixel['sourceU']}, {pixel['sourceV']}, {pixel['sourceX']}, "
+                f"{pixel['sourceY']}, {pixel['component']} }}")
+        object_rows.append(
+            f"{{ {row['id']}, {row['structureId']}, {row['supportStructureId']}, {row['layoutId']}, "
+            f"{row['groundMetatile']}, {row['spriteDepthBiasMillionths']}, "
+            f"{row['mapGroup']}, {row['mapNumber']}, "
+            f"{pixel_kinds[row['kind']]}, {pools[row['pool']]}, {class_ids[row['class']]}, "
+            f"{row['componentCount']}, {row['width']}, {row['height']}, "
+            f"{pixel_ground_modes[row['groundMode']]}, "
+            f"{row['supportOffsetQ16']}, {pixel_offset}, {len(row['pixels'])}, "
+            f"{mask_offset}, {len(row['maskRows'])} }}")
+    table("struct DioramaGeneratedPixelObjectV2", "gDioramaPixelObjectsV2",
+          "gDioramaPixelObjectV2Count", object_rows)
+    table("struct DioramaGeneratedPixelV2", "gDioramaPixelsV2",
+          "gDioramaPixelV2Count", pixel_rows)
+    table("uint64_t", "gDioramaPixelMaskRowsV2", "gDioramaPixelMaskRowV2Count",
+          [f"UINT64_C(0x{value:X})" for value in pixel_mask_rows])
     lines.extend(("#endif", ""))
     return "\n".join(lines)
 

@@ -73,5 +73,39 @@ int main(void)
                    resolved.rulePriority);
         }
     }
+    for (layoutIndex = 0; layoutIndex < gDioramaPixelObjectV2Count; layoutIndex++)
+    {
+        const struct DioramaGeneratedPixelObjectV2 *object = &gDioramaPixelObjectsV2[layoutIndex];
+        size_t count;
+        const struct DioramaGeneratedPixelV2 *pixels =
+            DioramaRules_GetPixelObjectPixels(object, &count);
+        size_t index;
+
+        if (pixels == NULL || count != object->pixelCount)
+            return 3;
+        printf("O\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%d\t%u\t%u\t%u\t%u",
+               object->id, object->structureId, object->supportStructureId,
+               object->layoutId, object->groundMetatile, object->spriteDepthBiasMillionths,
+               object->mapGroup, object->mapNumber, object->kind, object->pool,
+                object->classId, object->componentCount, object->width, object->height,
+                object->groundMode,
+               object->supportOffsetQ16, object->pixelCount, object->maskOffset,
+               object->maskCount);
+        for (index = 0; index < object->maskCount; index++)
+            printf("\t%llx", (unsigned long long)gDioramaPixelMaskRowsV2[object->maskOffset + index]);
+        putchar('\n');
+        for (index = 0; index < count; index++)
+        {
+            const struct DioramaGeneratedPixelV2 *pixel = &pixels[index];
+            printf("P\t%u\t%u\t%u\t%u\t%u\t%u\t%d\t%d\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\n",
+                   object->id, (unsigned)index, pixel->sourceCellOffset,
+                   pixel->expectedMetatile, pixel->expectedTileEntry, pixel->sourceTile,
+                   pixel->xQ32, pixel->yQ32, pixel->zQ32,
+                   pixel->sizeXQ32, pixel->sizeYQ32, pixel->sizeZQ32,
+                   pixel->sourceLayer, pixel->sourceSubtile, pixel->sourcePalette,
+                   pixel->sourceColor, pixel->sourceU, pixel->sourceV,
+                   pixel->sourceX, pixel->sourceY, pixel->component);
+        }
+    }
     return 0;
 }

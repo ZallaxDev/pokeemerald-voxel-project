@@ -9,6 +9,92 @@
 
 static int FindCell(const struct DioramaSceneSnapshot *snapshot,
                     const struct DioramaCellSnapshot *origin, int dx, int dy);
+static const struct DioramaGeneratedLayoutV2 *FindLayout(uint16_t layoutId);
+
+static const struct DioramaCellSnapshot *FindSourceCell(
+    const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *origin,
+    uint16_t layoutId, int16_t sourceX, int16_t sourceY)
+{
+    uint16_t i;
+
+    for (i = 0; i < snapshot->visibleCellCount && i < DIORAMA_MAX_VISIBLE_CELLS; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+
+        if ((cell->flags & DIORAMA_CELL_SOURCE_VALID)
+         && cell->sourceMapGroup == origin->sourceMapGroup
+         && cell->sourceMapNum == origin->sourceMapNum
+         && cell->sourceLayoutId == layoutId
+         && cell->sourceMapX == sourceX && cell->sourceMapY == sourceY)
+            return cell;
+    }
+    return NULL;
+}
+
+static bool PixelObjectMatchesSnapshot(const struct DioramaSceneSnapshot *snapshot,
+                                       const struct DioramaCellSnapshot *origin,
+                                       const struct DioramaGeneratedPixelObjectV2 *object)
+{
+    const struct DioramaGeneratedLayoutV2 *layout = FindLayout(object->layoutId);
+    const struct DioramaGeneratedPixelV2 *pixels;
+    size_t count;
+    size_t i;
+    uint32_t previousOffset = UINT32_MAX;
+
+    if (layout == NULL)
+        return false;
+    pixels = DioramaRules_GetPixelObjectPixels(object, &count);
+    if (pixels == NULL)
+        return false;
+    for (i = 0; i < count; i++)
+    {
+        if (pixels[i].sourceCellOffset == previousOffset)
+            continue;
+        previousOffset = pixels[i].sourceCellOffset;
+        const struct DioramaCellSnapshot *cell = FindSourceCell(
+            snapshot, origin, object->layoutId,
+            pixels[i].sourceCellOffset % layout->width,
+            pixels[i].sourceCellOffset / layout->width);
+
+        if (cell != NULL && cell->metatileId != pixels[i].expectedMetatile)
+            return false;
+    }
+    return true;
+}
+
+static bool PixelObjectSupportMatchesSnapshot(
+    const struct DioramaSceneSnapshot *snapshot, const struct DioramaResolvedCell *resolvedCells,
+    uint16_t count, const struct DioramaCellSnapshot *origin,
+    const struct DioramaGeneratedPixelObjectV2 *object)
+{
+    const struct DioramaGeneratedStructureV2 *support;
+    const struct DioramaGeneratedLayoutV2 *layout;
+    uint16_t i;
+    uint32_t cellIndex;
+
+    if (object->supportStructureId == 0)
+        return true;
+    for (i = 0; i < count; i++)
+        if (resolvedCells[i].structureId == object->supportStructureId
+         && snapshot->cells[i].sourceMapGroup == origin->sourceMapGroup
+         && snapshot->cells[i].sourceMapNum == origin->sourceMapNum)
+            return true;
+    support = DioramaRules_GetStructure(object->supportStructureId);
+    layout = support != NULL ? FindLayout(support->layoutId) : NULL;
+    if (support == NULL || layout == NULL
+     || support->cellOffset > gDioramaStructureCellV2Count
+     || support->cellCount > gDioramaStructureCellV2Count - support->cellOffset)
+        return false;
+    for (cellIndex = 0; cellIndex < support->cellCount; cellIndex++)
+    {
+        uint32_t offset = gDioramaStructureCellsV2[support->cellOffset + cellIndex];
+
+        if (FindSourceCell(snapshot, origin, support->layoutId,
+                           offset % layout->width, offset / layout->width) != NULL)
+            return false;
+    }
+    return true;
+}
 
 static const struct DioramaGeneratedLayoutV2 *FindLayout(uint16_t layoutId)
 {
@@ -207,6 +293,8 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
         structure = DioramaRules_GetStructure(resolved->structureId);
         if (structure != NULL)
         {
+            const struct DioramaGeneratedPixelObjectV2 *pixelObject;
+
             resolved->structureTemplateId = structure->kind == DIORAMA_OWNER_TEMPLATE
                                           ? structure->id : 0;
             resolved->structureX = structure->x;
@@ -217,6 +305,14 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
             resolved->structureLocalY = cell->sourceMapY - structure->y;
             resolved->structureOwnerKind = structure->kind;
             resolved->rulePriority = structure->priority;
+            pixelObject = DioramaRules_FindPixelObject(layout->id,
+                cell->sourceMapGroup, cell->sourceMapNum, structure->id);
+            if (pixelObject != NULL)
+            {
+                resolved->pixelObjectId = pixelObject->id;
+                resolved->groundMode = pixelObject->groundMode;
+                resolved->baseMetatileId = pixelObject->groundMetatile;
+            }
         }
     }
 }
@@ -431,6 +527,45 @@ const struct DioramaGeneratedStructureV2 *DioramaRules_GetStructure(uint16_t id)
         && gDioramaStructuresV2[id - 1].id == id ? &gDioramaStructuresV2[id - 1] : NULL;
 }
 
+const struct DioramaGeneratedPixelObjectV2 *DioramaRules_GetPixelObject(uint16_t id)
+{
+    return id != 0 && id <= gDioramaPixelObjectV2Count
+        && gDioramaPixelObjectsV2[id - 1].id == id ? &gDioramaPixelObjectsV2[id - 1] : NULL;
+}
+
+const struct DioramaGeneratedPixelObjectV2 *DioramaRules_FindPixelObject(
+    uint16_t layoutId, uint8_t mapGroup, uint8_t mapNum, uint16_t structureId)
+{
+    const struct DioramaGeneratedPixelObjectV2 *fallback = NULL;
+    size_t i;
+
+    for (i = 0; i < gDioramaPixelObjectV2Count; i++)
+    {
+        const struct DioramaGeneratedPixelObjectV2 *object = &gDioramaPixelObjectsV2[i];
+
+        if (object->layoutId != layoutId || object->structureId != structureId)
+            continue;
+        if (object->mapGroup == mapGroup && object->mapNumber == mapNum)
+            return object;
+        if (object->mapGroup == UINT8_MAX && object->mapNumber == UINT8_MAX)
+            fallback = object;
+    }
+    return fallback;
+}
+
+const struct DioramaGeneratedPixelV2 *DioramaRules_GetPixelObjectPixels(
+    const struct DioramaGeneratedPixelObjectV2 *object, size_t *count)
+{
+    if (count != NULL)
+        *count = 0;
+    if (object == NULL || object->pixelOffset > gDioramaPixelV2Count
+     || object->pixelCount > gDioramaPixelV2Count - object->pixelOffset)
+        return NULL;
+    if (count != NULL)
+        *count = object->pixelCount;
+    return &gDioramaPixelsV2[object->pixelOffset];
+}
+
 const char *DioramaRules_StructureKindName(uint8_t kind)
 {
     static const char *const sNames[] = {
@@ -522,6 +657,32 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
             resolvedCells[i].evidenceFlags |= DIORAMA_EVIDENCE_ELEVATION;
         if (cell->layerType != 0)
             resolvedCells[i].evidenceFlags |= DIORAMA_EVIDENCE_LAYER;
+    }
+    for (i = 0; i < count; i++)
+    {
+        const struct DioramaGeneratedPixelObjectV2 *object =
+            DioramaRules_GetPixelObject(resolvedCells[i].pixelObjectId);
+        uint16_t previous;
+        uint16_t other;
+
+        if (object == NULL)
+            continue;
+        for (previous = 0; previous < i; previous++)
+            if (resolvedCells[previous].pixelObjectId == object->id)
+                break;
+        if (previous < i)
+            continue;
+        if (PixelObjectMatchesSnapshot(snapshot, &snapshot->cells[i], object)
+         && PixelObjectSupportMatchesSnapshot(snapshot, resolvedCells, count,
+                                               &snapshot->cells[i], object))
+            continue;
+        for (other = 0; other < count; other++)
+            if (resolvedCells[other].pixelObjectId == object->id)
+            {
+                resolvedCells[other].pixelObjectId = 0;
+                resolvedCells[other].groundMode = 0;
+                resolvedCells[other].baseMetatileId = DIORAMA_MATERIAL_METATILE_SELF;
+            }
     }
     for (i = 0; i < count; i++)
         resolvedCells[i].effectiveElevation = snapshot->cells[i].elevation > 0

@@ -72,6 +72,96 @@
       "action": { "archetype": "counter", "pool": "furniture" }
     },
     {
+      "id": "generic-building-potted-plant",
+      "dimensions": { "width": 1, "height": 2 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_GenericBuilding" },
+      "cells": [[656], [664]],
+      "priority": 230,
+      "claimMask": ["1", "1"],
+      "action": { "archetype": "cutout", "pool": "prop", "groundPolicy": { "mode": "manual", "metatile": 547 } }
+    },
+    {
+      "id": "generic-building-left-stool",
+      "dimensions": { "width": 1, "height": 1 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_GenericBuilding" },
+      "cells": [[555]],
+      "priority": 220,
+      "claimMask": ["1"],
+      "action": { "archetype": "cutout", "pool": "prop", "spriteDepthBias": 0.0005 }
+    },
+    {
+      "id": "generic-building-right-stool",
+      "dimensions": { "width": 1, "height": 1 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_GenericBuilding" },
+      "cells": [[556]],
+      "priority": 220,
+      "claimMask": ["1"],
+      "action": { "archetype": "cutout", "pool": "prop", "spriteDepthBias": 0.0005 }
+    },
+    {
+      "id": "generic-building-table-relief",
+      "dimensions": { "width": 3, "height": 2 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_GenericBuilding" },
+      "cells": [[744, 745, 746], [752, 753, 754]],
+      "priority": 210,
+      "claimMask": ["111", "111"],
+      "action": { "archetype": "relief", "pool": "furniture" }
+    },
+    {
+      "id": "brendan-tv-support",
+      "dimensions": { "width": 1, "height": 3 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_BrendansMaysHouse" },
+      "cells": [[578], [2], [586]],
+      "priority": 225,
+      "claimMask": ["1", "0", "0"],
+      "action": { "archetype": "cutout", "pool": "furniture", "groundOffset": 1.5, "depthOffset": 1.0, "thickness": 0.5 }
+    },
+    {
+      "id": "brendan-tv-cutout",
+      "dimensions": { "width": 1, "height": 3 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_BrendansMaysHouse" },
+      "cells": [[578], [2], [586]],
+      "priority": 224,
+      "claimMask": ["0", "1", "0"],
+      "action": { "archetype": "console", "pool": "prop", "groundOffset": 0.5, "thickness": 0.5, "groundPolicy": { "mode": "manual", "metatile": 513 } }
+    },
+    {
+      "id": "brendan-tv-base",
+      "dimensions": { "width": 1, "height": 3 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_BrendansMaysHouse" },
+      "cells": [[578], [2], [586]],
+      "priority": 223,
+      "claimMask": ["0", "0", "1"],
+      "action": { "archetype": "cutout", "pool": "furniture", "depthOffset": -1.0, "thickness": 0.5, "pixelRows": [0, 8], "objectGroundMode": "replacement", "groundPolicy": { "mode": "manual", "metatile": 558 } }
+    },
+    {
+      "id": "may-tv-support",
+      "dimensions": { "width": 1, "height": 3 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_BrendansMaysHouse" },
+      "cells": [[582], [2], [691]],
+      "priority": 225,
+      "claimMask": ["1", "0", "0"],
+      "action": { "archetype": "cutout", "pool": "furniture", "groundOffset": 1.5, "depthOffset": 1.0, "thickness": 0.5 }
+    },
+    {
+      "id": "may-tv-cutout",
+      "dimensions": { "width": 1, "height": 3 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_BrendansMaysHouse" },
+      "cells": [[582], [2], [691]],
+      "priority": 224,
+      "claimMask": ["0", "1", "0"],
+      "action": { "archetype": "console", "pool": "prop", "groundOffset": 0.5, "thickness": 0.5, "groundPolicy": { "mode": "manual", "metatile": 513 } }
+    },
+    {
+      "id": "may-tv-base",
+      "dimensions": { "width": 1, "height": 3 },
+      "tilesets": { "primary": "gTileset_Building", "secondary": "gTileset_BrendansMaysHouse" },
+      "cells": [[582], [2], [691]],
+      "priority": 223,
+      "claimMask": ["0", "0", "1"],
+      "action": { "archetype": "cutout", "pool": "furniture", "depthOffset": -1.0, "thickness": 0.5, "pixelRows": [0, 8], "objectGroundMode": "replacement", "groundPolicy": { "mode": "manual", "metatile": 689 } }
+    },
+    {
       "id": "petalburg-isolated-signpost",
       "dimensions": { "width": 3, "height": 3 },
       "tilesets": { "primary": "gTileset_General", "secondary": "gTileset_Petalburg" },

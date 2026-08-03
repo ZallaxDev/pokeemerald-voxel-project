@@ -198,7 +198,7 @@ test-diorama: test-diorama-snapshot test-diorama-connection test-diorama-transit
 
 test-diorama-red-parity: test-diorama test-diorama-survey
 	python3 tools/diorama_red_parity/test_gate.py
-	python3 tools/diorama_red_parity/check_red_parity_gate.py --phase R3 --require-approved-previous
+	python3 tools/diorama_red_parity/check_red_parity_gate.py --phase R4 --require-approved-previous
 
 test-diorama-survey:
 	python3 tools/diorama_survey/test_survey.py
@@ -276,6 +276,7 @@ test-diorama-rules: tests/diorama/test_rules.c $(DIORAMA_RULE_TEST_DEPS)
 	python3 tools/diorama_rules/test_compile_rules.py
 	python3 tools/diorama_rules/test_tile_shape.py
 	python3 tools/diorama_rules/test_structures.py
+	python3 tools/diorama_rules/test_pixel_objects.py
 	python3 tools/diorama_rules/test_rules_parity.py
 	python3 tools/diorama_rules/test_catalog.py
 	python3 tools/diorama_rules/test_occupancy_model.py

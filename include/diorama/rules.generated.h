@@ -18,6 +18,8 @@ struct DioramaGeneratedSampleV2 { uint8_t tilesetId, layer; uint16_t metatile; }
 struct DioramaGeneratedStructureV2 { uint16_t id, layoutId; uint8_t mapGroup, mapNumber, kind, pool, classId, claimOnly; int16_t priority, x, y; uint8_t width, height; uint32_t cellOffset, cellCount, visiblePixels, transparentPixels, blackPixels, pixelComponents; const char *owner, *source, *evidence; };
 struct DioramaGeneratedStructureCellV2 { uint16_t claimOwner, regionId; uint8_t doorFold, voidKind; };
 struct DioramaGeneratedStructureOverrideV2 { uint16_t layoutId, expectedMetatile; uint32_t cellOffset; uint8_t mapGroup, mapNumber; struct DioramaGeneratedStructureCellV2 cell; };
+struct DioramaGeneratedPixelObjectV2 { uint16_t id, structureId, supportStructureId, layoutId, groundMetatile, spriteDepthBiasMillionths; uint8_t mapGroup, mapNumber, kind, pool, classId, componentCount, width, height, groundMode; int16_t supportOffsetQ16; uint32_t pixelOffset, pixelCount, maskOffset, maskCount; };
+struct DioramaGeneratedPixelV2 { uint32_t sourceCellOffset; uint16_t expectedMetatile, expectedTileEntry, sourceTile; int16_t xQ32, yQ32, zQ32; uint8_t sizeXQ32, sizeYQ32, sizeZQ32, sourceLayer, sourceSubtile, sourcePalette, sourceColor, sourceU, sourceV, sourceX, sourceY, component; };
 
 extern const char gDioramaRulesSha256[65];
 extern const uint32_t gDioramaRulesGeneration;
@@ -53,4 +55,10 @@ extern const struct DioramaGeneratedStructureCellV2 gDioramaStructureOwnersV2[];
 extern const size_t gDioramaStructureOwnerV2Count;
 extern const struct DioramaGeneratedStructureOverrideV2 gDioramaStructureOverridesV2[];
 extern const size_t gDioramaStructureOverrideV2Count;
+extern const struct DioramaGeneratedPixelObjectV2 gDioramaPixelObjectsV2[];
+extern const size_t gDioramaPixelObjectV2Count;
+extern const struct DioramaGeneratedPixelV2 gDioramaPixelsV2[];
+extern const size_t gDioramaPixelV2Count;
+extern const uint64_t gDioramaPixelMaskRowsV2[];
+extern const size_t gDioramaPixelMaskRowV2Count;
 #endif

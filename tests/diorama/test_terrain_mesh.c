@@ -613,6 +613,43 @@ static void TestFrustum(void)
     assert(!DioramaTerrain_IsBoundsVisible(&heightEdge, 0.0f, 0.0f, 1.22173048f, 130.0f));
 }
 
+static void TestPixelPrismProvenanceAndSupport(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh first;
+    struct DioramaTerrainMesh second;
+
+    memset(&input, 0, sizeof(input));
+    input.rulesGeneration = 7;
+    input.pixelCount = 1;
+    input.pixels[0].xQ32 = 16;
+    input.pixels[0].yQ32 = 24;
+    input.pixels[0].zQ32 = 16;
+    input.pixels[0].sizeXQ32 = 2;
+    input.pixels[0].sizeYQ32 = 2;
+    input.pixels[0].sizeZQ32 = 2;
+    input.pixels[0].rgba = UINT32_C(0xFF332211);
+    input.pixels[0].sourceCellOffset = 12;
+    input.pixels[0].objectId = 3;
+    input.pixels[0].structureId = 9;
+    input.pixels[0].expectedMetatile = 2;
+    input.pixels[0].expectedTileEntry = 0x412;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &first));
+    assert(first.vertexCount == 36);
+    assert(first.featureFaceCount == 6);
+    assert(first.bounds.minY == 0.75f);
+    assert(first.bounds.maxY == 0.8125f);
+    assert(sVertices[0].textureLayer == DIORAMA_TERRAIN_TEXTURE_VERTEX_COLOR);
+    assert(sVertices[0].color == UINT32_C(0xFF332211));
+    assert(sVertices[12].shade == 1.0f && sVertices[24].shade == 1.0f);
+    input.pixels[0].rgba ^= 1;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices,
+                                     DIORAMA_TERRAIN_MAX_VERTICES, &second));
+    assert(first.geometryHash != second.geometryHash);
+    assert(!DioramaTerrain_BuildChunk(&input, sVertices, 35, &second));
+}
+
 int main(void)
 {
     TestFloorDiv();
@@ -637,6 +674,7 @@ int main(void)
     TestHiddenShape();
     TestSpanShellIntervalsAndOwnership();
     TestChunkSeamAndHaloInvalidation();
+    TestPixelPrismProvenanceAndSupport();
     TestFrustum();
     puts("terrain mesh tests passed");
     return 0;

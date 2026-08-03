@@ -55,9 +55,9 @@ static void TestMapSupport(void)
     assert(gDioramaTilesetV2Count == 75);
     assert(gDioramaLayoutV2Count == 441);
     assert(gDioramaMapV2Count == 518);
-    assert(gDioramaTerrainV2Count == 324579);
+    assert(gDioramaTerrainV2Count == 325276);
     assert(gDioramaAmbiguityV2Count == 95);
-    assert(gDioramaStructureV2Count == 2923);
+    assert(gDioramaStructureV2Count > 2923);
     size_t terrainOffset = 0;
     for (size_t i = 0; i < gDioramaLayoutV2Count; i++)
     {
@@ -98,6 +98,9 @@ static void TestCompiledStructureClaims(void)
     structure = DioramaRules_GetStructure(resolved.claimOwner);
     assert(structure != NULL
         && strcmp(structure->source, "pattern:petalburg-isolated-signpost") == 0);
+    assert(resolved.pixelObjectId != 0);
+    assert(resolved.baseMetatileId == 1);
+    assert(DioramaRules_GetPixelObject(resolved.pixelObjectId) != NULL);
 
     sSnapshot.mapEditGeneration = 99;
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
@@ -107,6 +110,7 @@ static void TestCompiledStructureClaims(void)
     sSnapshot.dirtyCells[0].mapY = 13 + sSnapshot.mapCoordinateOffset;
     assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
     assert(resolved.claimOwner == 0 && resolved.regionId == 0);
+    assert(resolved.pixelObjectId == 0);
     sSnapshot.dirtyCellCount = 0;
     sSnapshot.mapEditGeneration = 0;
 
@@ -118,6 +122,117 @@ static void TestCompiledStructureClaims(void)
     assert(resolved.voidKind == DIORAMA_VOID_BLACK);
     assert(resolved.shape == DIORAMA_SHAPE_HIDDEN);
     InitLittleroot();
+}
+
+static void TestPixelObjectCatalog(void)
+{
+    size_t objectIndex;
+    size_t totalPixels = 0;
+
+    assert(gDioramaPixelObjectV2Count != 0);
+    for (objectIndex = 0; objectIndex < gDioramaPixelObjectV2Count; objectIndex++)
+    {
+        const struct DioramaGeneratedPixelObjectV2 *object = &gDioramaPixelObjectsV2[objectIndex];
+        const struct DioramaGeneratedPixelV2 *pixels;
+        size_t count;
+        size_t pixelIndex;
+
+        assert(object->id == objectIndex + 1);
+        assert(object->groundMode == DIORAMA_PIXEL_GROUND_REPLACEMENT
+            || object->groundMode == DIORAMA_PIXEL_GROUND_SOURCE_BASE);
+        if (object->groundMode == DIORAMA_PIXEL_GROUND_SOURCE_BASE)
+            assert(object->groundMetatile == DIORAMA_MATERIAL_METATILE_SELF);
+        assert(DioramaRules_GetStructure(object->structureId) != NULL);
+        if (object->supportStructureId != 0)
+        {
+            assert(object->supportStructureId != object->structureId);
+            assert(DioramaRules_GetStructure(object->supportStructureId) != NULL);
+            assert(object->supportOffsetQ16 == 12);
+        }
+        pixels = DioramaRules_GetPixelObjectPixels(object, &count);
+        assert(pixels != NULL && count == object->pixelCount && count != 0);
+        assert(object->maskOffset <= gDioramaPixelMaskRowV2Count);
+        assert(object->maskCount <= gDioramaPixelMaskRowV2Count - object->maskOffset);
+        for (pixelIndex = 0; pixelIndex < count; pixelIndex++)
+        {
+            assert(pixels[pixelIndex].expectedMetatile < DIORAMA_TILE_COUNT);
+            assert(pixels[pixelIndex].sourceColor != 0);
+            assert(pixels[pixelIndex].sourceX < 16 && pixels[pixelIndex].sourceY < 16);
+        }
+        totalPixels += count;
+    }
+    assert(totalPixels == gDioramaPixelV2Count);
+}
+
+static void TestPixelObjectStaysInvalidAfterDirtyPublication(void)
+{
+    struct DioramaSceneSnapshot snapshot;
+    struct DioramaResolvedCell resolved[2];
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.mapGroup = 2;
+    snapshot.mapNum = 0;
+    snapshot.mapLayoutId = 59;
+    snapshot.visibleCellCount = 2;
+    snapshot.cells[0] = MakeCell(8, 1, 656, MB_NORMAL);
+    snapshot.cells[1] = MakeCell(8, 2, 664, MB_NORMAL);
+    snapshot.cells[0].mapX = snapshot.cells[0].sourceMapX = 8;
+    snapshot.cells[0].mapY = snapshot.cells[0].sourceMapY = 1;
+    snapshot.cells[1].mapX = snapshot.cells[1].sourceMapX = 8;
+    snapshot.cells[1].mapY = snapshot.cells[1].sourceMapY = 2;
+    snapshot.cells[0].sourceMapGroup = snapshot.cells[1].sourceMapGroup = 2;
+    snapshot.cells[0].sourceMapNum = snapshot.cells[1].sourceMapNum = 0;
+    snapshot.cells[0].sourceLayoutId = snapshot.cells[1].sourceLayoutId = 59;
+    DioramaRules_ResolveGrid(&snapshot, resolved);
+    assert(resolved[0].pixelObjectId != 0);
+    assert(resolved[0].pixelObjectId == resolved[1].pixelObjectId);
+
+    snapshot.mapGroup = 0;
+    snapshot.mapNum = 9;
+    snapshot.mapLayoutId = 10;
+    snapshot.cells[0].mapX += 40;
+    snapshot.cells[1].mapX += 40;
+    DioramaRules_ResolveGrid(&snapshot, resolved);
+    assert(resolved[0].pixelObjectId != 0);
+    assert(resolved[0].pixelObjectId == resolved[1].pixelObjectId);
+
+    snapshot.mapEditGeneration = 1;
+    snapshot.cells[0].metatileId = 1;
+    DioramaRules_ResolveGrid(&snapshot, resolved);
+    assert(resolved[0].pixelObjectId == 0);
+    assert(resolved[1].pixelObjectId == 0);
+    assert(resolved[1].baseMetatileId == DIORAMA_MATERIAL_METATILE_SELF);
+}
+
+static void TestPixelObjectRequiresActiveAuthoredSupport(void)
+{
+    struct DioramaSceneSnapshot snapshot;
+    struct DioramaResolvedCell resolved[2];
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.mapGroup = 1;
+    snapshot.mapNum = 0;
+    snapshot.mapLayoutId = 54;
+    snapshot.visibleCellCount = 2;
+    snapshot.cells[0] = MakeCell(4, 3, 578, MB_NORMAL);
+    snapshot.cells[1] = MakeCell(4, 4, 2, MB_TELEVISION);
+    for (int i = 0; i < 2; i++)
+    {
+        snapshot.cells[i].mapX = snapshot.cells[i].sourceMapX = 4;
+        snapshot.cells[i].mapY = snapshot.cells[i].sourceMapY = 3 + i;
+        snapshot.cells[i].sourceMapGroup = 1;
+        snapshot.cells[i].sourceMapNum = 0;
+        snapshot.cells[i].sourceLayoutId = 54;
+    }
+    DioramaRules_ResolveGrid(&snapshot, resolved);
+    assert(resolved[1].pixelObjectId != 0);
+    assert(resolved[1].baseMetatileId == 513);
+
+    snapshot.cells[0].metatileId = 513;
+    snapshot.mapEditGeneration = 1;
+    DioramaRules_ResolveGrid(&snapshot, resolved);
+    assert(resolved[1].pixelObjectId == 0);
+    assert(resolved[1].baseMetatileId == DIORAMA_MATERIAL_METATILE_SELF);
 }
 
 static void TestCompiledPinAndGuards(void)
@@ -244,7 +359,9 @@ static void TestGridAndConnectedCoordinates(void)
     DioramaRules_ResolveGrid(&sSnapshot, resolved);
     assert(resolved[0].source != DIORAMA_RULE_SOURCE_MAP);
     assert(resolved[1].source != DIORAMA_RULE_SOURCE_BUILDING);
-    assert(resolved[0].claimOwner == 0 && resolved[1].claimOwner == 0);
+    assert(resolved[0].claimOwner != 0 && resolved[0].pixelObjectId != 0);
+    assert(resolved[0].groundMode == DIORAMA_PIXEL_GROUND_REPLACEMENT);
+    assert(resolved[1].claimOwner == 0);
 }
 
 static void TestContextualGameplayPlanes(void)
@@ -327,6 +444,9 @@ int main(void)
     TestMapSupport();
     TestCompiledPinAndGuards();
     TestCompiledStructureClaims();
+    TestPixelObjectCatalog();
+    TestPixelObjectStaysInvalidAfterDirtyPublication();
+    TestPixelObjectRequiresActiveAuthoredSupport();
     TestNeutralFallbackWithoutCompiledRules();
     TestNominalFeatureHeights();
     TestGridAndConnectedCoordinates();

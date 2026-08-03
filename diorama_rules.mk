@@ -11,7 +11,9 @@ DIORAMA_RULE_COMPILER_DEPS := tools/diorama_rules/building_profiles.py \
 	tools/diorama_rules/catalog.py \
 	tools/diorama_rules/emerald_compositor.py \
 	tools/diorama_rules/occupancy_model.py \
+	tools/diorama_rules/pixel_objects.py \
 	tools/diorama_rules/profiles.py \
+	tools/diorama_rules/structures.py \
 	tools/diorama_rules/tile_shape.py
 DIORAMA_RULE_SOURCE := src/data/diorama/diorama_rules.generated.c
 DIORAMA_RULE_HEADER := include/diorama/rules.generated.h

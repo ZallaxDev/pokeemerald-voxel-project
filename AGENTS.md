@@ -33,14 +33,35 @@
 
 ## Build and verification
 
+- Visual geometry work always uses a two-level workflow. While a phase is in
+  `implementation`, run only focused tests for the changed resolver/mesher and build the
+  Diorama target needed for a short user visual check. Do not run the full parity suite,
+  build classic, calculate release hashes, or publish gate evidence after every visual
+  attempt.
+- Automatic tests prove safety properties such as deterministic IR, provenance, ABI,
+  capacity, invalidation, Python/C parity, and classic fallback. They do not prove that
+  geometry is visible, correctly oriented, sufficiently deep, or visually faithful. A
+  golden mask only freezes its input and is not visual approval.
+- The user exclusively performs visual checks. Keep the phase in `implementation` after
+  a failed check, record the finding, and invalidate candidate hashes/evidence. Once the
+  user confirms that the reduced visual check is correct, run the complete phase suite,
+  both classic and Diorama builds, and the final regression procedure before requesting
+  explicit gate approval.
+- Prefer the smallest useful feedback loop: one object/class, one affected scenario, one
+  Diorama build. Never spend minutes rerunning corpus-wide checks when they cannot answer
+  the current visual question.
 - CachyOS/Arch diorama build (validated): on `feature/diorama`, install `base-devel`, `pkgconf`, `sdl2_image`, `sdl2_mixer`, `lib32-sdl2-compat`, `lib32-sdl2_mixer`, `lib32-libpng`, `lib32-zlib-ng-compat`, `lib32-libglvnd`, and `lib32-mesa`. `lib32-sdl2_image` is currently only available from the Arch archive: `sudo pacman -U https://archive.archlinux.org/packages/l/lib32-sdl2_image/lib32-sdl2_image-2.8.12-1-x86_64.pkg.tar.zst`.
 - Build and run the CachyOS diorama target with `make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j"$(nproc)" && ./pokeemerald`. The `PKG_CONFIG_32_PATH` override is required because this branch defaults to Ubuntu's `/usr/lib/i386-linux-gnu/pkgconfig` path.
 - The matching classic CachyOS build omits `DIORAMA=1`: `make -f Makefile_pc NATIVE_LINUX=1 PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig -j"$(nproc)" && ./pokeemerald`.
 - Native Linux desktop: `make -f Makefile_pc linux -j4`, then `./pokeemerald`. This is a 32-bit build and needs a multilib compiler plus 32-bit SDL2 and SDL2_image development packages.
 - Windows from MSYS2 Git Bash: `make -f Makefile_pc -j4 PREFIX= CPP=cpp SDL_DIR=/mingw32 TMP="C:/Users/<you>/AppData/Local/Temp" TEMP="C:/Users/<you>/AppData/Local/Temp"`. Pass `TMP` and `TEMP` as make variables; do not set `TMPDIR` to a Windows path. The current Makefile invokes `magick` to generate missing border BMPs.
 - Android setup is one-time: `git submodule update --init --recursive`, then `git -C android/SDL2 apply ../patches/sdl2-android-lifecycle.patch`. Build with `android/SDL2/android-project/gradlew -p android :app:assembleDebug` after setting `JAVA_HOME` and `ANDROID_HOME`.
-- There is currently no repository-level lint, unit-test, or CI command. For changes now, at minimum build the affected desktop target and smoke-test launch, input, audio, save/load, resize, and fullscreen as applicable.
-- Once `DIORAMA` exists, every renderer change must build both classic and diorama paths; the planned Linux diorama command is `make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1`, but it is not valid until the flag is implemented.
+- There is currently no repository-level lint, unit-test, or CI command. During visual
+  iteration, build the affected Diorama target and run only the relevant focused checks.
+  Launch/input/audio/save/load/resize/fullscreen and broad smoke tests belong to candidate
+  closure unless the current change directly affects them.
+- Every renderer change must eventually build both classic and Diorama paths before gate
+  approval, but not on every failed visual iteration.
 - Do not commit `build/`, executables, DLLs, generated border BMPs, `pokeemerald.sav`, `pokeemerald.cfg`, or downloaded `sounds/cries/`. Preserve committed `sounds/steps/` and `sounds/interacts/` assets.
 
 ## Reference map

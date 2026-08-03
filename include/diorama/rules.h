@@ -2,11 +2,14 @@
 #define GUARD_DIORAMA_RULES_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "diorama/scene_snapshot.h"
 
 struct DioramaGeneratedStructureV2;
+struct DioramaGeneratedPixelObjectV2;
+struct DioramaGeneratedPixelV2;
 
 enum DioramaShape
 {
@@ -231,6 +234,18 @@ enum DioramaVoidKind
     DIORAMA_VOID_BLACK
 };
 
+enum DioramaPixelObjectKind
+{
+    DIORAMA_PIXEL_OBJECT_CUTOUT = 1,
+    DIORAMA_PIXEL_OBJECT_RELIEF = 2
+};
+
+enum DioramaPixelObjectGroundMode
+{
+    DIORAMA_PIXEL_GROUND_REPLACEMENT = 1,
+    DIORAMA_PIXEL_GROUND_SOURCE_BASE = 2
+};
+
 enum DioramaCameraProfile
 {
     DIORAMA_CAMERA_EXTERIOR,
@@ -282,6 +297,7 @@ struct DioramaResolvedCell
     uint16_t regionId;
     int16_t rulePriority;
     uint16_t structureId;
+    uint16_t pixelObjectId;
     uint16_t structureTemplateId;
     int16_t structureX;
     int16_t structureY;
@@ -381,6 +397,11 @@ const char *DioramaRules_ClassifierSourceName(uint16_t sourceId);
 const char *DioramaRules_EvidenceDetails(uint16_t detailsId);
 const char *DioramaRules_AmbiguityDetails(uint16_t detailsId);
 const struct DioramaGeneratedStructureV2 *DioramaRules_GetStructure(uint16_t id);
+const struct DioramaGeneratedPixelObjectV2 *DioramaRules_GetPixelObject(uint16_t id);
+const struct DioramaGeneratedPixelObjectV2 *DioramaRules_FindPixelObject(
+    uint16_t layoutId, uint8_t mapGroup, uint8_t mapNum, uint16_t structureId);
+const struct DioramaGeneratedPixelV2 *DioramaRules_GetPixelObjectPixels(
+    const struct DioramaGeneratedPixelObjectV2 *object, size_t *count);
 const char *DioramaRules_StructureKindName(uint8_t kind);
 const struct DioramaGeneratedBuildingTemplate *DioramaRules_GetBuildingTemplate(uint16_t id);
 bool DioramaRules_IsMapSupported(uint8_t mapGroup, uint8_t mapNum, uint16_t layoutId);
