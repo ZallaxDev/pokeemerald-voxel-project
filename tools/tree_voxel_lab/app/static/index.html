@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emerald Tree Voxel Lab</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <!-- Local static vendor libraries with cache buster -->
+  <script src="/static/vendor/three.min.js?v=4"></script>
+  <script src="/static/vendor/OrbitControls.js?v=4"></script>
+</head>
+<body>
+  <div id="app-container">
+    <!-- Top Header Bar -->
+    <header id="main-header">
+      <div class="brand">
+        <span class="icon">🌲</span>
+        <h1>Emerald Tree Voxel Lab</h1>
+        <span class="badge">v1.0.0</span>
+      </div>
+      <div class="header-actions">
+        <button id="btn-load-synthetic" class="btn btn-accent">⚡ Cargar Ejemplo Sintético</button>
+        <button id="btn-open-project" class="btn">📂 Abrir Proyecto JSON</button>
+        <button id="btn-save-project" class="btn">💾 Guardar Proyecto</button>
+        <button id="btn-export-vox" class="btn btn-success">📦 Exportar .VOX</button>
+        <button id="btn-export-obj" class="btn">🧊 Exportar .OBJ/.MTL</button>
+        <button id="btn-export-zip" class="btn">📊 Paquete Diagnóstico (ZIP)</button>
+        <input type="file" id="file-input-project" accept=".json" style="display:none;">
+      </div>
+    </header>
+
+    <!-- Main Workbench 4-Panel Grid -->
+    <main id="workbench">
+
+      <!-- PANEL 1: TILESET PICKER & PALETTE (LEFT) -->
+      <section class="panel" id="panel-tileset">
+        <div class="panel-header">
+          <h2>1. Selector de Tilesets del Juego</h2>
+          <div class="zoom-controls">
+            <button id="btn-zoom-tileset-out" class="btn btn-xs">🔍-</button>
+            <span id="label-zoom-tileset">100%</span>
+            <button id="btn-zoom-tileset-in" class="btn btn-xs">🔍+</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          
+          <!-- Repository Tileset Selector Dropdowns -->
+          <div class="repo-selector-box">
+            <div class="control-row">
+              <label>🎮 Tileset:</label>
+              <select id="select-repo-tileset">
+                <option value="">Cargando tilesets del juego...</option>
+              </select>
+            </div>
+            <div class="control-row">
+              <label>🎨 Paleta:</label>
+              <select id="select-repo-palette">
+                <option value="02.pal">02.pal (Árboles Overworld)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="control-row">
+            <label>Tamaño Tile:</label>
+            <select id="select-tile-size">
+              <option value="8">8x8 (GBA Standard)</option>
+              <option value="16" selected>16x16 (Metatile)</option>
+              <option value="32">32x32</option>
+            </select>
+          </div>
+          <div class="control-row inline">
+            <label>Offset X:</label> <input type="number" id="num-grid-ox" value="0" min="0" max="64">
+            <label>Offset Y:</label> <input type="number" id="num-grid-oy" value="0" min="0" max="64">
+          </div>
+
+          <!-- Palette Swatches Bar -->
+          <div class="palette-swatches-box">
+            <span class="palette-label">Paleta GBA Activa (16 Colores):</span>
+            <div id="palette-swatches-container">
+              <span class="palette-hint">Selecciona un tileset para cargar paleta</span>
+            </div>
+          </div>
+
+          <!-- Manual File Upload Fallback -->
+          <details class="custom-upload-details">
+            <summary>📁 O Cargar Archivo Local Personalizado</summary>
+            <div class="panel-tools-row" style="margin-top: 6px;">
+              <label class="btn btn-xs btn-file">
+                📁 Cargar PNG Custom
+                <input type="file" id="input-tileset-file" accept="image/png" hidden>
+              </label>
+              <label class="btn btn-xs btn-file btn-accent">
+                🎨 Cargar .PAL Custom
+                <input type="file" id="input-palette-file" accept=".pal,.txt" hidden>
+              </label>
+            </div>
+          </details>
+
+          <div class="canvas-scroll-container" id="container-tileset">
+            <canvas id="canvas-tileset"></canvas>
+          </div>
+
+          <div class="tile-info-box" id="tile-info-box">
+            <div id="tile-coords-info">Tile Seleccionado: Ninguno</div>
+            <div class="tile-transforms">
+              <button id="btn-tile-flip-h" class="btn btn-xs">↔️ Reflejar H</button>
+              <button id="btn-tile-flip-v" class="btn btn-xs">↕️ Reflejar V</button>
+              <button id="btn-tile-rot" class="btn btn-xs">🔄 Rotar 90°</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PANEL 2: 2D COMPOSITOR & MASK EDITOR (CENTER) -->
+      <section class="panel" id="panel-compositor">
+        <div class="panel-header">
+          <div class="tabs">
+            <button class="tab-btn active" data-tab="tab-comp">Composición 2D</button>
+            <button class="tab-btn" data-tab="tab-masks">Editor Máscaras</button>
+            <button class="tab-btn" data-tab="tab-seeds">Semillas & Watershed</button>
+            <button class="tab-btn" data-tab="tab-diag">Diagnóstico 2D</button>
+          </div>
+          <div class="zoom-controls">
+            <button id="btn-zoom-comp-out" class="btn btn-xs">🔍-</button>
+            <span id="label-zoom-comp">100%</span>
+            <button id="btn-zoom-comp-in" class="btn btn-xs">🔍+</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          
+          <!-- TAB 1: COMPOSITOR -->
+          <div class="tab-content active" id="tab-comp">
+            <div class="toolbar-2d">
+              <label>Cuadrícula Personalizada:</label>
+              <label>Cols:</label> <input type="number" id="num-grid-cols" value="4" min="1" max="16" style="width: 50px;">
+              <label>Filas:</label> <input type="number" id="num-grid-rows" value="4" min="1" max="16" style="width: 50px;">
+              <button id="btn-clear-comp" class="btn btn-sm btn-danger">🗑️ Limpiar Canvas</button>
+              <button id="btn-export-comp-png" class="btn btn-sm">🖼️ Exportar PNG</button>
+            </div>
+            <div class="canvas-stage" id="container-comp">
+              <canvas id="canvas-compositor"></canvas>
+            </div>
+          </div>
+
+          <!-- TAB 2: MASK EDITOR -->
+          <div class="tab-content" id="tab-masks">
+            <div class="toolbar-2d">
+              <div class="btn-group">
+                <button class="btn btn-sm mask-layer-btn active" data-layer="foliage">🍃 Follaje</button>
+                <button class="btn btn-sm mask-layer-btn" data-layer="trunk">🪵 Tronco</button>
+                <button class="btn btn-sm mask-layer-btn" data-layer="shadow">👥 Sombra</button>
+                <button class="btn btn-sm mask-layer-btn" data-layer="ignore">🚫 Ignorar</button>
+              </div>
+              <div class="btn-group">
+                <button class="btn btn-sm mask-tool-btn active" data-tool="brush">✏️ Pincel</button>
+                <button class="btn btn-sm mask-tool-btn" data-tool="eraser">🧹 Borrador</button>
+                <button class="btn btn-sm mask-tool-btn" data-tool="bucket">🪣 Relleno</button>
+                <button class="btn btn-sm mask-tool-btn" data-tool="wand">🪄 Varita</button>
+              </div>
+              <div class="control-row">
+                <label>Tamaño Pincel:</label>
+                <select id="select-brush-size">
+                  <option value="1" selected>1px (Pixel Exacto)</option>
+                  <option value="2">2px</option>
+                  <option value="3">3px</option>
+                  <option value="4">4px</option>
+                  <option value="6">6px</option>
+                </select>
+              </div>
+              <div class="btn-group">
+                <button id="btn-mask-undo" class="btn btn-sm">↩️ Deshacer</button>
+                <button id="btn-mask-redo" class="btn btn-sm">↪️ Rehacer</button>
+              </div>
+            </div>
+
+            <div class="morph-toolbar">
+              <span>Morfología:</span>
+              <button id="btn-morph-dilate" class="btn btn-xs">Dilatar</button>
+              <button id="btn-morph-erode" class="btn btn-xs">Erosionar</button>
+              <button id="btn-morph-open" class="btn btn-xs">Apertura</button>
+              <button id="btn-morph-close" class="btn btn-xs">Cierre</button>
+              <button id="btn-morph-fill" class="btn btn-xs">Rellenar Huecos</button>
+              <button id="btn-morph-clean" class="btn btn-xs">Limpiar Ruido</button>
+            </div>
+
+            <div class="canvas-stage" id="container-mask">
+              <canvas id="canvas-mask-editor"></canvas>
+            </div>
+          </div>
+
+          <!-- TAB 3: SEEDS & WATERSHED -->
+          <div class="tab-content" id="tab-seeds">
+            <div class="toolbar-2d">
+              <button id="btn-detect-seeds" class="btn btn-sm btn-accent">🔍 Detectar Semillas Automáticas</button>
+              <button id="btn-run-watershed" class="btn btn-sm btn-success">🌊 Ejecutar Watershed</button>
+              <button id="btn-clear-seeds" class="btn btn-sm btn-danger">Borrar Semillas</button>
+            </div>
+            <div class="canvas-stage">
+              <canvas id="canvas-seed-editor"></canvas>
+            </div>
+          </div>
+
+          <!-- TAB 4: DIAGNOSTIC 2D -->
+          <div class="tab-content" id="tab-diag">
+            <div class="diag-grid">
+              <div class="diag-card">
+                <h4>Fondo / Diferencia</h4>
+                <canvas id="canvas-diag-diff"></canvas>
+              </div>
+              <div class="diag-card">
+                <h4>Máscara Follaje</h4>
+                <canvas id="canvas-diag-foliage"></canvas>
+              </div>
+              <div class="diag-card">
+                <h4>Transformada de Distancia EDT</h4>
+                <canvas id="canvas-diag-dist"></canvas>
+              </div>
+              <div class="diag-card">
+                <h4>Lóbulos Segmentados</h4>
+                <canvas id="canvas-diag-regions"></canvas>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- PANEL 3: 3D VISOR & VOXEL SLICE EDITOR (RIGHT) -->
+      <section class="panel" id="panel-visor-3d">
+        <div class="panel-header">
+          <h2>3. Visor Voxel 3D</h2>
+          <div class="camera-toolbar">
+            <button class="btn btn-xs cam-btn" data-cam="front">Frontal</button>
+            <button class="btn btn-xs cam-btn" data-cam="back">Trasera</button>
+            <button class="btn btn-xs cam-btn" data-cam="left">Izq</button>
+            <button class="btn btn-xs cam-btn" data-cam="right">Der</button>
+            <button class="btn btn-xs cam-btn" data-cam="top">Sup</button>
+            <button class="btn btn-xs cam-btn" data-cam="iso">Isométrica</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="view-mode-toolbar">
+            <label>Modo Render:</label>
+            <select id="select-render-mode">
+              <option value="textured" selected>Texturizado Original</option>
+              <option value="regions">Colores por Lóbulo/Región</option>
+              <option value="depth">Mapa de Profundidad</option>
+              <option value="flat">Colores Planos / Depuración</option>
+              <option value="wireframe">Malla / Wireframe</option>
+              <option value="normals">Normales 3D</option>
+            </select>
+            <button id="btn-generate-volume" class="btn btn-sm btn-success">⚙️ Generar Vóxeles</button>
+          </div>
+
+          <!-- Three.js Container -->
+          <div id="three-container"></div>
+
+          <!-- Slice Editor Bar -->
+          <div class="slice-editor-controls">
+            <label>Visualizar Corte Z:</label>
+            <input type="range" id="slider-z-slice" min="0" max="31" value="16">
+            <span id="label-z-slice-val">Z: 16</span>
+            <label><input type="checkbox" id="chk-slice-only"> Mostrar solo plano</label>
+          </div>
+        </div>
+      </section>
+
+      <!-- PANEL 4: PARAMS, HISTOGRAMS & LOGS (BOTTOM) -->
+      <section class="panel" id="panel-controls-logs">
+        <div class="panel-header">
+          <h2>4. Parámetros, Presets y Métricas</h2>
+        </div>
+        <div class="panel-body flex-row">
+          
+          <div class="param-group">
+            <h4>Algoritmo de Profundidad</h4>
+            <div class="control-row">
+              <label>Preset:</label>
+              <select id="select-preset">
+                <option value="diorama_balanced" selected>Diorama Equilibrado (35%)</option>
+                <option value="fine_relief">Relieve Fino (20%)</option>
+                <option value="deep_crown">Copa Profunda (50%)</option>
+                <option value="gen1_style">Estilo Gen 1 / Lóbulos Marcados</option>
+              </select>
+            </div>
+            <div class="control-row">
+              <label>Forma Volumétrica Copa:</label>
+              <select id="select-depth-mode">
+                <option value="hybrid" selected>Híbrido (Lóbulos + Distancia EDT)</option>
+                <option value="distance">Relieve por Distancia EDT</option>
+                <option value="conical">Pino / Conífero Orgánico</option>
+                <option value="ellipsoidal">Esférico / Domo Redondo</option>
+                <option value="tiered">Escalonado / En Capas</option>
+                <option value="cylindrical">Cilíndrico / Columna</option>
+              </select>
+            </div>
+            <div class="control-row">
+              <label>Profundidad Máxima Z:</label>
+              <input type="range" id="slider-max-depth" min="8" max="64" value="24">
+              <span id="lbl-max-depth">24 vox</span>
+            </div>
+            <div class="control-row">
+              <label>Altura Parte Ancha Y:</label>
+              <input type="range" id="slider-crown-center-y" min="10" max="90" value="50">
+              <span id="lbl-crown-center-y">50% (Centro)</span>
+            </div>
+            <div class="control-row">
+              <label>Pixeles Duplicados Centro Z:</label>
+              <input type="range" id="slider-center-dup" min="0" max="6" value="0">
+              <span id="lbl-center-dup">0 (Unificado)</span>
+            </div>
+            <div class="control-row">
+              <label>Franja Plana Silueta:</label>
+              <input type="range" id="slider-flat-margin" min="0" max="8" value="0">
+              <span id="lbl-flat-margin">0 px (Inmediato)</span>
+            </div>
+          </div>
+
+          <div class="param-group">
+            <h4>Parámetros Tronco</h4>
+            <div class="control-row">
+              <label>Modo Tronco:</label>
+              <select id="select-trunk-mode">
+                <option value="extruded" selected>Extruido</option>
+                <option value="prismatic">Prismático</option>
+                <option value="rounded">Redondeado / Cilíndrico</option>
+                <option value="none">Sin Tronco</option>
+              </select>
+            </div>
+            <div class="control-row">
+              <label>Profundidad Tronco:</label>
+              <input type="range" id="slider-trunk-depth" min="2" max="32" value="12">
+              <span id="lbl-trunk-depth">12 vox</span>
+            </div>
+          </div>
+
+          <div class="param-group stats-box">
+            <h4>Métricas del Volumen</h4>
+            <div id="metric-total-voxels">Vóxeles Totales: 0</div>
+            <div id="metric-foliage-voxels">Vóxeles Follaje: 0</div>
+            <div id="metric-trunk-voxels">Vóxeles Tronco: 0</div>
+            <div id="metric-locked-voxels">Vóxeles Edición Manual: 0</div>
+            <div id="metric-exec-time">Tiempo Generación: 0 ms</div>
+          </div>
+
+          <div class="param-group logs-box">
+            <h4>Registro de Diagnóstico</h4>
+            <div id="log-console"></div>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Modular Scripts -->
+  <script src="/static/js/utils.js"></script>
+  <script src="/static/js/state.js"></script>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/history.js"></script>
+  <script src="/static/js/tileset.js"></script>
+  <script src="/static/js/compositor.js"></script>
+  <script src="/static/js/mask-editor.js"></script>
+  <script src="/static/js/seed-editor.js"></script>
+  <script src="/static/js/diagnostic-view.js"></script>
+  <script src="/static/js/voxel-editor.js"></script>
+  <script src="/static/js/renderer-3d.js"></script>
+  <script src="/static/js/project-io.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
