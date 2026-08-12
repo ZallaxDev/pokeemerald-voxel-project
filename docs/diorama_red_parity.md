@@ -57,6 +57,23 @@ Por ello toda fase geometrica aplica siempre este orden:
 5. Pasar a `manual-pending` y solicitar la aprobacion final; cualquier regresion devuelve
    la fase a `implementation` e invalida toda evidencia del candidato.
 
+### 1.2 Modelos compilados para familias volumetricas
+
+Cuando una familia ya tiene una forma base conocida, una comprobacion visual fallida no debe abrir
+una cadena indefinida de ajustes ad-hoc en el mesher. La automatizacion objetivo es offline:
+
+1. Componer arte Emerald inmutable y resolver la topologia de la familia sobre el layout completo.
+2. Seleccionar una plantilla volumetrica versionada, como cuna, esquina, arbol o edificio.
+3. Proyectar arte y constraints sobre la plantilla para producir ocupacion voxel solida, no prismas
+   decorativos independientes ni alturas deducidas en runtime.
+4. Validar determinismo, provenance, conectividad, ausencia de cavidades y contratos exactos de seam.
+5. Exportar un modelo inspeccionable y compilar sus caras exteriores con greedy meshing para que el
+   runtime solo instancie datos inmutables.
+
+`tree_model/emerald_tree.vox` y `tools/diorama_tree/compile_vox.py` son el precedente de salida. Para
+terrazas, la cuna visual conocida sera la plantilla de entrada y el generador debera resolver sus
+variantes a partir del arte y la topologia, no mediante nuevas formulas visuales por captura.
+
 ## 2. Fuentes de autoridad de Rojo
 
 | Pieza | Responsabilidad exacta |

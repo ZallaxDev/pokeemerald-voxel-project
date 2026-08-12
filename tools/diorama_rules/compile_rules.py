@@ -15,9 +15,12 @@ from pathlib import Path
 
 from catalog import CatalogError, TilesetInfo, load_tilesets, load_world
 from emerald_compositor import TilesetComposer, load_animation_slots
+from measured_volumes import apply_to_analysis, detect_layout
+from mountain_art import MountainArtError, validate_layout as validate_mountain_art
 from profiles import NOMINAL_HEIGHTS, TileShape, shape_from_action
 from pixel_objects import UPRIGHT_CLASSES as UPRIGHT_PIXEL_CLASSES, extract_layout
 from structures import analyze_layout
+from terrace_topology import solve_layout as solve_terrace_topology
 from tile_shape import ClassificationError, TileShapeClassifier
 
 
@@ -447,18 +450,20 @@ def _patterns(values: object, path: str, tilesets: dict[str, TilesetInfo], pools
             raise RuleError(f"{item_path}.claimMask: must claim at least one cell")
         pair = _object(item.get("tilesets"), f"{item_path}.tilesets")
         _unknown(pair, {"primary", "secondary"}, f"{item_path}.tilesets")
-        if set(pair) != {"primary", "secondary"}:
-            raise RuleError(f"{item_path}.tilesets: primary and secondary are required")
-        for role in ("primary", "secondary"):
+        if "primary" not in pair:
+            raise RuleError(f"{item_path}.tilesets: primary is required")
+        for role in pair:
             symbol = pair[role]
             if symbol not in tilesets or tilesets[symbol].role != role:
                 raise RuleError(f"{item_path}.tilesets.{role}: unknown {role} tileset {symbol!r}")
         primary_count = tilesets[pair["primary"]].metatile_count
-        secondary_count = tilesets[pair["secondary"]].metatile_count
+        secondary_count = (tilesets[pair["secondary"]].metatile_count
+                           if "secondary" in pair else 0)
         for row_index, row in enumerate(normalized_cells):
             for column_index, metatile in enumerate(row):
                 valid = (metatile < 0x200 and metatile < primary_count) or (
-                    metatile >= 0x200 and metatile - 0x200 < secondary_count)
+                    "secondary" in pair and metatile >= 0x200
+                    and metatile - 0x200 < secondary_count)
                 if not valid:
                     raise RuleError(
                         f"{item_path}.cells[{row_index}][{column_index}]: metatile {metatile} "
@@ -635,8 +640,9 @@ def _pattern_placements(pattern: dict, layouts: list[dict], cells: dict[str, tup
     expected = [value for row in pattern["cells"] for value in row]
     total = 0
     for layout in layouts:
-        if (layout["primary_tileset"] != pattern["tilesets"]["primary"] or
-                layout["secondary_tileset"] != pattern["tilesets"]["secondary"]):
+        if (layout["primary_tileset"] != pattern["tilesets"]["primary"]
+                or ("secondary" in pattern["tilesets"]
+                    and layout["secondary_tileset"] != pattern["tilesets"]["secondary"])):
             continue
         ids = [cell["metatile"] for cell in cells[layout["id"]]]
         for y in range(layout["height"] - height + 1):
@@ -675,8 +681,9 @@ def _validate_pattern_claim_overlaps(global_patterns: list[dict], maps: list[dic
         applicable = [(pattern, None) for pattern in global_patterns]
         applicable.extend((pattern, context) for pattern in scoped_patterns)
         for pattern, scope in applicable:
-            if (layout["primary_tileset"] != pattern["tilesets"]["primary"] or
-                    layout["secondary_tileset"] != pattern["tilesets"]["secondary"]):
+            if (layout["primary_tileset"] != pattern["tilesets"]["primary"]
+                    or ("secondary" in pattern["tilesets"]
+                        and layout["secondary_tileset"] != pattern["tilesets"]["secondary"])):
                 continue
             width = pattern["dimensions"]["width"]
             for x, y in _pattern_origins(pattern, layout, cells):
@@ -751,6 +758,16 @@ def _with_animation_provenance(shape: TileShape, cell: dict) -> TileShape:
     return TileShape(shape.class_name, shape.height, shape.art_mode, shape.pool,
                      shape.authored, source, shape.confidence, evidence,
                      shape.ambiguity, shape.prop_ground)
+
+
+def _with_mountain_art(shape: TileShape, cell: dict, accepted: bool) -> TileShape:
+    if not accepted or cell.get("behavior") == "MB_MOUNTAIN_TOP":
+        return shape
+    evidence = tuple(dict.fromkeys(shape.evidence + (
+        "pixels:mountain-art-family", "context:mountain-connected")))
+    return TileShape("cliff", 1.0, "top", "terrain", False,
+                     "heuristic:mountain-art-family", 0.9, evidence, (),
+                     shape.prop_ground)
 
 
 def _visible_components(pixels: tuple) -> int:
@@ -947,6 +964,8 @@ def _shape_geometry(class_name: str) -> tuple[str, str, str]:
         return "cliff", archetype, "rock"
     if class_name in ("bridge", "deck", "rail", "support"):
         return "bridge", class_name, "wood"
+    if class_name in ("round-hull", "tree", "forest-wall", "shrub", "hedge"):
+        return "extruded", "round-hull", "ground"
     if class_name in UPRIGHT_PIXEL_CLASSES:
         return "flat", class_name, "ground"
     if class_name == "relief":
@@ -965,13 +984,24 @@ def _evidence_flags(values: tuple[str, ...]) -> int:
 
 def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
                     structure: dict, map_group: int = 0xFF,
-                    map_number: int = 0xFF) -> dict:
+                    map_number: int = 0xFF, measurement: dict | None = None,
+                    terrace: dict | None = None) -> dict:
     geometry, archetype, terrain_class = _shape_geometry(shape.class_name)
     prop = shape.prop_ground.as_dict()
-    return {
+    terrace_course = terrace is not None and terrace["solid"]
+    terrace_topology = terrace is not None
+    mountain_art = terrace_course or (terrace is None and (
+        (shape.class_name == "cliff" and (
+            cell.get("behavior") == "MB_MOUNTAIN_TOP"
+            or shape.source == "heuristic:mountain-art-family"))
+        or shape.source == "context:general-dense-forest-cell"))
+    record = {
         "cellOffset": cell_offset, "expectedMetatile": cell["metatile"],
         "mapGroup": map_group, "mapNumber": map_number,
         "class": shape.class_name, "heightQ16": round(shape.height * 16),
+        "groundQ16": terrace["groundQ16"] if terrace else 0,
+        "topQ16": terrace["topQ16"] if terrace else round(shape.height * 16),
+        "terraceProfile": terrace["profile"] if terrace else "none",
         "artMode": shape.art_mode, "pool": shape.pool, "authored": shape.authored,
         "source": shape.source, "confidence": shape.confidence,
         "evidence": list(shape.evidence), "evidenceFlags": _evidence_flags(shape.evidence),
@@ -983,6 +1013,64 @@ def _terrain_record(cell_offset: int, cell: dict, shape: TileShape,
         "cliffTransitionMask": 0, "cliffCornerMask": 0,
         **structure,
     }
+    if measurement is None:
+        record.update({"measuredHeightQ16": 0, "measuredBodyQ16": 0,
+                       "measuredRoofQ16": 0, "measuredAxis": "x",
+                       "measuredExtentBands": 0, "measuredPeriodBands": 0,
+                       "measuredRoofBands": 0, "measuredRunLocal": 0,
+                       "measuredRunLength": 0,
+                       "measuredFlags": (32 if mountain_art or terrace_course else 0)
+                                        | (64 if terrace_course else 0)
+                                        | (128 if terrace_topology else 0),
+                       "measuredConfidence": 0.0, "measuredBands": []})
+        return record
+    height_bands = measurement["heightBands"]
+    roof_candidate_bands = measurement["roofCandidateBands"]
+    evidence = tuple(record["evidence"]) + (
+        "pixels:source-band-repeat", "collision:candidate-blocked",
+        f"volume:axis-{measurement['axis']}",
+    )
+    record.update({
+        "class": "wall-volume", "heightQ16": height_bands * 8,
+        "artMode": "upright", "pool": "structure", "authored": False,
+        "source": "heuristic:measured-volume", "confidence": measurement["confidence"],
+        "evidence": list(dict.fromkeys(evidence)), "evidenceFlags": _evidence_flags(evidence),
+        "ambiguity": [], "ambiguityFlags": 0,
+        "shape": "extruded",
+        "archetype": "wall-volume", "terrainClass": "rock",
+        "measuredHeightQ16": height_bands * 8,
+        "measuredBodyQ16": height_bands * 8,
+        "measuredRoofQ16": 0,
+        "measuredAxis": measurement["axis"],
+        "measuredExtentBands": measurement["extentBands"],
+        "measuredPeriodBands": measurement["periodBands"],
+        "measuredRoofBands": roof_candidate_bands,
+        "measuredRunLocal": measurement["runLocal"],
+        "measuredRunLength": measurement["runLength"],
+        "measuredFlags": ((1 if measurement["fromRepeat"] else 0)
+                           | (2 if measurement["adoptedConsensus"] else 0)
+                           | (4 if measurement["conflicts"] else 0)
+                           | (8 if roof_candidate_bands else 0)
+                           | (16 if measurement["silhouette"] else 0)
+                           | (128 if terrace_topology else 0)),
+        "measuredConfidence": measurement["confidence"],
+        "measuredBands": measurement["sourceBands"],
+    })
+    return record
+
+
+def _measurement_semantic(measurement: dict | None) -> str:
+    return json.dumps(measurement, sort_keys=True, separators=(",", ":"))
+
+
+def _outdoor(map_type: str) -> bool:
+    return map_type not in ("MAP_TYPE_INDOOR", "MAP_TYPE_SECRET_BASE",
+                            "MAP_TYPE_UNDERGROUND", "MAP_TYPE_UNDERWATER")
+
+
+def _volume_scene(map_type: str) -> bool:
+    return map_type not in ("MAP_TYPE_NONE", "MAP_TYPE_INDOOR",
+                            "MAP_TYPE_SECRET_BASE", "MAP_TYPE_UNDERWATER")
 
 
 def _structure_fields(analysis: dict, mapping: dict[int, int], offset: int,
@@ -1029,6 +1117,17 @@ def compile_data(root: Path) -> dict:
     cells, behavior_counts, pin_counts = _load_cells(root, layouts, tilesets, behavior_names)
     event_cells = _events(root, maps, cells, layouts_by_id)
     pixel_summaries = _pixel_summaries(root, layouts, cells, tilesets)
+    mountain_art_cells = {}
+    terrace_topology = {}
+    for layout in layouts:
+        try:
+            mountain_art_cells[layout["id"]] = validate_mountain_art(
+                cells[layout["id"]], pixel_summaries[layout["id"]],
+                layout["width"], layout["height"])
+        except MountainArtError as error:
+            raise RuleError(f"{layout['id']}: {error}") from error
+        terrace_topology[layout["id"]] = solve_terrace_topology(
+            cells[layout["id"]], layout["width"], layout["height"])
 
     source = load_json(rules_root / "defaults.json")
     _unknown(source, {"schemaVersion", "kind", "default", "semanticPools", "profiles",
@@ -1224,20 +1323,36 @@ def compile_data(root: Path) -> dict:
                 layout_cells, layout["width"], layout["height"])
             wildcard = tuple(_with_animation_provenance(shape, cell)
                              for shape, cell in zip(wildcard, layout_cells))
+            wildcard = tuple(_with_mountain_art(
+                shape, cell, offset in mountain_art_cells[layout["id"]])
+                for offset, (shape, cell) in enumerate(zip(wildcard, layout_cells)))
             wildcard_structures = analyze_layout(
                 layout, layout_cells, wildcard, patterns, pixel_summaries[layout["id"]])
             wildcard = _apply_derived_voids(wildcard, wildcard_structures)
+            wildcard_objects = extract_layout(
+                wildcard_structures, layout_cells, wildcard,
+                pixel_summaries[layout["id"]], layout["width"], layout["height"])
+            wildcard_detection = detect_layout(
+                layout, layout_cells, wildcard, pixel_summaries[layout["id"]],
+                wildcard_structures, {item["structureId"] for item in wildcard_objects},
+                outdoor=all(_outdoor(row["mapType"])
+                            for row in maps_by_layout.get(layout["id"], ())),
+                allow_volumes=bool(maps_by_layout.get(layout["id"])) and all(
+                    _volume_scene(row["mapType"])
+                    for row in maps_by_layout.get(layout["id"], ())))
+            wildcard_measurements = apply_to_analysis(
+                wildcard_structures, wildcard_detection, layout["width"],
+                pixel_summaries[layout["id"]])
             wildcard_mapping = _register_candidates(
                 wildcard_structures, layout["numericId"], 0xFF, 0xFF, structure_catalog)
-            _register_pixel_objects(extract_layout(
-                wildcard_structures, layout_cells, wildcard,
-                pixel_summaries[layout["id"]], layout["width"], layout["height"]),
+            _register_pixel_objects(wildcard_objects,
                 wildcard_mapping, layout["numericId"], 0xFF, 0xFF, pixel_object_catalog)
             for offset, (cell, shape) in enumerate(zip(layout_cells, wildcard)):
                 records.append(_terrain_record(
                     offset, cell, shape,
                     _structure_fields(wildcard_structures, wildcard_mapping, offset,
-                                      layout["width"])))
+                                      layout["width"]), measurement=wildcard_measurements.get(offset),
+                    terrace=terrace_topology[layout["id"]].get(offset)))
                 if not shape.authored and shape.confidence == 0.0:
                     ambiguity_counts[shape.ambiguity] += 1
                     ambiguity_flags[shape.ambiguity] |= _evidence_flags(shape.evidence)
@@ -1258,7 +1373,10 @@ def compile_data(root: Path) -> dict:
                     map_type=map_row["mapType"], events=coordinate_events)
                 exact_patterns = patterns + (configured["exactPatterns"] if configured else [])
                 exact = tuple(_with_animation_provenance(shape, cell)
-                              for shape, cell in zip(exact, layout_cells))
+                               for shape, cell in zip(exact, layout_cells))
+                exact = tuple(_with_mountain_art(
+                    shape, cell, offset in mountain_art_cells[layout["id"]])
+                    for offset, (shape, cell) in enumerate(zip(exact, layout_cells)))
                 map_events = {offset: values for (symbol, x, y), values in event_cells.items()
                               if symbol == map_row["symbol"]
                               for offset in (y * layout["width"] + x,)}
@@ -1276,11 +1394,24 @@ def compile_data(root: Path) -> dict:
                     layout, layout_cells, exact, exact_patterns,
                     pixel_summaries[layout["id"]], doors, sign_events)
                 exact = _apply_derived_voids(exact, exact_structures)
+                exact_objects = extract_layout(
+                    exact_structures, layout_cells, exact,
+                    pixel_summaries[layout["id"]], layout["width"], layout["height"])
+                exact_detection = detect_layout(
+                    layout, layout_cells, exact, pixel_summaries[layout["id"]],
+                    exact_structures, {item["structureId"] for item in exact_objects},
+                    outdoor=_outdoor(map_row["mapType"]),
+                    allow_volumes=_volume_scene(map_row["mapType"]))
+                exact_measurements = apply_to_analysis(
+                    exact_structures, exact_detection, layout["width"],
+                    pixel_summaries[layout["id"]])
                 scope = map_catalog_by_symbol[map_row["symbol"]]
                 changed_structure = {
                     offset for offset in range(len(layout_cells))
                     if _structure_semantic(exact_structures, offset)
                     != _structure_semantic(wildcard_structures, offset)
+                    or _measurement_semantic(exact_measurements.get(offset))
+                    != _measurement_semantic(wildcard_measurements.get(offset))
                 }
                 needed = {local_id for offset in changed_structure
                           for local_id in (exact_structures["cells"][offset]["owner"],
@@ -1289,9 +1420,7 @@ def compile_data(root: Path) -> dict:
                 exact_mapping = _register_candidates(
                     exact_structures, layout["numericId"], scope["group"], scope["number"],
                     structure_catalog, needed)
-                _register_pixel_objects(extract_layout(
-                    exact_structures, layout_cells, exact,
-                    pixel_summaries[layout["id"]], layout["width"], layout["height"]),
+                _register_pixel_objects(exact_objects,
                     exact_mapping, layout["numericId"], scope["group"], scope["number"],
                     pixel_object_catalog)
                 for offset, (cell, shape, base) in enumerate(zip(layout_cells, exact, wildcard)):
@@ -1303,7 +1432,11 @@ def compile_data(root: Path) -> dict:
                                  _structure_fields(wildcard_structures, wildcard_mapping, offset,
                                                    layout["width"]))
                     records.append(_terrain_record(offset, cell, shape, structure,
-                                                   scope["group"], scope["number"]))
+                                                    scope["group"], scope["number"],
+                                                    exact_measurements.get(offset)
+                                                    if offset in changed_structure
+                                                    else wildcard_measurements.get(offset),
+                                                    terrace_topology[layout["id"]].get(offset)))
                     if not shape.authored and shape.confidence == 0.0:
                         ambiguity_counts[shape.ambiguity] += 1
                         ambiguity_flags[shape.ambiguity] |= _evidence_flags(shape.evidence)
@@ -1358,7 +1491,8 @@ def render_header() -> str:
 
 struct DioramaGeneratedTilesetV2 { uint8_t id, role, terrainClass; uint16_t metatileCount; const char *symbol; };
 struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount, structureCellOffset; const char *symbol; };
-struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile, classId, sourceId, evidenceDetailsId, ambiguityDetailsId, propGroundMetatile, evidenceFlags, ambiguityFlags; int16_t heightQ16; uint8_t mapGroup, mapNumber, shape, archetype, terrainClass, artMode, pool, authored, sourceKind, propGroundMode, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; float confidence; };
+struct DioramaGeneratedTerrainV2 { uint32_t cellOffset, measuredBandOffset; uint16_t expectedMetatile, classId, sourceId, evidenceDetailsId, ambiguityDetailsId, propGroundMetatile, evidenceFlags, ambiguityFlags; int16_t heightQ16, groundQ16, topQ16, measuredHeightQ16, measuredBodyQ16, measuredRoofQ16; uint8_t mapGroup, mapNumber, shape, archetype, terrainClass, artMode, pool, authored, sourceKind, propGroundMode, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask, terraceProfile, measuredAxis; uint16_t measuredExtentBands; uint8_t measuredPeriodBands, measuredRoofBands; uint16_t measuredRunLocal, measuredRunLength; uint8_t measuredFlags, measuredBandCount; float confidence, measuredConfidence; };
+struct DioramaGeneratedMeasuredBandV2 { uint32_t sourceCellOffset; uint16_t expectedMetatile; uint8_t layer, sourceHalf; };
 struct DioramaGeneratedClassifierSourceV2 { uint16_t id; const char *name; };
 struct DioramaGeneratedEvidenceV2 { uint16_t id; const char *details; };
 struct DioramaGeneratedAmbiguityV2 { uint16_t id, flags; uint32_t placementCount; const char *details; };
@@ -1379,8 +1513,10 @@ extern const struct DioramaGeneratedTilesetV2 gDioramaTilesetsV2[];
 extern const size_t gDioramaTilesetV2Count;
 extern const struct DioramaGeneratedLayoutV2 gDioramaLayoutsV2[];
 extern const size_t gDioramaLayoutV2Count;
-extern const struct DioramaGeneratedTerrainV2 gDioramaTerrainV2[];
-extern const size_t gDioramaTerrainV2Count;
+    extern const struct DioramaGeneratedTerrainV2 gDioramaTerrainV2[];
+    extern const size_t gDioramaTerrainV2Count;
+    extern const struct DioramaGeneratedMeasuredBandV2 gDioramaMeasuredBandsV2[];
+    extern const size_t gDioramaMeasuredBandV2Count;
 extern const struct DioramaGeneratedClassifierSourceV2 gDioramaClassifierSourcesV2[];
 extern const size_t gDioramaClassifierSourceV2Count;
 extern const struct DioramaGeneratedEvidenceV2 gDioramaEvidenceDetailsV2[];
@@ -1455,6 +1591,9 @@ def render_c(data: dict) -> str:
         ("flat", "extruded", "cliff", "ledge", "stairs", "water", "bridge",
          "billboard", "cutout", "roof", "building-part", "hidden"))}
     axes = {"x": 0, "z": 1, "cross": 2}
+    terrace_profiles = {"none": 0, "horizontal": 1, "vertical": 2,
+                        "outer": 3, "inner": 4,
+                        "transition-horizontal": 5}
     owner_kinds = {"none": 0, "template": 1, "authored-special": 2,
                    "prop-candidate": 3, "generic-volume": 4, "region": 5}
     void_kinds = {"none": 0, "transparent": 1, "black": 2}
@@ -1471,13 +1610,31 @@ def render_c(data: dict) -> str:
             return 10
         return 6
     terrain_rows = []
+    measured_band_rows = []
+    measured_band_ranges = {}
     for layout in data["layouts"]:
         for row in layout["terrainRecords"]:
+            band_key = tuple((band["sourceCellOffset"], band["expectedMetatile"],
+                              band["layer"], band["sourceHalf"])
+                             for band in row["measuredBands"])
+            if band_key not in measured_band_ranges:
+                measured_band_ranges[band_key] = len(measured_band_rows)
+                for source_offset, expected, layer, source_half in band_key:
+                    layer_id = {"full": 0, "base": 1, "foreground": 2}[layer]
+                    measured_band_rows.append(
+                        f"{{ {source_offset}, {expected}, "
+                        f"{layer_id}, "
+                        f"{source_half} }}")
+            measured_band_offset = measured_band_ranges[band_key]
             terrain_rows.append(
-                f"{{ {row['cellOffset']}, {row['expectedMetatile']}, {class_ids[row['class']]}, "
+                f"{{ {row['cellOffset']}, {measured_band_offset}, "
+                f"{row['expectedMetatile']}, {class_ids[row['class']]}, "
                 f"{source_ids[row['source']]}, {evidence_ids[tuple(row['evidence'])]}, "
                 f"{ambiguity_ids.get(tuple(row['ambiguity']), 0)}, {row['propGroundMetatile']}, "
                 f"{row['evidenceFlags']}, {row['ambiguityFlags']}, {row['heightQ16']}, "
+                f"{row['groundQ16']}, {row['topQ16']}, "
+                f"{row['measuredHeightQ16']}, {row['measuredBodyQ16']}, "
+                f"{row['measuredRoofQ16']}, "
                 f"{row['mapGroup']}, {row['mapNumber']}, {shapes[row['shape']]}, "
                 f"{archetypes[row['archetype']]}, {terrain_classes[row['terrainClass']]}, "
                 f"{art_modes[row['artMode']]}, {pools[row['pool']]}, {int(row['authored'])}, "
@@ -1485,10 +1642,17 @@ def render_c(data: dict) -> str:
                 f"{axes[row['axis']]}, "
                 f"{row['cliffEdgeMask']}, "
                 f"{row['cliffBaseMask']}, {row['cliffTransitionMask']}, "
-                f"{row['cliffCornerMask']}, "
-                f"{row['confidence']:.6f}f }}")
+                f"{row['cliffCornerMask']}, {terrace_profiles[row['terraceProfile']]}, "
+                f"{axes[row['measuredAxis']]}, "
+                f"{row['measuredExtentBands']}, {row['measuredPeriodBands']}, "
+                f"{row['measuredRoofBands']}, {row['measuredRunLocal']}, "
+                f"{row['measuredRunLength']}, {row['measuredFlags']}, "
+                f"{len(row['measuredBands'])}, {row['confidence']:.6f}f, "
+                f"{row['measuredConfidence']:.6f}f }}")
     table("struct DioramaGeneratedTerrainV2", "gDioramaTerrainV2", "gDioramaTerrainV2Count",
           terrain_rows)
+    table("struct DioramaGeneratedMeasuredBandV2", "gDioramaMeasuredBandsV2",
+          "gDioramaMeasuredBandV2Count", measured_band_rows)
     table("struct DioramaGeneratedClassifierSourceV2", "gDioramaClassifierSourcesV2",
           "gDioramaClassifierSourceV2Count",
           [f"{{ {row['id']}, {_c_string(row['name'])} }}" for row in data["classifierSources"]])

@@ -14,6 +14,7 @@
 #define DIORAMA_TERRAIN_PIXEL_COLUMNS (DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL * DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL)
 #define DIORAMA_TERRAIN_MAX_FACES (DIORAMA_TERRAIN_PIXEL_COLUMNS * DIORAMA_OCCUPANCY_FACE_COUNT * DIORAMA_TERRAIN_MAX_SURFACES)
 #define DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES 4096
+#define DIORAMA_TERRAIN_MAX_TREE_INSTANCES 32
 #define DIORAMA_TERRAIN_MAX_VERTICES ((DIORAMA_TERRAIN_MAX_FACES + DIORAMA_TERRAIN_MAX_PIXEL_PRIMITIVES * 6) * 6)
 #define DIORAMA_TERRAIN_LEDGE_HEIGHT 0.375f
 #define DIORAMA_TERRAIN_WATER_HEIGHT -0.125f
@@ -36,6 +37,15 @@ enum DioramaElevationSemantics
     DIORAMA_ELEVATION_WILDCARD,
     DIORAMA_ELEVATION_CONCRETE,
     DIORAMA_ELEVATION_RETAIN
+};
+
+enum DioramaTreeShade
+{
+    DIORAMA_TREE_SHADE_OFF,
+    DIORAMA_TREE_SHADE_BLACK,
+    DIORAMA_TREE_SHADE_DARK,
+    DIORAMA_TREE_SHADE_LIGHT,
+    DIORAMA_TREE_SHADE_WHITE
 };
 
 struct DioramaTerrainMaterial
@@ -91,22 +101,38 @@ struct DioramaTerrainCell
     uint8_t structureOwnerKind;
     uint8_t doorFold;
     uint8_t voidKind;
+    uint8_t treeHullReady;
+    uint8_t treeMaskDirect;
     uint8_t southFacadeCount;
+    uint8_t measuredAxis;
+    uint16_t measuredExtentBands;
+    uint8_t measuredPeriodBands;
+    uint8_t measuredRoofBands;
+    uint16_t measuredRunLocal;
+    uint16_t measuredRunLength;
+    uint8_t measuredFlags;
+    uint8_t measuredBandCount;
     uint8_t cliffEdgeMask;
     uint8_t cliffBaseMask;
     uint8_t cliffTransitionMask;
     uint8_t cliffCornerMask;
+    uint8_t terraceProfile;
     float groundHeight;
     float visualHeight;
     float featureHeight;
     float structureBodyHeight;
     float structureRoofHeight;
     float southFacadeUnitHeight;
+    float measuredConfidence;
     struct DioramaTerrainSurface surfaces[DIORAMA_TERRAIN_MAX_SURFACES];
     struct DioramaTerrainMaterial materials[DIORAMA_MATERIAL_FACE_COUNT];
     struct DioramaTerrainMaterial underlayMaterials[DIORAMA_MATERIAL_FACE_COUNT];
+    struct DioramaTerrainMaterial treeMaterial;
     uint16_t foregroundAlpha[DIORAMA_VOXELS_PER_CELL];
+    uint8_t mountainHeight[DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL];
+    uint8_t treeShade[DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL];
     struct DioramaTerrainMaterial southFacadeMaterials[DIORAMA_BUILDING_MAX_FACADE_ROWS];
+    struct DioramaTerrainMaterial measuredBands[DIORAMA_MAX_MEASURED_BANDS];
 };
 
 struct DioramaTerrainHeightCell
@@ -171,6 +197,13 @@ struct DioramaTerrainBounds
     float maxZ;
 };
 
+struct DioramaTerrainTreeInstance
+{
+    float x;
+    float y;
+    float z;
+};
+
 struct DioramaTerrainMesh
 {
     uint32_t vertexCount;
@@ -184,12 +217,16 @@ struct DioramaTerrainMesh
     uint32_t cliffBaseFaceCount;
     uint32_t cliffCornerCount;
     uint32_t cliffTransitionFaceCount;
+    uint16_t treeInstanceCount;
     uint8_t usedCompressedOccupancy;
     uint64_t geometryHash;
     struct DioramaTerrainBounds bounds;
+    struct DioramaTerrainTreeInstance treeInstances[DIORAMA_TERRAIN_MAX_TREE_INSTANCES];
 };
 
 int32_t DioramaTerrain_FloorDiv(int32_t value, int32_t divisor);
+int16_t DioramaTerrain_VisibleStructureOrigin(int16_t mapCoordinate,
+                                              uint8_t structureLocalCoordinate);
 bool DioramaTerrain_DirtyCellAffectsChunk(int16_t mapX, int16_t mapY,
                                          int16_t chunkX, int16_t chunkY);
 bool DioramaTerrain_ShouldInvalidateAll(uint64_t previousSequence,
@@ -203,11 +240,20 @@ enum DioramaElevationSemantics DioramaTerrain_GetElevationSemantics(uint8_t rawE
 void DioramaTerrain_BuildHeightField(const struct DioramaTerrainHeightCell *cells,
                                      uint16_t width, uint16_t height,
                                      float *visualHeights);
+void DioramaTerrain_BuildTerraceHeightmap(uint8_t profile,
+                                          const uint16_t artworkRows[DIORAMA_VOXELS_PER_CELL],
+                                          bool useArtwork,
+                                          uint16_t rows[DIORAMA_VOXELS_PER_CELL],
+                                          uint8_t heights[DIORAMA_VOXELS_PER_CELL
+                                                          * DIORAMA_VOXELS_PER_CELL]);
 uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *input);
 bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                                struct DioramaTerrainVertex *vertices,
                                uint32_t vertexCapacity,
                                struct DioramaTerrainMesh *mesh);
+bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
+                                   uint32_t vertexCapacity, uint32_t *vertexCount,
+                                   struct DioramaTerrainBounds *bounds);
 bool DioramaTerrain_IsBoundsVisible(const struct DioramaTerrainBounds *bounds,
                                      float cameraX, float cameraZ,
                                      float cameraPitch, float focalLength);

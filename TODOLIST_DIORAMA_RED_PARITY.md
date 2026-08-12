@@ -6,9 +6,11 @@
 - Base historica inspeccionada: `da18b4436`; sus decisiones geometricas no son autoridad.
 - Referencia Rojo congelada: `b21fd46ea789a0b8cb99d2c7e0add5a007568a54`.
 - Especificacion: `docs/diorama_red_parity.md`.
-- Editor visual: fuera de alcance hasta terminar este TODO.
-- Fase activa: **R4** (`implementation`).
-- Ultima fase aprobada manualmente: **R3**.
+- No se anadiran editores interactivos nuevos durante este TODO; si se permite un compilador offline
+  que produzca modelos `.vox` inspeccionables y mallas generadas.
+- Fase **R5 pausada por decision del usuario** (`implementation`). No continuar R5 hasta que el
+  usuario lo indique expresamente.
+- Ultima fase aprobada manualmente: **R4**.
 - El stash anterior permanece aislado y no se mezcla aqui.
 
 ## Protocolo obligatorio de fases
@@ -312,7 +314,7 @@ al norte. El usuario dispenso los escenarios restantes y F5/F6 para este gate.
 
 ## R4: props automaticos y cutouts por pixel
 
-**Estado:** `implementation`
+**Estado:** `approved`
 
 **Objetivo:** reproducir `extractObjects`, billboards forzados, reliefs y soporte sobre
 objetos sin convertir arte ambiguo en cajas.
@@ -337,8 +339,8 @@ Validacion automatica especifica:
 
 - [x] Masks golden pixel a pixel.
 - [x] Cada voxel visible tiene provenance valida.
-- [ ] Ningun foreground perdido o fondo incluido en la comprobacion visual.
-- [ ] Prop sobre mesa conserva altura y no pinta suelo a traves del soporte.
+- [x] Ningun foreground perdido o fondo incluido en la comprobacion visual.
+- [x] Prop sobre mesa conserva altura y no pinta suelo a traves del soporte.
 
 **Prueba manual obligatoria R4:**
 
@@ -422,37 +424,37 @@ de Pueblo Escaso, y dispensa pruebas o cierre automatico adicionales para este c
 
 ## R5: volumenes genericos y alturas repeat-aware
 
-**Estado:** `pending`
+**Estado:** `implementation`
 
 **Objetivo:** portar el detector automatico que falta actualmente: medir el dibujo
 ensamblado y no repetir IDs de metatile como sustituto del arte.
 
 Implementacion:
 
-- [ ] Medir runs norte-sur sobre componentes estructurales completos, igual que Rojo.
-- [ ] Detectar repeticion con una firma Emerald equivalente al tile ID de Rojo: tile,
+- [x] Medir runs norte-sur sobre componentes estructurales completos, igual que Rojo.
+- [x] Detectar repeticion con una firma Emerald equivalente al tile ID de Rojo: tile,
       capa, paleta, flips y provenance. Comparar pixels solo como evidencia adicional.
-- [ ] Distinguir extent dibujado de secuencia repetida.
-- [ ] Aplicar limite fisico equivalente a seis filas de 8 px, adaptado y justificado a
+- [x] Distinguir extent dibujado de secuencia repetida.
+- [x] Aplicar limite fisico equivalente a seis filas de 8 px, adaptado y justificado a
       bandas de arte Emerald, no copiado como tres metatiles por defecto.
-- [ ] Implementar consenso de region y registrar conflictos.
-- [ ] Analizar ambos ejes cuando el arte Emerald lo requiera.
-- [ ] Conservar una banda source distinta por tramo de cara.
-- [ ] Detectar top rows diferentes como candidato de roof solo en exterior.
-- [ ] No procesar celdas reclamadas, passable decorativas ni clases authored.
-- [ ] Emitir confidence y dejar plano cualquier candidato contradictorio.
-- [ ] Introducir el detector nuevo en un unico modulo; el detector viejo ya fue retirado
+- [x] Implementar consenso de region y registrar conflictos.
+- [x] Analizar ambos ejes cuando el arte Emerald lo requiera.
+- [x] Conservar una banda source distinta por tramo de cara.
+- [x] Detectar top rows diferentes como candidato de roof solo en exterior.
+- [x] No procesar celdas reclamadas, passable decorativas ni clases authored.
+- [x] Emitir confidence y dejar plano cualquier candidato contradictorio.
+- [x] Introducir el detector nuevo en un unico modulo; el detector viejo ya fue retirado
       en R0 y no puede reaparecer como fallback oculto.
-- [ ] Compilar volumenes al IR runtime y renderizarlos en esta fase.
+- [x] Compilar volumenes al IR runtime y renderizarlos en esta fase.
 
 Validacion automatica especifica:
 
-- [ ] Bosque largo produce arboles repetidos, no monolito.
-- [ ] Fachada de varias bandas conserva altura dibujada y source por banda.
-- [ ] Firmas de fuente equivalentes forman repeticion aunque procedan de metatiles
+- [x] Bosque largo produce arboles repetidos, no monolito.
+- [x] Fachada de varias bandas conserva altura dibujada y source por banda.
+- [x] Firmas de fuente equivalentes forman repeticion aunque procedan de metatiles
       distintos.
-- [ ] Un metatile ID igual con capa/paleta/provenance distinta no se fuerza a repetir.
-- [ ] Resultado independiente de viewport y orden.
+- [x] Un metatile ID igual con capa/paleta/provenance distinta no se fuerza a repetir.
+- [x] Resultado independiente de viewport y orden.
 
 **Prueba manual obligatoria R5:**
 
@@ -464,6 +466,195 @@ Validacion automatica especifica:
 
 **Gate R5:** el usuario aprueba la deteccion automatica general de alturas. Este gate es
 el cierre real de la deteccion automatica de terreno. Solo entonces empieza R6.
+
+Primer resultado visual: R4 permanece correcto, pero el candidato R5 convierte demasiadas
+clases en gables genericos, recorta los ledges dejando negro bajo la lamina y eleva paredes
+de interiores domesticos con source incorrecto. R5 sigue en `implementation`; roofs quedan
+como candidatos para una fase de edificios, el eje X requiere recorte/rotacion propios y el
+fallback de occupancy debe conservar soporte solido bajo ledges.
+
+La segunda revision confirma ledges e interiores corregidos. El bosque repetido aun usa
+celdas cuadradas, repite la textura y presenta runs mas altas dentro de una sola plantacion;
+la primera occupancy derivada del alpha foreground no produjo ningun cambio visible porque
+los metatiles principales son completamente opacos. El candidato actual separa el fondo
+conectado a los bordes para obtener la silueta real y fuerza en toda region vegetal el
+periodo repetido dominante, con desempate hacia la menor altura. Los niveles relativos de
+Route 104, la bajada a playa y escaleras quedan registrados para R6;
+los perfiles definitivos de edificios siguen perteneciendo a R7.
+
+La tercera revision confirma que ese enfoque seguia siendo incorrecto: recortar alpha solo
+aplanaba algunas celdas y no cambiaba la clasificacion que originaba los cubos. La comparacion
+directa con Rojo muestra que `buildVolume` recibe exclusivamente residuos `upright` despues
+de edificios, hulls, escaleras y props; no convierte collision en semantica. El detector R5
+ahora exige `artMode=upright`, y los arboles General se reclaman antes como `round-hull` de
+altura uniforme. Las celdas `fallback:flat` de edificios quedan planas en vez de adquirir
+una altura falsa; R7 debe resolverlas positivamente antes de cualquier fold.
+
+La cuarta revision confirma la mejora estructural y precisa la unidad de dibujo: los arboles
+grandes General son matrices 2x3 (fila norte atravesable sobre cuerpo bloqueado 2x2) y los
+pequenos son parejas 2x1. El candidato actual reclama primero cuatro variantes grandes y
+despues cinco parejas pequenas, y las renderiza como un unico `grouped-hull`: 32x32 a altura
+2 o 32x16 a altura 1. La capa base ocupa tanto la fila atravesable como los pixels recortados
+de la elipse, evitando que el fondo negro aparezca entre arbol y suelo.
+
+La quinta revision muestra dos fallos restantes de esa primera agrupacion. Los bosques
+repetidos contienen cuerpos 2x2 sin fila norte y caian al fallback 2x1, por lo que solo
+alcanzaban altura 1; ahora siete matrices 2x2 se resuelven antes del fallback. Ademas, usar
+la composicion `full` pegaba el cesped base a la piel y la tapa del hull. La geometria de
+arbol usa ahora solo `foreground` con alpha, el suelo usa solo `base`, y la UV de la tapa
+abarca el footprint completo. El relleno forestal General 198/199 se trata como una unidad
+round por celda, no como una pareja arbitraria ni como un componente monolitico.
+
+La revision de la implementacion de Rojo invalida tambien el hull eliptico anterior: era
+equivalente al primer torno/cilindro que la referencia descarto. El candidato actual ensambla
+el dibujo completo de cada owner (16x16, 32x16 o 32x32), separa copa y fondo con flood fill
+de contorno negro y fallback negro+oscuro para dither, y convierte cada pixel de la mascara
+en una cuerda circular de voxeles. Frente y reverso conservan el texel fuente, los laterales
+buscan hasta tres pixels hacia el interior para no pintar una pared negra, la tapa combina
+aro y muestras profundas, y la ultima fila ocupada se prolonga hasta el suelo. El underlay
+`base` sigue siendo independiente y cubre todas las celdas reclamadas. Las pruebas focalizadas
+congelan exclusion de hierba/sombra, fallback dither, ensamblado entre cuatro metatiles,
+procedencia UV por cuadrante y centrado 32x16.
+
+La primera revision visual de este port muestra un manchurron de voxeles sobre el arbol 2D
+original y una degradacion fuerte de rendimiento. El `base` del propio metatile General no
+es un ground replacement valido para estas matrices, y emitir una cara independiente por
+voxel multiplica innecesariamente vertices y draw payload. Este candidato queda invalidado;
+R5 sigue en `implementation` hasta sustituir el suelo por una fuente plana comprobada y
+fusionar caras compatibles sin perder procedencia de texel.
+
+La causa concreta es que la hierba cian opaca de Emerald tambien es oscura: el flood generico
+retenia entre 79% y 85% de los canvas General. El arte ofrece una separacion estable mejor:
+la copa y tronco usan tokens de paleta 2 `{1,2,3,4,6,8}`, y hierba/sombra usan
+`{12,13,14,15}`. El candidato corregido compone la mascara con los primeros, conserva el
+mayor componente conectado que alcanza la mitad superior y usa la paleta unfaded para que
+un fade no altere geometria. Las caras muestrean `full` porque la copa esta horneada en base;
+el underlay usa el ground plano dominante de la escena. Frente/reverso se fusionan por runs
+y laterales/tapas por intervalos expuestos; un hull que exceda capacidad se revierte completo
+en vez de romper el chunk. Los metatiles 198/199 quedan como follaje denso de celda completa,
+no como copas redondas.
+
+La reconstruccion automatica posterior tampoco obtuvo aprobacion visual. El siguiente candidato
+usa directamente `tree_model/emerald_tree.vox`, aportado por el usuario, para todo patron grande
+con cuerpo 2x2. El modelo mide 32x24x48, contiene 6782 voxels y se compila a 2424 quads mediante
+greedy meshing por color, sin caras internas. Los patrones 2x3 se anclan en sus dos filas sur de
+cuerpo: la fila norte pintada y el cuerpo completo se reemplazan por ground plano, mientras las
+dos filas bajo el modelo reciben una sombra uniforme mas oscura. El patron pequeno 2x1 no usa
+este activo. La prueba de capacidad cubre 16 arboles grandes dentro de un chunk 8x8.
+
+El primer build con el activo no lo mostro: `structureX/Y` estaban en coordenadas fuente del
+layout, mientras `FindTerrainInputCell` trabaja con coordenadas visibles que incluyen
+`MAP_OFFSET`. Esto forzaba `treeHullReady=false` para todos los grupos y recuperaba el bloque
+elevado texturizado. `BuildInput` reconstruye ahora el origen visible a partir de `mapX/Y` y
+`structureLocalX/Y`, valido tambien para mapas conectados. Ademas, cualquier patron grande que
+no pueda completar su modelo degrada a ground plano, nunca al volumen fuente.
+
+La siguiente revision aprobo el modelo y el reemplazo de ground, pero encontro hulls 2x1
+cortados, tirones y el borde repetido plano. El mesher ya no copia 14544 vertices por arbol:
+construye la malla local una sola vez, la sube a un VBO estatico y conserva por chunk solo
+instancias `(x,y,z)` de 12 bytes. Los arboles visibles se envian con una unica llamada
+`glDrawArraysInstanced`; los bounds completos permanecen en el chunk propietario para no
+introducir popping. Todo `grouped-hull` de ancho 2 usa ahora el activo completo, y un owner de
+altura 1 se ancla una fila al norte. El borde no conectado se marca como procedencia de render
+separada y solo su matriz exacta `468/469/476/477` genera owners 2x2; conexiones y celdas
+source-valid conservan su autoridad normal.
+
+La revision posterior detecta que las montanas seguian planas. R5 clasifica ahora
+`MB_MOUNTAIN_TOP` positivamente como cliff de una celda, sin convertir collision ni elevation
+en altura. La occupancy se extrae de foreground parcial o, para cimas opacas, elimina mediante
+flood-fill el fondo conectado a las esquinas usando la paleta unfaded. Los pixels recortados
+conservan underlay base. El compilador valida todas las variantes del corpus y rechaza cualquier
+mascara vacia o rectangular; runtime, mesher y build Diorama pasan sus checks focalizados.
+
+La primera revision de montanas seguia pareciendo plana porque todas las mascaras vecinas
+terminaban en la misma tapa y el greedy mesher las fusionaba. Ademas, Emerald etiqueta varias
+caras graficas de Ruta 115 como `MB_NORMAL`. El candidato actual deriva por tile un heightmap
+escalonado 4/16..16/16 mediante erosion de su propia silueta. Las caras `MB_NORMAL` solo se
+incorporan cuando comparten filas de tile y paleta con una semilla `MB_MOUNTAIN_TOP`, conservan
+mascara no rectangular y estan conectadas cardinalmente a esa semilla.
+
+La comprobacion posterior en Ruta 104 seguia plana porque la pared visible no es roca: usa
+General `198/199`, follaje denso que `BuildInput` excluia explicitamente del round hull sin
+geometria alternativa. Esos tiles conservan su semantica vegetal, pero ahora consumen el
+heightmap voxel 4/16..16/16 de su silueta opaca. La prueba runtime fija la celda real `(20,40)`
+de `MAP_ROUTE104` antes del nuevo build visual.
+
+La captura posterior identifica la colina correcta: `MAP_ROUTE104 TGT 25,66` mostraba
+`CLS:GROUND SRC:FALLBACK`, metatile General `121/0x79`. Forma parte de la familia de terrazas
+`{111,113,121,133,135,136,137,141,144}`. Solo sus usos `MB_NORMAL` se convierten en cliff
+heightmapped de una celda; usos compartidos con ledges mantienen su behavior y geometria.
+
+La revision visual invalida ese heightmap para terrazas: erosionar la silueta 2D produjo
+piramides triangulares de franjas concentricas. El arte representa una pared vertical, no un
+mapa topografico horizontal. La familia usa ahora un curso continuo de altura uniforme, con
+tapa plana y sin alturas intermedias; esta ruta no consume el modelo VOX del arbol.
+
+La siguiente revision confirma que un curso uniforme tampoco es suficiente: elevaba solo los
+metatiles de roca como bloques cuadrados, mientras cesped y arena seguian coplanares. La familia
+se resuelve ahora como contorno dirigido sobre el layout completo. En Ruta 104 `(25,66)`, `121`
+impone norte=sur+1: el cesped `(25,65)` queda a nivel 1, la pared ocupa 0..1 y la arena `(25,67)`
+queda a nivel 0, aunque ambos suelos compartan `elevation 3`. `137/144` usan perfiles diagonales
+complementarios; reutilizaciones aisladas no forman curso y degradan de forma segura.
+
+La revision siguiente valida la diferencia relativa pero invalida su anclaje: elevar el cesped
+a 1 crea un escalon falso al entrar desde el pueblo. El componente se normaliza ahora por su
+plano superior: cesped 0, pared -1..0 y playa -1. Tambien se eliminan las diagonales rectas
+sinteticas. Los metatiles con foreground parcial, incluidos 136/144, usan su mascara 16x16
+unfaded como contorno exacto entre plano alto y bajo, conservando el borde curvo del arte.
+
+La captura posterior muestra que una mascara binaria sigue siendo incorrecta: eleva pixels a 0
+y deja el resto en -1 sin construir la cara intermedia; ademas, muestrear foreground en los
+laterales deja ver el clear negro. El contorno curvo pasa a ser el pie de una rampa voxelizada de
+seis columnas que asciende progresivamente de -1 a 0. La composicion full opaca se aplica a tapa
+y laterales para situar el arte original sobre la cara inclinada y cerrar todo el volumen.
+
+La ampliacion siguiente revela seams negros en cada cambio de angulo: rectas y esquinas
+calculaban rampas locales incompatibles. Los perfiles se componen ahora con funciones compartidas:
+horizontal=N, vertical=E, esquina interior=min(E,N) y exterior=max(E,N). El contorno curvo solo
+modula el interior, mientras las secciones de empalme son canonicas e identicas muestra a muestra.
+El borde bajo termina en -1 y el alto en 0; una prueba C compara los cuatro seams completos.
+
+La revision posterior considera la forma base aceptable, pero invalida la rampa: sus alturas
+intermedias se leen como miniescalones descendentes y abren huecos entre bandas. Los marrones se
+interpretan ahora como profundidad sobre una pared vertical continua. El tono oscuro queda en el
+plano base, el medio sobresale un voxel y el claro dos, equivalente a -1/0/+1 alrededor del medio.
+La clasificacion cromatica excluye arena y cesped; un overflow omite el relieve, nunca el chunk.
+
+La captura inmediata invalida por completo ese experimento: sustituir la cuna por pared binaria
+y superponer prismas recupera bloques cuadrados y nuevos errores negros. Se elimina toda la piel
+por luminancia y se restaura la cuna curva anterior con sus perfiles N/E/min/max y materiales full.
+Cualquier estudio posterior de color solo podra perturbar la profundidad de esa cuna, nunca
+reemplazar su volumen base.
+
+La siguiente captura confirma la restauracion de la cuna y aisla dos defectos todavia presentes:
+grandes cavidades negras en concavidades y cortes escalonados repetidos en paredes laterales. Ambos
+proceden de una sola suposicion de ocupacion: para el curso normalizado `-1..0`, las muestras
+elevadas se generaban como laminas de un voxel en su altura final en vez de columnas apoyadas en
+el plano inferior. El mesher rellena ahora cada muestra desde `ground - 1` sin cambiar el heightmap,
+los materiales ni las funciones N/E/min/max. El test enfocado congela que todas las caras inferiores
+de una terraza negativa comparten el unico plano base; queda pendiente revision visual.
+
+La revision visual siguiente confirma que esta correccion elimina las cavidades negras y las bandas
+laterales separadas. La ocupacion solida relativa a `ground` queda validada y no debe volver a
+convertirse en laminas. R5 permanece en `implementation`: la confirmacion resuelve ese defecto
+tecnico concreto, pero no aprueba por si sola el aspecto final, todavia muy ortogonal, de la terraza.
+
+Para suavizar ese volumen sin reabrir huecos, el nuevo candidato modifica solo el interior del
+heightmap 16x16. Las rampas compartidas N/E aplican smoothstep entero conservando exactamente 0 y
+16; las esquinas usan composicion bilineal redondeada, de modo que E=N=8 produce interior=4 y
+exterior=12 en vez del cruce ortogonal min/max=8. Los cuatro perimetros de cada perfil siguen
+coincidiendo voxel por voxel con rampas vecinas o planos alto/bajo. La ocupacion continua desde
+`ground - 1`, el arte full opaco y la resolucion permanecen intactos. Test enfocado y build Diorama
+pasan; queda pendiente revision visual.
+
+La revision visual invalida tambien este suavizado: modificar formulas interiores sigue produciendo
+un volumen que no alcanza una montana voxel logica. Se detiene la iteracion por heightmaps. R5 queda
+pausada por decision expresa del usuario hasta disponer de un pipeline automatico de modelos:
+arte Emerald inmutable + topologia + plantilla de cuna conocida -> volumen voxel solido e
+inspeccionable -> validacion de seams/provenance -> malla greedy compilada. El modelo manual del
+arbol y `tools/diorama_tree/compile_vox.py` fijan el contrato de salida; el runtime solo debe
+instanciar modelos compilados. No continuar esta fase ni probar nuevas formulas hasta recibir la
+orden expresa del usuario.
 
 ## R6: topologia relativa y formas especiales de Rojo
 

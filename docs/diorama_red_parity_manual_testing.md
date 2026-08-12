@@ -140,3 +140,52 @@ compilado. `PX` debe desaparecer junto con el claim si una mutacion invalida el 
 F6 solo se usa para documentar un defecto concreto. Si algo falla, indica scenario ID,
 coordenada, pitch y `PX/G`; R4 solo se aprueba tras declarar explicitamente que masks,
 soporte y ground replacement son correctos.
+
+## R5
+
+F3 muestra `VOL H:<bandas> P:<periodo> <eje> F:<flags>` para una celda aceptada por el
+detector generico. Cada banda representa 8 pixels del dibujo, es decir, media celda de
+altura; `H` nunca supera seis. La vista `flat` es la autoridad para decidir cuanto arte
+pertenece a la cara, pero la correccion 3D solo puede validarse moviendo la camara.
+
+1. Ejecuta `R5-ROUTE115-CLIFF-RUNS` en Ruta 115, (18,41), mirando al norte. Comprueba
+   primero a pitch 35 y 50 que cada metatile `MB_MOUNTAIN_TOP` alcanza exactamente una
+   celda de altura, independientemente de collision y elevation. Su contorno elevado debe
+   seguir la silueta pixelada del foreground o de la cima opaca; nunca debe verse como un
+   cuadrado completo elevado ni dejar negro en los pixels recortados.
+2. Ejecuta `R5-MT-CHIMNEY-REPEATED-RIDGES` en Monte Cenizo, (20,23), mirando al sur.
+   Las filas repetidas deben conservar la misma altura de una celda y unirse sin grietas,
+   escalones accidentales ni slabs cuadrados entre variantes de borde y cima.
+3. Ejecuta `R5-JAGGED-PASS-BIDIRECTIONAL-RUNS` en Desfiladero, (16,25), mirando al norte.
+   Revisa con F3 ejemplos `X` y `Z`; la mascara debe conservar su curva en ambas direcciones
+   y no cambiar al mover la camara o durante fades.
+4. Ejecuta `R5-FORTREE-FOREST-REPETITION` en Arborada, (5,7), mirando al norte. El bosque
+   debe conservar unidades repetidas acotadas y de altura uniforme dentro de una plantacion,
+   no una pared monolitica o columnas altas. Cada copa debe conservar literalmente su silueta
+   frontal pixelada y adquirir profundidad redondeada al girar la camara, sin parecer un
+   sprite pegado a un cilindro. La hierba y sombra dibujada del fondo no forman geometria;
+   frente/reverso conservan el dibujo y laterales/tapa usan colores interiores de la copa.
+   Debajo solo aparece el ground plano circundante: nunca debe quedar una copia 2D del arbol.
+   El movimiento de camara por una plantacion no debe producir caidas fuertes de rendimiento.
+   El arbol grande debe coincidir con `tree_model/emerald_tree.vox`, estar centrado sobre el
+   cuerpo bloqueante 2x2 y tocar el suelo. La fila norte atravesable del dibujo 2x3 debe quedar
+   como cesped normal; las dos filas bajo el modelo pueden verse algo mas oscuras como sombra.
+   No debe quedar ningun hull cortado a media altura. El patron repetido fuera del borde este
+   de Oldale y de los bordes sin conexion de Littleroot debe usar el mismo modelo; una conexion
+   real nunca debe convertirse en decoracion de borde. Recorrer y girar la camara por Oldale
+   debe mantener movimiento fluido y los arboles no deben aparecer/desaparecer en seams de chunk.
+   Las pasarelas y edificios reclamados no deben recibir `VOL`.
+   En Villa Raiz/Pueblo Escaso comprueba ademas que un arbol grande forma un solo hull 2x2
+   de dos celdas de altura, incluida su fila norte atravesable, y que un arbol pequeno forma
+   un solo hull 2x1. No debe verse negro en las esquinas recortadas ni entre hulls vecinos.
+5. Ejecuta `R5-GRANITE-CAVE-B1F-WALL-EXTENT`: entra por (25,13), avanza a (25,14) y mira
+   al norte. Las paredes coherentes usan bandas distintas sin estirar una unica textura;
+   no debe haber roofs en el interior de la cueva y la roca ambigua queda plana.
+6. Ejecuta `R5-CLAIMED-CONTENT-EXCLUSION` en el Centro Pokemon de Pueblo Escaso, (7,7),
+   mirando al norte. El mostrador conserva `OWN:template` y nunca muestra `VOL`.
+7. En los cinco escenarios de terreno compara pitches 15, 35, 50 y 75, y vuelve al mapa
+   mediante una transicion normal. Altura, periodo, eje, flags y geometria deben mantenerse.
+
+Para iterar basta empezar por Ruta 115 y Monte Cenizo. Indica escenario, coordenada,
+pitch y si falla altura, eje, repeticion, textura de banda, roof o exclusion. Los escenarios
+restantes se usan cuando el primer candidato visual ya permite revisar cada clase.

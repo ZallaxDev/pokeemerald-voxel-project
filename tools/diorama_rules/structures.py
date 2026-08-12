@@ -64,7 +64,8 @@ def _pattern_matches(pattern: dict, layout: dict, cells: tuple[dict, ...],
                      origin_x: int, origin_y: int) -> bool:
     pair = pattern.get("tilesets")
     if pair and (layout.get("primary_tileset") != pair.get("primary")
-                 or layout.get("secondary_tileset") != pair.get("secondary")):
+                 or ("secondary" in pair
+                     and layout.get("secondary_tileset") != pair.get("secondary"))):
         return False
     width = layout["width"]
     return all(cells[(origin_y + row) * width + origin_x + column].get("metatile") == value

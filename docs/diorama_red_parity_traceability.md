@@ -6,7 +6,7 @@ Reference commit: `b21fd46ea789a0b8cb99d2c7e0add5a007568a54`.
 |---|---|---|---|---|
 | `main.lua` fallback | Existing OpenGL compositor plus software fallback | Emerald retains complete classic rendering for unsupported scenes | `R0-CLASSIC-SMOKE` | Movement, menus, battle and save/load remain software-rendered and functional |
 | `TileShape.lua` final wall fallback | R2 compiles one complete-layout classifier to guarded C records | Ambiguous Emerald art remains flat rather than becoming a wall | `R0-ROUTE101` | Blocked unclassified cells have zero invented height |
-| `Structures.lua` generic run detector | No R0 owner; scheduled for R5 | The discarded metatile-ID north-south detector is removed, not used as fallback | `R0-ROUTE115` | Generated IR has no automatic/measured run records |
+| `Structures.lua` generic run detector | R5 measures complete residual components in `measured_volumes.py`, then compiles guarded height/run/band records | Emerald compares tile/layer/palette/flips/subtile and tileset-pair provenance; metatile ID and pixel equality are not authority | `R5-ROUTE115-CLIFF-RUNS`, `tools/diorama_rules/test_measured_volumes.py` | Extent and period remain distinct, height is capped at six 8-pixel bands, and contradictory candidates remain flat |
 | `voxel_heights.lua` manual profile | No R0 profile; R2/R7/R9 rebuild reviewed reusable knowledge | All inherited pins and coordinate experiments are removed | `R0-ROUTE104` | No map has an inherited terrain anchor or pin |
 | Relative ledge/stair constraints | No R0 topology resolver; R6 will implement the audited equivalent | Gameplay elevation remains metadata, never metric height | `R0-MT-CHIMNEY` | No static topology record is generated before R6 |
 | Map-complete cache stability | Static records guarded by layout, source coordinate and expected metatile | Runtime never repeats viewport-local inference | `R0-LITTLEROOT` | Leaving and returning does not change geometry |
@@ -58,3 +58,97 @@ agree over all 325,276 terrain records and every object, mask and pixel record. 
 technical evidence is now invalid as a candidate: the second visual review still found
 flat TV screen/support, plants, stools and relief. R4 is back in `implementation`, and
 corpus-wide closure will not run again until a reduced visual candidate is accepted.
+
+R5 introduces one detector over complete layouts after authored/template/prop claims. It
+scans north-south and east-west runs in deterministic source order, anchors repetition at
+the south/east front, supports the trim-plus-repeat case, applies regional consensus and
+stores confidence/conflicts. Runtime consumes immutable measured records, invalidates the
+whole owner after a dirty source cell and renders each half-metatile face band from its own
+compiled source. Roof evidence remains a candidate for R7 rather than creating a generic
+gable.
+
+The failed forest candidates exposed a missing prerequisite from Red: generic folding is
+restricted to residual `upright` art. Collision is supporting evidence, never a positive
+classification. Emerald `fallback:flat` cells therefore cannot enter R5. General tree art
+is claimed before the generic fold, while unresolved buildings stay flat until R7 rather
+than becoming mixed generic owners.
+
+Emerald's authoritative `MB_MOUNTAIN_TOP` behavior now supplies a separate positive R5
+terrain class. Every accepted mountain cell contributes exactly one cell of visual height;
+gameplay elevation remains plane identity only. Runtime derives a fade-invariant occupancy
+mask from the unfaded foreground layer when partial, or removes the corner-connected
+background from an opaque full composition. Raised pixels use the mountain shell while all
+removed pixels retain base underlay, so no variant can become a square slab or expose black.
+The offline compiler applies the equivalent extraction to the complete corpus and rejects
+unresolved, empty or rectangular mountain masks.
+
+General's Route 104 rock-terrace family is not a horizontal topographic silhouette: its art
+depicts a directed boundary between visual planes. The complete-layout solver recognizes only
+connected 121/136/137/144 courses, closes Route 104's 207/175 transitions, and compiles integer
+potentials without treating gameplay elevation as metric. At source `(25,66)`, north ground is
+one cell above south ground even though both carry gameplay elevation 3. Components anchor their
+highest plane at zero, preserving map-connection ground while lower beaches become negative.
+Terrace cells with partial foreground alpha use that exact unfaded 16x16 mask as their high-plane
+foot. A six-voxel run rises from the lower plane to the upper plane at that curved boundary,
+forming a voxel wedge rather than a binary cut. The wedge uses full-composite opaque materials
+on its exposed surfaces; foreground alpha never leaves the clear color visible below the course.
+Course turns share boundary functions rather than meshing independent local ramps: horizontal
+uses N, vertical uses E, inner corners use `min(E,N)`, and outer corners use `max(E,N)`. Curvature
+is restricted to interior samples while canonical endpoint sections make every shared edge
+bit-identical. Low and high endpoints land exactly on -1 and 0, respectively.
+The attempted luminance relief skin is not part of the current renderer. Replacing the wedge with
+a binary wall and brown pixel prisms visually regressed to square blocks and black artifacts, so
+the experiment was removed. The restored candidate is the curved gradual wedge with opaque full
+materials and shared N/E/min/max seam functions. Any future color relief must preserve that base
+volume rather than substitute it.
+
+Terrace occupancy is relative to the resolved course ground, not absolute world zero. Every raised
+mountain-art sample spans from `ground - 1 voxel` through `ground + mountainHeight`; this keeps the
+gradual `-1..0` Route 104 wedge solid instead of emitting disconnected one-voxel slabs. The focused
+terrain fixture uses a negative-ground vertical terrace and rejects any downward horizontal face
+above the single lower base plane.
+
+The follow-up Route 104 capture confirms this invariant removes both previously visible failure
+modes: there are no black concave cavities and no disconnected side bands. This validates solid
+course occupancy while leaving final terrace shape approval as a separate visual decision.
+
+The current smoothing candidate changes only unconstrained interior height samples. Shared N/E
+ramps use integer smoothstep while preserving exact 0/16 endpoints. Inner corners use
+`ceil(E*N/16)` and outer corners use its exact dual
+`16-ceil((16-E)*(16-N)/16)`, so all high, low and neighboring profile boundaries remain identical.
+At E=N=8 the interiors become 4/12 instead of the orthogonal min/max value 8. Solid occupancy,
+native 16x16 resolution, full-composite materials and gameplay state are unchanged.
+This candidate failed visual review and is not an accepted technique. R5 is paused by explicit user
+decision. Further terrace work must replace runtime height-formula iteration with an offline,
+deterministic model compiler: immutable Emerald art and topology constrain a known wedge template;
+the compiler emits a solid inspectable voxel model, validates interfaces and provenance, and greedy-
+meshes it for immutable runtime instancing. `tree_model/emerald_tree.vox` and
+`tools/diorama_tree/compile_vox.py` define the existing output-side precedent.
+Contradictory components fall back together, isolated ID reuse is ignored, and tree VOX rendering
+remains independent.
+
+General tree ownership is now ordered by complete drawing: 2x3 trees, repeated 2x2 bodies,
+then incomplete 2x1 edge rows. Dense forest metatiles 198/199 are identical one-cell units
+rather than left/right pairs. The renderer assembles each complete 16x16, 32x16 or 32x32
+drawing. General's opaque art cannot use Red's luminance flood directly: stable palette-2
+tokens `{1,2,3,4,6,8}` identify crown/trunk while `{12,13,14,15}` identify cyan ground and
+painted shadow. The largest upper connected component becomes quantized circular depth
+chords. Front/back faces preserve full-composite texels, sides search inward past the dark
+outline, dome interiors sample deeper artwork rows, and the dominant visible flat ground
+metatile replaces the source tree below the hull. Compatible faces are emitted as runs rather
+than one quad per voxel. Dense forest 198/199 remains full-cell foliage, not a round crown.
+
+The user-authored `tree_model/emerald_tree.vox` supersedes that inferred hull for General's
+large 2x2 body. Its 6782 voxels compile offline into 2424 exterior, color-aware greedy quads;
+runtime never parses an asset or emits hidden cube faces. A 2x3 painted pattern anchors the
+same model at its southern 2x2 blocking body. Every claimed source cell becomes flat visible
+ground, with a darker ground shade only below the blocking body. The 2x1 small-tree fallback
+and dense forest cells remain separate classes.
+
+The authored model is uploaded once as a static local-space VBO. Terrain chunks retain only
+bounded value-only translations, own each tree by its visible anchor chunk, and conservatively
+include the complete transformed model in their culling bounds. All visible trees use one
+OpenGL 3.3 instanced draw. A render-only border provenance flag distinguishes repeated
+`border.bin` presentation from source-valid map cells; only the exact General matrix
+`468/469/476/477` becomes a 2x2 tree owner. This neither fabricates map coordinates nor changes
+the field map, connections, collision, or any gameplay state.

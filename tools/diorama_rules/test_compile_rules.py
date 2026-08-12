@@ -65,22 +65,33 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertEqual(render_c(self.data), render_c(compile_data(ROOT)))
 
     def test_repository_has_authoritative_pin_and_r3_r4_patterns(self):
-        for key in ("behaviorRules", "profiles", "contextualRules"):
-            self.assertEqual(self.data[key], [])
-        self.assertEqual(
-            [(row["id"], row["placementCount"]) for row in self.data["exactPatterns"]],
-            [("petalburg-lab-shell", 1), ("petalburg-house-left-shell", 1),
-             ("petalburg-house-right-shell", 1),
-             ("pokemon-center-service-counter", 3),
-             ("generic-building-potted-plant", 5),
-             ("brendan-tv-support", 1),
-             ("may-tv-support", 1),
-             ("brendan-tv-cutout", 1),
-             ("may-tv-cutout", 1),
-             ("generic-building-left-stool", 6),
-             ("generic-building-right-stool", 10),
-             ("generic-building-table-relief", 1),
-             ("petalburg-isolated-signpost", 2)])
+        self.assertEqual(self.data["profiles"], [])
+        self.assertEqual([(row["behavior"], row["action"]["archetype"],
+                           row["action"]["height"])
+                          for row in self.data["behaviorRules"]],
+                         [("MB_MOUNTAIN_TOP", "cliff", 1.0)])
+        self.assertEqual([row["id"] for row in self.data["contextualRules"]],
+                         ["general-rock-terrace-cell", "general-dense-forest-cell"])
+        placements = {row["id"]: row["placementCount"]
+                      for row in self.data["exactPatterns"]}
+        self.assertTrue(all(placements[name] > 0 for name in (
+            "general-large-tree-canonical", "general-tree-body-canonical",
+            "general-small-tree-canonical")))
+        self.assertEqual({name: placements[name] for name in (
+            "petalburg-lab-shell", "petalburg-house-left-shell",
+            "petalburg-house-right-shell", "pokemon-center-service-counter",
+            "generic-building-potted-plant", "brendan-tv-support", "may-tv-support",
+            "brendan-tv-cutout", "may-tv-cutout", "brendan-tv-base", "may-tv-base",
+            "generic-building-left-stool", "generic-building-right-stool",
+            "generic-building-table-relief", "petalburg-isolated-signpost")}, {
+                "petalburg-lab-shell": 1, "petalburg-house-left-shell": 1,
+                "petalburg-house-right-shell": 1, "pokemon-center-service-counter": 3,
+                "generic-building-potted-plant": 5, "brendan-tv-support": 1,
+                "may-tv-support": 1, "brendan-tv-cutout": 1, "may-tv-cutout": 1,
+                "brendan-tv-base": 1, "may-tv-base": 1,
+                "generic-building-left-stool": 6, "generic-building-right-stool": 10,
+                "generic-building-table-relief": 1, "petalburg-isolated-signpost": 2,
+            })
         self.assertEqual(len(self.data["tilesetPins"]), 1)
         pin = self.data["tilesetPins"][0]
         self.assertEqual((pin["tileset"], pin["metatile"], pin["placementCount"]),
@@ -90,6 +101,16 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertIn("General_Flower", pin["reason"])
         self.assertTrue(all(row["contextualRules"] == [] for row in self.data["maps"]))
         self.assertTrue(all(row["exactPatterns"] == [] for row in self.data["maps"]))
+
+    def test_repository_mountains_are_one_block_art_masked_cliffs(self):
+        mountains = [record for layout in self.data["layouts"]
+                     for record in layout["terrainRecords"]
+                     if record["source"] == "behavior:MB_MOUNTAIN_TOP"]
+        self.assertGreater(len(mountains), 20000)
+        self.assertEqual({record["class"] for record in mountains}, {"cliff"})
+        self.assertEqual({record["heightQ16"] for record in mountains}, {16})
+        self.assertEqual({record["measuredFlags"] for record in mountains}, {32})
+        self.assertEqual({record["artMode"] for record in mountains}, {"top"})
 
     def test_sha256_is_canonical_and_covers_every_ir_section(self):
         canonical_keys = ("schemaVersion", "tilesets", "layouts", "pools", "profiles", "default",
@@ -304,7 +325,7 @@ class DioramaRuleCompilerTests(unittest.TestCase):
                             for obj in self.data["pixelObjects"] for pixel in obj["pixels"]))
         supported = [obj for obj in self.data["pixelObjects"] if obj["supportStructureId"]]
         self.assertEqual(len(supported), 2)
-        self.assertTrue(all(obj["class"] == "console" and obj["supportOffsetQ16"] == 12
+        self.assertTrue(all(obj["class"] == "console" and obj["supportOffsetQ16"] == 8
                             and obj["groundMode"] == "replacement"
                             and obj["groundMetatile"] == 513 for obj in supported))
         structures = {row["id"]: row for row in self.data["structureCandidates"]}
@@ -321,13 +342,17 @@ class DioramaRuleCompilerTests(unittest.TestCase):
             ("event:background-sign", "replacement", 1, False,
              "d48f1e20b24a2549f329db82dfe0399a852945cc3585be861290e5d5e4bfbc3f"): 3,
             ("brendan-tv-cutout", "replacement", 513, True,
-             "0efca5a034af598fd64bf87ffcbcc300a9d2fbcd77475eaa5c16bad4a397ea67"): 1,
+             "f19997c0626bbf8e6ae5b3bbc525ffb28e6ded5f3fcea5d4da6b04fec43c9996"): 1,
             ("may-tv-cutout", "replacement", 513, True,
-             "0efca5a034af598fd64bf87ffcbcc300a9d2fbcd77475eaa5c16bad4a397ea67"): 1,
+             "f19997c0626bbf8e6ae5b3bbc525ffb28e6ded5f3fcea5d4da6b04fec43c9996"): 1,
             ("brendan-tv-support", "source-base", 0xFFFF, False,
              "077af72744ba6ac7056fd27e228770687db42b56fa17bbeb0a1bc399d3925a1b"): 1,
             ("may-tv-support", "source-base", 0xFFFF, False,
              "077af72744ba6ac7056fd27e228770687db42b56fa17bbeb0a1bc399d3925a1b"): 1,
+            ("brendan-tv-base", "replacement", 558, False,
+             "5ada150e0358d4385fd8b34c576ca78aca64d94aa5dc105cd4c89aff290bb248"): 1,
+            ("may-tv-base", "replacement", 689, False,
+             "5ada150e0358d4385fd8b34c576ca78aca64d94aa5dc105cd4c89aff290bb248"): 1,
             ("generic-building-potted-plant", "source-base", 0xFFFF, False,
              "d444d1b17085ac9d0f7adfb5f55e82a229f32e59e3147ab1b098c1739a64e0e9"): 5,
             ("generic-building-left-stool", "source-base", 0xFFFF, False,

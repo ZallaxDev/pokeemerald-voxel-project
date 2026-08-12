@@ -1972,6 +1972,17 @@ El error más peligroso sería comenzar creando geometría vistosa antes de reso
 
 Con esas bases resueltas, el resto se convierte en una expansión progresiva del diccionario visual de Hoenn, no en una reescritura del juego.
 
+### 32.1 Compilacion automatica de modelos voxel
+
+Para una familia cuya forma base ya sea conocida, la expansion del diccionario visual no debe
+consistir en retocar formulas del mesher tras cada captura. Un compilador offline debe combinar arte
+Emerald inmutable, topologia del layout y una plantilla volumetrica versionada; su salida sera un
+modelo voxel solido e inspeccionable y una malla greedy determinista. El compilador debe validar
+provenance, conectividad, cavidades, capacidad y seams antes de publicar datos generados. El runtime
+solo observa el snapshot e instancia esos datos inmutables. El flujo `.vox` del arbol existente es
+el precedente de salida; las cunas y esquinas de terraza deben convertirse en otra familia de
+plantillas compiladas, no en heightmaps ad-hoc permanentes.
+
 ---
 
 ## 33. Fuentes revisadas
@@ -1998,3 +2009,11 @@ Con esas bases resueltas, el resto se convierte en una expansión progresiva del
 - [`data/voxel_heights.lua`](https://github.com/DramaticShape/DramaticShapeVoxelMod/blob/master/data/voxel_heights.lua)
 - [`lib/TileShape.lua`](https://github.com/DramaticShape/DramaticShapeVoxelMod/blob/master/lib/TileShape.lua)
 - [`lib/Buildings.lua`](https://github.com/DramaticShape/DramaticShapeVoxelMod/blob/master/lib/Buildings.lua)
+- [Gen1Recomp](https://github.com/bryanthaboi/gen1recomp): referencia de integracion moderna del
+  modo de presentacion, aislamiento de estado GPU y fallback 2D. Su checkout no incluye el renderer
+  voxel, que se distribuye como mod separado.
+- [`src/render/Pipelines.lua`](https://github.com/bryanthaboi/gen1recomp/blob/dev/src/render/Pipelines.lua)
+- [`docs/modding.md`](https://github.com/bryanthaboi/gen1recomp/blob/dev/docs/modding.md)
+- [Terrarium](https://github.com/BrenoBertucci/Terrarium) y
+  [PotatoVoxel](https://github.com/ShaneMcGovernIE/potato_voxel): forks externos mas recientes que
+  pueden estudiarse si se incorporan explicitamente como referencias, nunca como dependencias.

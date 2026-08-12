@@ -198,7 +198,7 @@ test-diorama: test-diorama-snapshot test-diorama-connection test-diorama-transit
 
 test-diorama-red-parity: test-diorama test-diorama-survey
 	python3 tools/diorama_red_parity/test_gate.py
-	python3 tools/diorama_red_parity/check_red_parity_gate.py --phase R4 --require-approved-previous
+	python3 tools/diorama_red_parity/check_red_parity_gate.py --phase R5 --require-approved-previous
 
 test-diorama-survey:
 	python3 tools/diorama_survey/test_survey.py
@@ -240,13 +240,14 @@ test-diorama-metatile-golden: tests/diorama/metatile_golden_driver.c src/diorama
 	python3 tools/diorama_rules/test_emerald_compositor.py --driver $(DIORAMA_METATILE_GOLDEN_DRIVER)
 
 DIORAMA_RULE_TEST_DEPS := src/diorama/rules.c src/data/diorama/diorama_rules.generated.c \
-	include/diorama/rules.h include/diorama/rules.generated.h
+	include/diorama/rules.h include/diorama/rules.generated.h \
+	src/data/diorama/tree_model.generated.c include/diorama/tree_model.generated.h
 
 test-diorama-terrain: tests/diorama/test_terrain_mesh.c src/diorama/terrain/terrain_mesh.c src/diorama/terrain/occupancy.c include/diorama/terrain_mesh.h include/diorama/occupancy.h $(DIORAMA_RULE_TEST_DEPS)
 	mkdir -p $(dir $(DIORAMA_TERRAIN_TEST))
 	$(DIORAMA_TEST_CC) -m32 -std=gnu99 -Wall -Wextra -Werror -D ENABLE_DIORAMA -iquote include \
 		tests/diorama/test_terrain_mesh.c src/diorama/terrain/terrain_mesh.c src/diorama/terrain/occupancy.c src/diorama/rules.c \
-		src/data/diorama/diorama_rules.generated.c \
+		src/data/diorama/diorama_rules.generated.c src/data/diorama/tree_model.generated.c \
 		-lm -o $(DIORAMA_TERRAIN_TEST)
 	$(DIORAMA_TERRAIN_TEST)
 
@@ -255,7 +256,8 @@ test-diorama-sprite: tests/diorama/test_sprite_frame.c src/diorama/scene/sprite_
 	$(DIORAMA_TEST_CC) -m32 -std=gnu99 -Wall -Wextra -Werror -D ENABLE_DIORAMA -iquote include \
 		tests/diorama/test_sprite_frame.c src/diorama/scene/sprite_frame.c \
 		src/diorama/terrain/terrain_mesh.c src/diorama/terrain/occupancy.c src/diorama/rules.c \
-		src/data/diorama/diorama_rules.generated.c -lm -o $(DIORAMA_SPRITE_TEST)
+		src/data/diorama/diorama_rules.generated.c src/data/diorama/tree_model.generated.c \
+		-lm -o $(DIORAMA_SPRITE_TEST)
 	$(DIORAMA_SPRITE_TEST)
 
 test-diorama-weather: tests/diorama/test_weather.c src/diorama/scene/weather.c include/diorama/weather.h
@@ -276,6 +278,9 @@ test-diorama-rules: tests/diorama/test_rules.c $(DIORAMA_RULE_TEST_DEPS)
 	python3 tools/diorama_rules/test_compile_rules.py
 	python3 tools/diorama_rules/test_tile_shape.py
 	python3 tools/diorama_rules/test_structures.py
+	python3 tools/diorama_rules/test_measured_volumes.py
+	python3 tools/diorama_rules/test_mountain_art.py
+	python3 tools/diorama_rules/test_terrace_topology.py
 	python3 tools/diorama_rules/test_pixel_objects.py
 	python3 tools/diorama_rules/test_rules_parity.py
 	python3 tools/diorama_rules/test_catalog.py

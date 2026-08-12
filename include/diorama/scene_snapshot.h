@@ -23,6 +23,7 @@ enum DioramaCellFlags
 {
     DIORAMA_CELL_SOURCE_VALID = 1 << 0,
     DIORAMA_CELL_CONNECTED = 1 << 1,
+    DIORAMA_CELL_BORDER = 1 << 2,
 };
 
 enum DioramaObjectFlags
@@ -210,6 +211,7 @@ struct DioramaSceneSnapshot
     int16_t surfBlobOffsetX;
     int16_t surfBlobOffsetY;
     struct DioramaObjectSnapshot surfBlob;
+    uint16_t unfadedPalette[DIORAMA_FADED_PALETTE_ENTRIES];
     uint16_t fadedPalette[DIORAMA_FADED_PALETTE_ENTRIES];
     uint8_t tileGraphics[DIORAMA_TILE_GRAPHICS_SIZE];
 };

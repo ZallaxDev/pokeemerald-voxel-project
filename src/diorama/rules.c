@@ -11,6 +11,18 @@ static int FindCell(const struct DioramaSceneSnapshot *snapshot,
                     const struct DioramaCellSnapshot *origin, int dx, int dy);
 static const struct DioramaGeneratedLayoutV2 *FindLayout(uint16_t layoutId);
 
+static void DisableMeasuredVolume(struct DioramaResolvedCell *resolved)
+{
+    resolved->shape = DIORAMA_SHAPE_FLAT;
+    resolved->profile = DIORAMA_ROOF_NONE;
+    resolved->featureHeight = 0.0f;
+    resolved->topHeight = resolved->groundHeight;
+    resolved->structureBodyHeight = 0.0f;
+    resolved->structureRoofHeight = 0.0f;
+    resolved->structureRoofRows = 0;
+    resolved->measuredBandCount = 0;
+}
+
 static const struct DioramaCellSnapshot *FindSourceCell(
     const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *origin,
     uint16_t layoutId, int16_t sourceX, int16_t sourceY)
@@ -248,6 +260,21 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
     record = FindStaticTerrain(layout, cellOffset, cell->sourceMapGroup, cell->sourceMapNum);
     if (record == NULL || record->expectedMetatile != cell->metatileId)
         return;
+    if (record->measuredBandCount > DIORAMA_MAX_MEASURED_BANDS
+     || record->measuredBandOffset > gDioramaMeasuredBandV2Count
+     || record->measuredBandCount > gDioramaMeasuredBandV2Count - record->measuredBandOffset)
+        return;
+    for (uint8_t bandIndex = 0; bandIndex < record->measuredBandCount; bandIndex++)
+    {
+        const struct DioramaGeneratedMeasuredBandV2 *band =
+            &gDioramaMeasuredBandsV2[record->measuredBandOffset + bandIndex];
+        const struct DioramaCellSnapshot *sourceCell = FindSourceCell(
+            snapshot, cell, layout->id, band->sourceCellOffset % layout->width,
+            band->sourceCellOffset / layout->width);
+
+        if (sourceCell != NULL && sourceCell->metatileId != band->expectedMetatile)
+            return;
+    }
     resolved->shape = record->shape;
     resolved->archetype = record->archetype;
     resolved->terrainClass = record->terrainClass;
@@ -265,21 +292,59 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
     resolved->groundMode = record->propGroundMode;
     resolved->baseMetatileId = record->propGroundMetatile;
     resolved->planeAxis = record->axis;
-    resolved->featureHeight = record->heightQ16 > 0 ? record->heightQ16 / 16.0f : 0.0f;
-    resolved->groundHeight = record->heightQ16 < 0 ? record->heightQ16 / 16.0f : 0.0f;
-    if (record->shape == DIORAMA_SHAPE_LEDGE)
-        resolved->groundHeight = resolved->featureHeight;
-    resolved->topHeight = resolved->groundHeight + resolved->featureHeight;
-    if (record->shape == DIORAMA_SHAPE_LEDGE)
-        resolved->topHeight = resolved->groundHeight;
+    if (record->measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY)
+    {
+        resolved->groundHeight = record->groundQ16 / 16.0f;
+        resolved->topHeight = record->topQ16 / 16.0f;
+        resolved->featureHeight = resolved->topHeight - resolved->groundHeight;
+    }
+    else
+    {
+        resolved->featureHeight = record->heightQ16 > 0 ? record->heightQ16 / 16.0f : 0.0f;
+        resolved->groundHeight = record->heightQ16 < 0 ? record->heightQ16 / 16.0f : 0.0f;
+        if (record->shape == DIORAMA_SHAPE_LEDGE)
+            resolved->groundHeight = resolved->featureHeight;
+        resolved->topHeight = resolved->groundHeight + resolved->featureHeight;
+        if (record->shape == DIORAMA_SHAPE_LEDGE)
+            resolved->topHeight = resolved->groundHeight;
+    }
     resolved->cliffEdgeMask = record->cliffEdgeMask;
     resolved->cliffBaseMask = record->cliffBaseMask;
     resolved->cliffTransitionMask = record->cliffTransitionMask;
     resolved->cliffCornerMask = record->cliffCornerMask;
+    resolved->terraceProfile = record->terraceProfile;
+    resolved->measuredAxis = record->measuredAxis;
+    resolved->measuredExtentBands = record->measuredExtentBands;
+    resolved->measuredPeriodBands = record->measuredPeriodBands;
+    resolved->measuredRoofBands = record->measuredRoofBands;
+    resolved->measuredRunLocal = record->measuredRunLocal;
+    resolved->measuredRunLength = record->measuredRunLength;
+    resolved->measuredFlags = record->measuredFlags;
+    resolved->measuredBandCount = record->measuredBandCount;
+    resolved->measuredConfidence = record->measuredConfidence;
+    resolved->structureBodyHeight = record->measuredBodyQ16 / 16.0f;
+    resolved->structureRoofHeight = record->measuredRoofQ16 / 16.0f;
+    resolved->structureRoofRows = record->measuredRoofBands;
+    if (record->measuredRoofQ16 != 0)
+        resolved->profile = record->measuredAxis == DIORAMA_PLANE_AXIS_Z
+                          ? DIORAMA_ROOF_GABLE_Z : DIORAMA_ROOF_GABLE_X;
+    for (uint8_t bandIndex = 0; bandIndex < record->measuredBandCount; bandIndex++)
+    {
+        const struct DioramaGeneratedMeasuredBandV2 *band =
+            &gDioramaMeasuredBandsV2[record->measuredBandOffset + bandIndex];
+
+        resolved->measuredBands[bandIndex].metatileId = band->expectedMetatile;
+        resolved->measuredBands[bandIndex].layer = band->layer;
+        resolved->measuredBands[bandIndex].sourceHalf = band->sourceHalf;
+    }
     structureCell = FindStaticStructure(layout, cellOffset, cell->metatileId,
                                         cell->sourceMapGroup, cell->sourceMapNum);
     if (structureCell == NULL)
+    {
+        if (record->measuredBandCount != 0)
+            DisableMeasuredVolume(resolved);
         return;
+    }
     resolved->voidKind = structureCell->voidKind;
     if (!StructureIsDirty(snapshot, cell,
                           DioramaRules_GetStructure(structureCell->claimOwner != 0
@@ -305,6 +370,59 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
             resolved->structureLocalY = cell->sourceMapY - structure->y;
             resolved->structureOwnerKind = structure->kind;
             resolved->rulePriority = structure->priority;
+            if (structure->kind == DIORAMA_OWNER_TEMPLATE
+             && structure->width == 2
+             && structure->height >= 1 && structure->height <= 3
+             && strcmp(DioramaRules_ClassName(structure->classId), "grouped-hull") == 0)
+            {
+                uint8_t bodyRows = structure->height >= 2 ? 2 : 1;
+                uint8_t bodyStart = structure->height - bodyRows;
+                uint32_t topOffset = (uint32_t)structure->y * layout->width
+                                   + structure->x + resolved->structureLocalX;
+                const struct DioramaGeneratedTerrainV2 *topRecord = FindStaticTerrain(
+                    layout, topOffset, cell->sourceMapGroup, cell->sourceMapNum);
+
+                resolved->shape = DIORAMA_SHAPE_EXTRUDED;
+                resolved->archetype = DIORAMA_ARCHETYPE_GROUPED_HULL;
+                resolved->featureHeight = bodyRows;
+                resolved->topHeight = resolved->groundHeight + bodyRows;
+                if (topRecord != NULL)
+                {
+                    resolved->materials[DIORAMA_MATERIAL_FACE_TOP].metatileId =
+                        topRecord->expectedMetatile;
+                    resolved->materials[DIORAMA_MATERIAL_FACE_TOP].layer =
+                        DIORAMA_MATERIAL_FOREGROUND;
+                }
+                if (resolved->structureLocalY >= bodyStart)
+                {
+                    resolved->measuredAxis = DIORAMA_PLANE_AXIS_Z;
+                    resolved->measuredBandCount = bodyRows * 2;
+                    resolved->measuredExtentBands = bodyRows * 2;
+                    resolved->measuredPeriodBands = bodyRows * 2;
+                    for (uint8_t band = 0; band < resolved->measuredBandCount; band++)
+                    {
+                        uint16_t sourceY = structure->y + structure->height - 1 - band / 2;
+                        uint32_t sourceOffset = (uint32_t)sourceY * layout->width
+                                              + structure->x + resolved->structureLocalX;
+                        const struct DioramaGeneratedTerrainV2 *sourceRecord = FindStaticTerrain(
+                            layout, sourceOffset, cell->sourceMapGroup, cell->sourceMapNum);
+
+                        if (sourceRecord == NULL)
+                        {
+                            resolved->measuredBandCount = 0;
+                            break;
+                        }
+                        resolved->measuredBands[band].metatileId =
+                            sourceRecord->expectedMetatile;
+                        resolved->measuredBands[band].layer = DIORAMA_MATERIAL_FOREGROUND;
+                        resolved->measuredBands[band].sourceHalf = (band & 1) ? 0 : 1;
+                    }
+                }
+            }
+            if (resolved->archetype == DIORAMA_ARCHETYPE_ROUND_HULL)
+                for (uint8_t face = DIORAMA_MATERIAL_FACE_TOP;
+                     face < DIORAMA_MATERIAL_FACE_COUNT; face++)
+                    resolved->materials[face].layer = DIORAMA_MATERIAL_FOREGROUND;
             pixelObject = DioramaRules_FindPixelObject(layout->id,
                 cell->sourceMapGroup, cell->sourceMapNum, structure->id);
             if (pixelObject != NULL)
@@ -314,6 +432,10 @@ static void ApplyStaticTerrain(const struct DioramaSceneSnapshot *snapshot,
                 resolved->baseMetatileId = pixelObject->groundMetatile;
             }
         }
+    }
+    else if (record->measuredBandCount != 0)
+    {
+        DisableMeasuredVolume(resolved);
     }
 }
 
@@ -462,6 +584,78 @@ static int FindCell(const struct DioramaSceneSnapshot *snapshot,
      || snapshot->cells[index].mapX != mapX || snapshot->cells[index].mapY != mapY)
         return -1;
     return index;
+}
+
+static void ClaimBorderTreeCell(const struct DioramaCellSnapshot *cell,
+                                struct DioramaResolvedCell *resolved,
+                                uint16_t structureId, uint8_t localX, uint8_t localY)
+{
+    resolved->shape = DIORAMA_SHAPE_EXTRUDED;
+    resolved->archetype = DIORAMA_ARCHETYPE_GROUPED_HULL;
+    resolved->artMode = DIORAMA_ART_UPRIGHT;
+    resolved->source = DIORAMA_RULE_SOURCE_PATTERN;
+    resolved->claimOwner = structureId;
+    resolved->regionId = structureId;
+    resolved->structureId = structureId;
+    resolved->rulePriority = 415;
+    resolved->structureX = cell->mapX - localX;
+    resolved->structureY = cell->mapY - localY;
+    resolved->structureWidth = 2;
+    resolved->structureHeight = 2;
+    resolved->structureLocalX = localX;
+    resolved->structureLocalY = localY;
+    resolved->structureOwnerKind = DIORAMA_OWNER_TEMPLATE;
+    resolved->featureHeight = 2.0f;
+    resolved->topHeight = resolved->groundHeight + 2.0f;
+}
+
+static void ClaimBorderTrees(const struct DioramaSceneSnapshot *snapshot,
+                             struct DioramaResolvedCell *resolvedCells, uint16_t count)
+{
+    const struct DioramaGeneratedLayoutV2 *layout = FindLayout(snapshot->mapLayoutId);
+
+    if (layout == NULL || layout->primaryTilesetId == 0
+     || layout->primaryTilesetId > gDioramaTilesetV2Count
+     || strcmp(gDioramaTilesetsV2[layout->primaryTilesetId - 1].symbol,
+               "gTileset_General") != 0)
+        return;
+    for (uint16_t index = 0; index < count; index++)
+    {
+        const struct DioramaCellSnapshot *northWest = &snapshot->cells[index];
+        uint16_t structureId;
+        int northEast;
+        int southWest;
+        int southEast;
+        int members[4];
+
+        if (!(northWest->flags & DIORAMA_CELL_BORDER) || northWest->metatileId != 468)
+            continue;
+        northEast = FindCell(snapshot, northWest, 1, 0);
+        southWest = FindCell(snapshot, northWest, 0, 1);
+        southEast = FindCell(snapshot, northWest, 1, 1);
+        if (northEast < 0 || southWest < 0 || southEast < 0
+         || !(snapshot->cells[northEast].flags & DIORAMA_CELL_BORDER)
+         || !(snapshot->cells[southWest].flags & DIORAMA_CELL_BORDER)
+         || !(snapshot->cells[southEast].flags & DIORAMA_CELL_BORDER)
+         || snapshot->cells[northEast].sourceLayoutId != northWest->sourceLayoutId
+         || snapshot->cells[southWest].sourceLayoutId != northWest->sourceLayoutId
+         || snapshot->cells[southEast].sourceLayoutId != northWest->sourceLayoutId
+         || snapshot->cells[northEast].metatileId != 469
+         || snapshot->cells[southWest].metatileId != 476
+         || snapshot->cells[southEast].metatileId != 477)
+            continue;
+        members[0] = index;
+        members[1] = northEast;
+        members[2] = southWest;
+        members[3] = southEast;
+        structureId = UINT16_C(0x8000)
+                    | ((northWest->mapX & 0x7F) << 8)
+                    | (northWest->mapY & 0xFF);
+        for (uint8_t member = 0; member < 4; member++)
+            ClaimBorderTreeCell(&snapshot->cells[members[member]],
+                                &resolvedCells[members[member]], structureId,
+                                member & 1, member >> 1);
+    }
 }
 
 uint32_t DioramaRules_GetGeneration(void)
@@ -658,6 +852,7 @@ void DioramaRules_ResolveGrid(const struct DioramaSceneSnapshot *snapshot,
         if (cell->layerType != 0)
             resolvedCells[i].evidenceFlags |= DIORAMA_EVIDENCE_LAYER;
     }
+    ClaimBorderTrees(snapshot, resolvedCells, count);
     for (i = 0; i < count; i++)
     {
         const struct DioramaGeneratedPixelObjectV2 *object =

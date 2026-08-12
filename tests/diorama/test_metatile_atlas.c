@@ -90,6 +90,27 @@ static void TestAlphaMask(void)
     CHECK(rows[15] == 0x0010);
 }
 
+static void TestOpaqueSilhouetteMask(void)
+{
+    uint32_t pixels[DIORAMA_METATILE_SIZE * DIORAMA_METATILE_SIZE];
+    uint16_t rows[DIORAMA_METATILE_SIZE];
+    int x;
+    int y;
+
+    for (y = 0; y < DIORAMA_METATILE_SIZE; y++)
+        for (x = 0; x < DIORAMA_METATILE_SIZE; x++)
+            pixels[y * DIORAMA_METATILE_SIZE + x] = 0xFF00AA88;
+    for (y = 3; y < 15; y++)
+        for (x = 2 + (y < 5); x < 14 - (y < 5); x++)
+            pixels[y * DIORAMA_METATILE_SIZE + x] = 0xFF228844;
+
+    DioramaMetatile_BuildSilhouetteMask(pixels, rows);
+    CHECK(rows[0] == 0);
+    CHECK(rows[3] == 0x1FF8);
+    CHECK(rows[5] == 0x3FFC);
+    CHECK(rows[15] == 0);
+}
+
 static void TestAtlasGuttersAndUv(void)
 {
     static struct DioramaSceneSnapshot snapshot;
@@ -239,6 +260,7 @@ int main(void)
     TestDecodeAndFlips();
     TestColorAndComposition();
     TestAlphaMask();
+    TestOpaqueSilhouetteMask();
     TestAtlasGuttersAndUv();
     TestCutoutDifference();
     TestDirtyTileUpdates();

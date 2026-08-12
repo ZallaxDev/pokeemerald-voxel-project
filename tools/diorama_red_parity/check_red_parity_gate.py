@@ -145,6 +145,29 @@ R4_PIXEL_OBJECT_EVIDENCE = {
     "repetitiveRowRatio": 0.75,
     "reliefDepthQ32": 10,
 }
+R5_SCENARIOS = {
+    "R5-ROUTE115-CLIFF-RUNS", "R5-MT-CHIMNEY-REPEATED-RIDGES",
+    "R5-JAGGED-PASS-BIDIRECTIONAL-RUNS", "R5-FORTREE-FOREST-REPETITION",
+    "R5-GRANITE-CAVE-B1F-WALL-EXTENT", "R5-CLAIMED-CONTENT-EXCLUSION",
+}
+R5_COMMANDS = list(R0_COMMANDS)
+R5_PITCHES = [0, 15, 35, 50, 75]
+R5_LOCATIONS = {
+    "R5-ROUTE115-CLIFF-RUNS": (
+        "MAP_ROUTE115", "LAYOUT_ROUTE115", {"x": 18, "y": 41}, "norte"),
+    "R5-MT-CHIMNEY-REPEATED-RIDGES": (
+        "MAP_MT_CHIMNEY", "LAYOUT_MT_CHIMNEY", {"x": 20, "y": 23}, "sur"),
+    "R5-JAGGED-PASS-BIDIRECTIONAL-RUNS": (
+        "MAP_JAGGED_PASS", "LAYOUT_JAGGED_PASS", {"x": 16, "y": 25}, "norte"),
+    "R5-FORTREE-FOREST-REPETITION": (
+        "MAP_FORTREE_CITY", "LAYOUT_FORTREE_CITY", {"x": 5, "y": 7}, "norte"),
+    "R5-GRANITE-CAVE-B1F-WALL-EXTENT": (
+        "MAP_GRANITE_CAVE_B1F", "LAYOUT_GRANITE_CAVE_B1F",
+        {"x": 25, "y": 14}, "norte"),
+    "R5-CLAIMED-CONTENT-EXCLUSION": (
+        "MAP_OLDALE_TOWN_POKEMON_CENTER_1F", "LAYOUT_POKEMON_CENTER_1F",
+        {"x": 7, "y": 7}, "norte"),
+}
 
 
 def requires_r0_neutrality(gates: list[dict]) -> bool:
@@ -186,16 +209,20 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
                 and any(previous["state"] != "approved" for previous in gates[:phase_index]):
             fail(f"{phase['id']} advanced before all previous phases were approved")
         if phase["state"] == "approved":
-            required = ("binarySha256", "classicBinarySha256", "tester", "testedAtUtc",
-                        "approval")
+            waived = phase.get("automaticClosureWaivedByUser") is True
+            required = (("tester", "testedAtUtc", "approval", "automaticClosureWaiver")
+                        if waived else
+                        ("binarySha256", "classicBinarySha256", "tester", "testedAtUtc",
+                         "approval"))
             if any(not phase.get(field) for field in required):
                 fail(f"{phase['id']} approval metadata is incomplete")
-            for field in ("binarySha256", "classicBinarySha256"):
-                if not re.fullmatch(r"[0-9a-f]{64}", phase[field]):
-                    fail(f"{phase['id']} {field} is invalid")
+            if not waived:
+                for field in ("binarySha256", "classicBinarySha256"):
+                    if not re.fullmatch(r"[0-9a-f]{64}", phase[field]):
+                        fail(f"{phase['id']} {field} is invalid")
     scenario_by_id = {scenario["id"]: scenario for scenario in scenarios}
     required_scenarios = (R0_SCENARIOS | R1_SCENARIOS | R2_SCENARIOS | R3_SCENARIOS
-                          | R4_SCENARIOS)
+                          | R4_SCENARIOS | R5_SCENARIOS)
     if len(scenario_by_id) != len(scenarios) or not required_scenarios <= set(scenario_by_id):
         fail("required Red-parity scenarios are missing or duplicated")
     sys.path.insert(0, str(root / "tools/diorama_rules"))
@@ -385,7 +412,8 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
             fail("R4 Spanish manual guide is missing")
         if r4.get("gameplayAuthority") != "original-game-only-no-teleport":
             fail("R4 must preserve original gameplay authority")
-        if r4["state"] in {"automatic-passed", "manual-pending", "approved"}:
+        if r4["state"] in {"automatic-passed", "manual-pending", "approved"} \
+                and not r4.get("automaticClosureWaivedByUser"):
             for field in ("binarySha256", "classicBinarySha256"):
                 if not re.fullmatch(r"[0-9a-f]{64}", r4.get(field, "")):
                     fail(f"R4 {field} is missing after automatic validation")
@@ -405,6 +433,29 @@ def validate(root: Path, phase_id: str, require_previous: bool) -> None:
                     or scenario["pitch"] != R4_PITCHES \
                     or scenario["resolution"] != {"width": 960, "height": 640}:
                 fail(f"{scenario_id} does not match the R4 capture contract")
+    r5 = by_phase["R5"]
+    if r5["state"] != "pending":
+        if set(r5.get("manualScenarios", [])) != R5_SCENARIOS \
+                or len(r5["manualScenarios"]) != len(R5_SCENARIOS) \
+                or r5.get("automaticCommands") != R5_COMMANDS:
+            fail("R5 gate commands or scenarios do not match the phase contract")
+        if r5.get("manualGuide") != "docs/diorama_red_parity_manual_testing.md" \
+                or not (root / r5["manualGuide"]).is_file():
+            fail("R5 Spanish manual guide is missing")
+        if r5.get("gameplayAuthority") != "original-game-only-no-teleport":
+            fail("R5 must preserve original gameplay authority")
+        for scenario_id in R5_SCENARIOS:
+            scenario = scenario_by_id[scenario_id]
+            expected_map, expected_layout, expected_position, expected_facing = \
+                R5_LOCATIONS[scenario_id]
+            if scenario["phase"] != "R5" or scenario["renderer"] != "classic-and-diorama" \
+                    or scenario["map"] != expected_map \
+                    or scenario["layout"] != expected_layout \
+                    or scenario["position"] != expected_position \
+                    or scenario["facing"] != expected_facing \
+                    or scenario["pitch"] != R5_PITCHES \
+                    or scenario["resolution"] != {"width": 960, "height": 640}:
+                fail(f"{scenario_id} does not match the R5 capture contract")
     ids = [entry["id"] for entry in resolvers]
     if len(ids) != len(set(ids)):
         fail("resolver responsibilities must be unique")

@@ -16,6 +16,7 @@ extern PFNGLDELETEBUFFERSPROC dglDeleteBuffers;
 extern PFNGLDELETEPROGRAMPROC dglDeleteProgram;
 extern PFNGLDELETESHADERPROC dglDeleteShader;
 extern PFNGLDELETEVERTEXARRAYSPROC dglDeleteVertexArrays;
+extern PFNGLDRAWARRAYSINSTANCEDPROC dglDrawArraysInstanced;
 extern PFNGLENABLEVERTEXATTRIBARRAYPROC dglEnableVertexAttribArray;
 extern PFNGLGENBUFFERSPROC dglGenBuffers;
 extern PFNGLGENVERTEXARRAYSPROC dglGenVertexArrays;
@@ -32,6 +33,7 @@ extern PFNGLUNIFORM2FPROC dglUniform2f;
 extern PFNGLUNIFORM4FPROC dglUniform4f;
 extern PFNGLUSEPROGRAMPROC dglUseProgram;
 extern PFNGLVERTEXATTRIBPOINTERPROC dglVertexAttribPointer;
+extern PFNGLVERTEXATTRIBDIVISORPROC dglVertexAttribDivisor;
 
 bool DioramaGL_LoadFunctions(void);
 

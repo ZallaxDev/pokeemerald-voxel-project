@@ -50,6 +50,34 @@ class StructureTests(unittest.TestCase):
                              for candidate in result["candidates"]))
         self.assertIsNone(result["cells"][1]["owner"])
 
+    def test_large_tree_claim_precedes_nested_small_tree(self):
+        large = pattern("large", [[10, 11], [20, 21], [30, 31]],
+                        ["11", "11", "11"], 2)
+        large["action"] = {"class": "grouped-hull", "pool": "vegetation"}
+        small = pattern("small", [[30, 31]], ["11"], 1)
+        small["action"] = {"class": "grouped-hull", "pool": "vegetation"}
+        result = analyze(2, 3, [10, 11, 20, 21, 30, 31], [shape()] * 6,
+                         patterns=[small, large])
+        owner = result["candidates"][0]
+        self.assertEqual(owner["owner"], "large")
+        self.assertEqual(owner["cells"], list(range(6)))
+        self.assertEqual(owner["bbox"], {"x": 0, "y": 0, "width": 2, "height": 3})
+        self.assertFalse(any(candidate["owner"] == "small"
+                             for candidate in result["candidates"]))
+
+    def test_repeated_tree_body_precedes_bottom_row_fallback(self):
+        body = pattern("body", [[20, 21], [30, 31]], ["11", "11"], 2)
+        body["action"] = {"class": "grouped-hull", "pool": "vegetation"}
+        small = pattern("small", [[30, 31]], ["11"], 1)
+        small["action"] = {"class": "grouped-hull", "pool": "vegetation"}
+        result = analyze(2, 2, [20, 21, 30, 31], [shape()] * 4,
+                         patterns=[small, body])
+        self.assertEqual(result["candidates"][0]["owner"], "body")
+        self.assertEqual(result["candidates"][0]["bbox"],
+                         {"x": 0, "y": 0, "width": 2, "height": 2})
+        self.assertFalse(any(candidate["owner"] == "small"
+                             for candidate in result["candidates"]))
+
     def test_claimed_cell_is_excluded_from_later_detector(self):
         result = analyze(2, 1, [1, 2],
                          [shape("wall", pool="structure", art_mode="upright"),

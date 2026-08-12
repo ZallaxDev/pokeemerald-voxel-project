@@ -152,6 +152,7 @@ enum DioramaCliffCorner
 #define DIORAMA_MATERIAL_METATILE_SELF UINT16_C(0xFFFF)
 #define DIORAMA_MAX_VISUAL_SURFACES 3
 #define DIORAMA_BUILDING_MAX_FACADE_ROWS 4
+#define DIORAMA_MAX_MEASURED_BANDS 6
 #define DIORAMA_BUILDING_PIXELS_PER_CELL 16
 #define DIORAMA_BUILDING_MAX_PROFILE_COLUMNS (32 * DIORAMA_BUILDING_PIXELS_PER_CELL + 1)
 
@@ -167,6 +168,13 @@ struct DioramaFaceMaterial
     uint8_t layer;
     uint8_t rotation;
     uint8_t flags;
+};
+
+struct DioramaMeasuredBand
+{
+    uint16_t metatileId;
+    uint8_t layer;
+    uint8_t sourceHalf;
 };
 
 struct DioramaResolvedSurface
@@ -246,6 +254,28 @@ enum DioramaPixelObjectGroundMode
     DIORAMA_PIXEL_GROUND_SOURCE_BASE = 2
 };
 
+enum DioramaMeasuredFlags
+{
+    DIORAMA_MEASURED_FROM_REPEAT = 1u << 0,
+    DIORAMA_MEASURED_ADOPTED_CONSENSUS = 1u << 1,
+    DIORAMA_MEASURED_HAS_CONFLICTS = 1u << 2,
+    DIORAMA_MEASURED_ROOF_CANDIDATE = 1u << 3,
+    DIORAMA_MEASURED_SILHOUETTE = 1u << 4,
+    DIORAMA_MEASURED_MOUNTAIN_ART = 1u << 5,
+    DIORAMA_MEASURED_TERRACE_COURSE = 1u << 6,
+    DIORAMA_MEASURED_TERRACE_TOPOLOGY = 1u << 7
+};
+
+enum DioramaTerraceProfile
+{
+    DIORAMA_TERRACE_NONE,
+    DIORAMA_TERRACE_HORIZONTAL,
+    DIORAMA_TERRACE_VERTICAL,
+    DIORAMA_TERRACE_OUTER,
+    DIORAMA_TERRACE_INNER,
+    DIORAMA_TERRACE_TRANSITION_HORIZONTAL
+};
+
 enum DioramaCameraProfile
 {
     DIORAMA_CAMERA_EXTERIOR,
@@ -310,18 +340,29 @@ struct DioramaResolvedCell
     uint8_t doorFold;
     uint8_t voidKind;
     uint8_t structureSouthFacadeRows;
+    uint8_t measuredAxis;
+    uint16_t measuredExtentBands;
+    uint8_t measuredPeriodBands;
+    uint8_t measuredRoofBands;
+    uint16_t measuredRunLocal;
+    uint16_t measuredRunLength;
+    uint8_t measuredFlags;
+    uint8_t measuredBandCount;
     uint8_t cliffEdgeMask;
     uint8_t cliffBaseMask;
     uint8_t cliffTransitionMask;
     uint8_t cliffCornerMask;
+    uint8_t terraceProfile;
     float groundHeight;
     float topHeight;
     float featureHeight;
     float structureBodyHeight;
     float structureRoofHeight;
     float structureSouthFacadeUnitHeight;
+    float measuredConfidence;
     struct DioramaResolvedSurface surfaces[DIORAMA_MAX_VISUAL_SURFACES];
     struct DioramaFaceMaterial materials[DIORAMA_MATERIAL_FACE_COUNT];
+    struct DioramaMeasuredBand measuredBands[DIORAMA_MAX_MEASURED_BANDS];
 };
 
 struct DioramaGeneratedLayoutRule

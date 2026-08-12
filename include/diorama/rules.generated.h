@@ -6,7 +6,8 @@
 
 struct DioramaGeneratedTilesetV2 { uint8_t id, role, terrainClass; uint16_t metatileCount; const char *symbol; };
 struct DioramaGeneratedLayoutV2 { uint16_t id, width, height; uint8_t primaryTilesetId, secondaryTilesetId; uint32_t terrainRecordOffset, terrainRecordCount, structureCellOffset; const char *symbol; };
-struct DioramaGeneratedTerrainV2 { uint32_t cellOffset; uint16_t expectedMetatile, classId, sourceId, evidenceDetailsId, ambiguityDetailsId, propGroundMetatile, evidenceFlags, ambiguityFlags; int16_t heightQ16; uint8_t mapGroup, mapNumber, shape, archetype, terrainClass, artMode, pool, authored, sourceKind, propGroundMode, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask; float confidence; };
+struct DioramaGeneratedTerrainV2 { uint32_t cellOffset, measuredBandOffset; uint16_t expectedMetatile, classId, sourceId, evidenceDetailsId, ambiguityDetailsId, propGroundMetatile, evidenceFlags, ambiguityFlags; int16_t heightQ16, groundQ16, topQ16, measuredHeightQ16, measuredBodyQ16, measuredRoofQ16; uint8_t mapGroup, mapNumber, shape, archetype, terrainClass, artMode, pool, authored, sourceKind, propGroundMode, axis, cliffEdgeMask, cliffBaseMask, cliffTransitionMask, cliffCornerMask, terraceProfile, measuredAxis; uint16_t measuredExtentBands; uint8_t measuredPeriodBands, measuredRoofBands; uint16_t measuredRunLocal, measuredRunLength; uint8_t measuredFlags, measuredBandCount; float confidence, measuredConfidence; };
+struct DioramaGeneratedMeasuredBandV2 { uint32_t sourceCellOffset; uint16_t expectedMetatile; uint8_t layer, sourceHalf; };
 struct DioramaGeneratedClassifierSourceV2 { uint16_t id; const char *name; };
 struct DioramaGeneratedEvidenceV2 { uint16_t id; const char *details; };
 struct DioramaGeneratedAmbiguityV2 { uint16_t id, flags; uint32_t placementCount; const char *details; };
@@ -27,8 +28,10 @@ extern const struct DioramaGeneratedTilesetV2 gDioramaTilesetsV2[];
 extern const size_t gDioramaTilesetV2Count;
 extern const struct DioramaGeneratedLayoutV2 gDioramaLayoutsV2[];
 extern const size_t gDioramaLayoutV2Count;
-extern const struct DioramaGeneratedTerrainV2 gDioramaTerrainV2[];
-extern const size_t gDioramaTerrainV2Count;
+    extern const struct DioramaGeneratedTerrainV2 gDioramaTerrainV2[];
+    extern const size_t gDioramaTerrainV2Count;
+    extern const struct DioramaGeneratedMeasuredBandV2 gDioramaMeasuredBandsV2[];
+    extern const size_t gDioramaMeasuredBandV2Count;
 extern const struct DioramaGeneratedClassifierSourceV2 gDioramaClassifierSourcesV2[];
 extern const size_t gDioramaClassifierSourceV2Count;
 extern const struct DioramaGeneratedEvidenceV2 gDioramaEvidenceDetailsV2[];

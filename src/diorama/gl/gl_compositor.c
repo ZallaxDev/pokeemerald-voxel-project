@@ -408,6 +408,15 @@ static void BuildDebugImage(const struct DioramaSceneSnapshot *snapshot)
                          targetCell->baseMetatileId);
             DrawText(5, 149, text, RGB(220, 230, 235));
         }
+        else if (targetCell->measuredBandCount != 0)
+        {
+            SDL_snprintf(text, sizeof(text), "VOL H:%u P:%u %c F:%u",
+                         targetCell->measuredBandCount,
+                         targetCell->measuredPeriodBands,
+                         targetCell->measuredAxis == DIORAMA_PLANE_AXIS_Z ? 'Z' : 'X',
+                         targetCell->measuredFlags);
+            DrawText(5, 149, text, RGB(220, 230, 235));
+        }
         else
             DrawValue(5, 149, "EVI:", targetCell->evidenceFlags);
     }

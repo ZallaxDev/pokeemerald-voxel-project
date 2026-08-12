@@ -45,9 +45,9 @@
     },
     {
       "id": "generic-volume-detection",
-      "disposition": "replace-in-R5",
-      "owner": null,
-      "consumer": null
+      "disposition": "implemented-in-R5",
+      "owner": "tools/diorama_rules/measured_volumes.py:detect_layout",
+      "consumer": "src/diorama/rules.c:ApplyStaticTerrain"
     },
     {
       "id": "exact-structure-matching",

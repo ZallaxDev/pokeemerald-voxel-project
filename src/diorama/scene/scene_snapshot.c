@@ -344,6 +344,13 @@ static bool CopyCells(struct DioramaSceneSnapshot *snapshot)
             }
             else if (TryCopyConnectedCell(snapshot, mapX, mapY, cell))
                 continue;
+            else if (GetMapConnectionAtPos(mapX, mapY) == NULL)
+            {
+                cell->sourceMapGroup = snapshot->mapGroup;
+                cell->sourceMapNum = snapshot->mapNum;
+                cell->sourceLayoutId = snapshot->mapLayoutId;
+                cell->flags = DIORAMA_CELL_BORDER;
+            }
             if (!CopyCellVisual(gMapHeader.mapLayout, MapGridGetMetatileIdAt(mapX, mapY),
                                 MapGridGetCollisionAt(mapX, mapY),
                                 MapGridGetElevationAt(mapX, mapY), cell))
@@ -723,6 +730,7 @@ void DioramaScene_PublishOverworld(void)
         sObjPaletteGeneration++;
     memcpy(sPreviousPalette, gPlttBufferFaded, sizeof(sPreviousPalette));
     sHasPreviousPalette = true;
+    memcpy(sDraft.unfadedPalette, gPlttBufferUnfaded, sizeof(sDraft.unfadedPalette));
     memcpy(sDraft.fadedPalette, gPlttBufferFaded, sizeof(sDraft.fadedPalette));
     sDraft.paletteGeneration = sPaletteGeneration;
     sDraft.objPaletteGeneration = sObjPaletteGeneration;

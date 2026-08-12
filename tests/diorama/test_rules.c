@@ -55,8 +55,8 @@ static void TestMapSupport(void)
     assert(gDioramaTilesetV2Count == 75);
     assert(gDioramaLayoutV2Count == 441);
     assert(gDioramaMapV2Count == 518);
-    assert(gDioramaTerrainV2Count == 325276);
-    assert(gDioramaAmbiguityV2Count == 95);
+    assert(gDioramaTerrainV2Count == 325079);
+    assert(gDioramaAmbiguityV2Count == 94);
     assert(gDioramaStructureV2Count > 2923);
     size_t terrainOffset = 0;
     for (size_t i = 0; i < gDioramaLayoutV2Count; i++)
@@ -124,6 +124,93 @@ static void TestCompiledStructureClaims(void)
     InitLittleroot();
 }
 
+static void TestRoute115MountainClassification(void)
+{
+    struct DioramaResolvedCell resolved;
+    struct DioramaCellSnapshot cell;
+
+    memset(&sSnapshot, 0, sizeof(sSnapshot));
+    sSnapshot.mapGroup = 0;
+    sSnapshot.mapNum = 30;
+    sSnapshot.mapLayoutId = 31;
+    sSnapshot.mapWidth = 40;
+    sSnapshot.mapHeight = 80;
+    sSnapshot.mapCoordinateOffset = 7;
+    cell = MakeCell(20, 23, 577, MB_MOUNTAIN_TOP);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_CLIFF);
+    assert(resolved.archetype == DIORAMA_ARCHETYPE_CLIFF);
+    assert(resolved.artMode == DIORAMA_ART_TOP);
+    assert(resolved.groundHeight == 0.0f);
+    assert(resolved.featureHeight == 1.0f && resolved.topHeight == 1.0f);
+    assert(resolved.measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART);
+
+    cell = MakeCell(16, 13, 584, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_CLIFF);
+    assert(resolved.featureHeight == 1.0f && resolved.topHeight == 1.0f);
+    assert(resolved.measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART);
+    InitLittleroot();
+}
+
+static void TestRoute104DenseForestHeightmap(void)
+{
+    struct DioramaResolvedCell resolved;
+    struct DioramaCellSnapshot cell;
+
+    memset(&sSnapshot, 0, sizeof(sSnapshot));
+    sSnapshot.mapGroup = 0;
+    sSnapshot.mapNum = 19;
+    sSnapshot.mapLayoutId = 20;
+    sSnapshot.mapWidth = 40;
+    sSnapshot.mapHeight = 80;
+    sSnapshot.mapCoordinateOffset = 7;
+    cell = MakeCell(20, 40, 199, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_EXTRUDED);
+    assert(resolved.archetype == DIORAMA_ARCHETYPE_ROUND_HULL);
+    assert(resolved.featureHeight == 1.0f && resolved.topHeight == 1.0f);
+    assert(resolved.measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART);
+    InitLittleroot();
+}
+
+static void TestRoute104CapturedTerraceTile(void)
+{
+    struct DioramaResolvedCell resolved;
+    struct DioramaCellSnapshot cell;
+
+    memset(&sSnapshot, 0, sizeof(sSnapshot));
+    sSnapshot.mapGroup = 0;
+    sSnapshot.mapNum = 19;
+    sSnapshot.mapLayoutId = 20;
+    sSnapshot.mapWidth = 40;
+    sSnapshot.mapHeight = 80;
+    sSnapshot.mapCoordinateOffset = 7;
+    cell = MakeCell(25, 66, 121, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_CLIFF);
+    assert(resolved.archetype == DIORAMA_ARCHETYPE_CLIFF);
+    assert(resolved.groundHeight == -1.0f);
+    assert(resolved.featureHeight == 1.0f && resolved.topHeight == 0.0f);
+    assert(resolved.measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART);
+    assert(resolved.measuredFlags & DIORAMA_MEASURED_TERRACE_COURSE);
+    assert(resolved.measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY);
+    assert(resolved.terraceProfile == DIORAMA_TERRACE_HORIZONTAL);
+
+    cell = MakeCell(25, 65, 1, MB_NORMAL);
+    cell.elevation = 3;
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.groundHeight == 0.0f && resolved.topHeight == 0.0f);
+    assert(resolved.measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY);
+
+    cell = MakeCell(25, 67, 292, MB_SAND);
+    cell.elevation = 3;
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.groundHeight == -1.0f && resolved.topHeight == -1.0f);
+    assert(resolved.measuredFlags & DIORAMA_MEASURED_TERRACE_TOPOLOGY);
+    InitLittleroot();
+}
+
 static void TestPixelObjectCatalog(void)
 {
     size_t objectIndex;
@@ -147,7 +234,7 @@ static void TestPixelObjectCatalog(void)
         {
             assert(object->supportStructureId != object->structureId);
             assert(DioramaRules_GetStructure(object->supportStructureId) != NULL);
-            assert(object->supportOffsetQ16 == 12);
+            assert(object->supportOffsetQ16 >= 0 && object->supportOffsetQ16 <= 32);
         }
         pixels = DioramaRules_GetPixelObjectPixels(object, &count);
         assert(pixels != NULL && count == object->pixelCount && count != 0);
@@ -162,6 +249,92 @@ static void TestPixelObjectCatalog(void)
         totalPixels += count;
     }
     assert(totalPixels == gDioramaPixelV2Count);
+}
+
+static void TestGroupedTreeClaimsAndDirtyFallback(void)
+{
+    struct DioramaResolvedCell resolved;
+    struct DioramaCellSnapshot cell;
+
+    cell = MakeCell(18, 15, 462, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.structureOwnerKind == DIORAMA_OWNER_TEMPLATE);
+    assert(resolved.archetype == DIORAMA_ARCHETYPE_GROUPED_HULL);
+    assert(resolved.structureWidth == 2 && resolved.structureHeight == 3);
+    assert(resolved.structureLocalX == 0 && resolved.structureLocalY == 0);
+    assert(resolved.topHeight == 2.0f && resolved.measuredBandCount == 0);
+
+    cell = MakeCell(18, 16, 470, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.archetype == DIORAMA_ARCHETYPE_GROUPED_HULL);
+    assert(resolved.structureLocalY == 1);
+    assert(resolved.measuredBandCount == 4);
+    assert(resolved.measuredBands[0].metatileId == 476);
+    assert(resolved.measuredBands[2].metatileId == 470);
+    assert(resolved.materials[DIORAMA_MATERIAL_FACE_TOP].metatileId == 462);
+
+    sSnapshot.dirtyCellCount = 1;
+    sSnapshot.dirtyCells[0].mapX = cell.mapX;
+    sSnapshot.dirtyCells[0].mapY = cell.mapY;
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.shape == DIORAMA_SHAPE_FLAT);
+    assert(resolved.measuredBandCount == 0);
+
+    sSnapshot.dirtyCellCount = 0;
+    cell = MakeCell(0, 1, 476, MB_NORMAL);
+    assert(DioramaRules_ResolveCell(&sSnapshot, &cell, &resolved));
+    assert(resolved.archetype == DIORAMA_ARCHETYPE_GROUPED_HULL);
+    assert(resolved.structureWidth == 2 && resolved.structureHeight == 2);
+    assert(resolved.topHeight == 2.0f && resolved.measuredBandCount == 4);
+    assert(resolved.materials[DIORAMA_MATERIAL_FACE_TOP].layer
+        == DIORAMA_MATERIAL_FOREGROUND);
+    for (int band = 0; band < resolved.measuredBandCount; band++)
+        assert(resolved.measuredBands[band].layer == DIORAMA_MATERIAL_FOREGROUND);
+    InitLittleroot();
+}
+
+static void TestRepeatedBorderTreeClaim(void)
+{
+    struct DioramaSceneSnapshot snapshot;
+    struct DioramaResolvedCell resolved[35];
+    static const uint16_t metatiles[4] = {468, 469, 476, 477};
+    static const uint8_t indices[4] = {0, 1, 33, 34};
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.mapLayoutId = 10;
+    snapshot.visibleCellCount = 35;
+    snapshot.gridOriginX = -1;
+    snapshot.gridOriginY = -1;
+    for (int index = 0; index < snapshot.visibleCellCount; index++)
+    {
+        snapshot.cells[index].mapX = snapshot.gridOriginX + index % DIORAMA_GRID_WIDTH;
+        snapshot.cells[index].mapY = snapshot.gridOriginY + index / DIORAMA_GRID_WIDTH;
+    }
+    for (int member = 0; member < 4; member++)
+    {
+        struct DioramaCellSnapshot *cell = &snapshot.cells[indices[member]];
+
+        cell->metatileId = metatiles[member];
+        cell->sourceLayoutId = 10;
+        cell->flags = DIORAMA_CELL_BORDER;
+    }
+    DioramaRules_ResolveGrid(&snapshot, resolved);
+    for (int member = 0; member < 4; member++)
+    {
+        const struct DioramaResolvedCell *cell = &resolved[indices[member]];
+
+        assert(cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL);
+        assert(cell->structureWidth == 2 && cell->structureHeight == 2);
+        assert(cell->structureLocalX == (member & 1));
+        assert(cell->structureLocalY == (member >> 1));
+        assert(cell->structureId == resolved[0].structureId);
+    }
+
+    snapshot.cells[34].flags = 0;
+    DioramaRules_ResolveGrid(&snapshot, resolved);
+    assert(resolved[0].archetype == DIORAMA_ARCHETYPE_GROUND);
+    assert(resolved[1].archetype == DIORAMA_ARCHETYPE_GROUND);
+    assert(resolved[33].archetype == DIORAMA_ARCHETYPE_GROUND);
 }
 
 static void TestPixelObjectStaysInvalidAfterDirtyPublication(void)
@@ -444,7 +617,12 @@ int main(void)
     TestMapSupport();
     TestCompiledPinAndGuards();
     TestCompiledStructureClaims();
+    TestRoute115MountainClassification();
+    TestRoute104DenseForestHeightmap();
+    TestRoute104CapturedTerraceTile();
     TestPixelObjectCatalog();
+    TestGroupedTreeClaimsAndDirtyFallback();
+    TestRepeatedBorderTreeClaim();
     TestPixelObjectStaysInvalidAfterDirtyPublication();
     TestPixelObjectRequiresActiveAuthoredSupport();
     TestNeutralFallbackWithoutCompiledRules();

@@ -18,6 +18,8 @@ struct DioramaTerrainMetrics
     uint32_t vertices;
     uint32_t triangles;
     uint16_t drawCalls;
+    uint16_t visibleTreeInstances;
+    uint32_t treeModelVertices;
 };
 
 bool DioramaGLTerrain_Init(void);

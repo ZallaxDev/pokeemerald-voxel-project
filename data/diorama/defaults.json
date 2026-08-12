@@ -15,9 +15,182 @@
     "pool": "terrain",
     "groundPolicy": { "mode": "automatic" }
   },
-  "behaviorRules": [],
-  "contextualRules": [],
+  "behaviorRules": [
+    {
+      "behavior": "MB_MOUNTAIN_TOP",
+      "action": {
+        "archetype": "cliff",
+        "pool": "terrain",
+        "height": 1
+      }
+    }
+  ],
+  "contextualRules": [
+    {
+      "id": "general-rock-terrace-cell",
+      "priority": 210,
+      "selector": {
+        "tilesets": ["gTileset_General"],
+        "metatiles": [121, 136, 137, 144],
+        "behaviors": ["MB_NORMAL"]
+      },
+      "action": { "archetype": "cliff", "pool": "terrain", "height": 1 }
+    },
+    {
+      "id": "general-dense-forest-cell",
+      "priority": 200,
+      "selector": {
+        "tilesets": ["gTileset_General"],
+        "metatiles": [198, 199]
+      },
+      "action": { "archetype": "round-hull", "pool": "vegetation" }
+    }
+  ],
   "exactPatterns": [
+    {
+      "id": "general-large-tree-canonical",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [470, 469], [476, 477]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-joined-crown",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [468, 471], [476, 477]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-tall-grass",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[454, 455], [470, 469], [476, 477]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-large-tree-alternate-crown",
+      "dimensions": { "width": 2, "height": 3 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[462, 463], [468, 469], [476, 477]],
+      "priority": 420,
+      "claimMask": ["11", "11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-canonical",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [476, 477]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-canonical-edge",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[470, 469], [476, 477]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-joined-edge",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 471], [476, 477]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-interior",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [484, 485]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-left-edge",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [486, 485]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-right-edge",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [484, 487]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-tree-body-both-edges",
+      "dimensions": { "width": 2, "height": 2 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[468, 469], [486, 487]],
+      "priority": 415,
+      "claimMask": ["11", "11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-small-tree-canonical",
+      "dimensions": { "width": 2, "height": 1 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[476, 477]],
+      "priority": 410,
+      "claimMask": ["11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-small-tree-interior",
+      "dimensions": { "width": 2, "height": 1 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[484, 485]],
+      "priority": 410,
+      "claimMask": ["11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-small-tree-left-edge",
+      "dimensions": { "width": 2, "height": 1 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[486, 485]],
+      "priority": 410,
+      "claimMask": ["11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-small-tree-right-edge",
+      "dimensions": { "width": 2, "height": 1 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[484, 487]],
+      "priority": 410,
+      "claimMask": ["11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
+    {
+      "id": "general-small-tree-both-edges",
+      "dimensions": { "width": 2, "height": 1 },
+      "tilesets": { "primary": "gTileset_General" },
+      "cells": [[486, 487]],
+      "priority": 410,
+      "claimMask": ["11"],
+      "action": { "archetype": "grouped-hull", "pool": "vegetation" }
+    },
     {
       "id": "petalburg-house-left-shell",
       "dimensions": { "width": 5, "height": 5 },

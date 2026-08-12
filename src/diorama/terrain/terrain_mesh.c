@@ -7,6 +7,7 @@
 #include "constants/metatile_behaviors.h"
 #include "diorama/rules.generated.h"
 #include "diorama/terrain_mesh.h"
+#include "diorama/tree_model.generated.h"
 
 #define FNV_OFFSET UINT64_C(1469598103934665603)
 #define FNV_PRIME UINT64_C(1099511628211)
@@ -110,17 +111,22 @@ static bool AppendQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
     return true;
 }
 
-static float ResolveRoofHeight(const struct DioramaTerrainCell *cell, float worldX)
+static float ResolveRoofHeight(const struct DioramaTerrainCell *cell,
+                               int pixelX, int pixelZ)
 {
     float factor;
-    float localX;
+    float coordinate;
+    float length;
 
-    if (cell->structureId == 0 || cell->profile != DIORAMA_ROOF_GABLE_X)
+    if (cell->structureId == 0 || cell->measuredRunLength == 0
+     || (cell->profile != DIORAMA_ROOF_GABLE_X
+      && cell->profile != DIORAMA_ROOF_GABLE_Z))
         return cell->visualHeight;
-    localX = worldX - (cell->structureX - 0.5f);
-    factor = 1.0f - fabsf(2.0f * localX / cell->structureWidth - 1.0f);
-    if ((cell->structureWidth & 1) != 0)
-        factor /= 1.0f - 1.0f / cell->structureWidth;
+    coordinate = cell->measuredRunLocal
+               + ((cell->measuredAxis == DIORAMA_PLANE_AXIS_Z ? pixelZ : pixelX) + 0.5f)
+               / DIORAMA_VOXELS_PER_CELL;
+    length = cell->measuredRunLength;
+    factor = 1.0f - fabsf(2.0f * coordinate / length - 1.0f);
     if (factor < 0.0f)
         factor = 0.0f;
     if (factor > 1.0f)
@@ -137,6 +143,12 @@ int32_t DioramaTerrain_FloorDiv(int32_t value, int32_t divisor)
     if (remainder != 0 && ((remainder < 0) != (divisor < 0)))
         quotient--;
     return quotient;
+}
+
+int16_t DioramaTerrain_VisibleStructureOrigin(int16_t mapCoordinate,
+                                              uint8_t structureLocalCoordinate)
+{
+    return mapCoordinate - structureLocalCoordinate;
 }
 
 float DioramaTerrain_NormalizeElevation(uint8_t rawElevation, uint8_t behavior)
@@ -195,6 +207,97 @@ void DioramaTerrain_BuildHeightField(const struct DioramaTerrainHeightCell *cell
                 cells[y * width + x].rawElevation, cells[y * width + x].behavior);
 }
 
+void DioramaTerrain_BuildTerraceHeightmap(uint8_t profile,
+                                          const uint16_t artworkRows[DIORAMA_VOXELS_PER_CELL],
+                                          bool useArtwork,
+                                          uint16_t rows[DIORAMA_VOXELS_PER_CELL],
+                                          uint8_t heights[DIORAMA_VOXELS_PER_CELL
+                                                          * DIORAMA_VOXELS_PER_CELL])
+{
+    int row;
+
+    memset(heights, 0,
+           DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL);
+    for (row = 0; row < DIORAMA_VOXELS_PER_CELL; row++)
+    {
+        int x;
+        uint16_t artwork = artworkRows[row];
+        int artworkStart = 2;
+
+        if (useArtwork)
+        {
+            artworkStart = 0;
+            while (artworkStart < DIORAMA_VOXELS_PER_CELL
+                && !(artwork & (1u << artworkStart)))
+                artworkStart++;
+        }
+        if (row == 0 || row == DIORAMA_VOXELS_PER_CELL - 1)
+            artworkStart = 2;
+
+        rows[row] = 0;
+        for (x = 0; x < DIORAMA_VOXELS_PER_CELL; x++)
+        {
+            int eastHeight;
+            int northHeight = (DIORAMA_VOXELS_PER_CELL - 1 - row)
+                            * DIORAMA_VOXELS_PER_CELL
+                            / (DIORAMA_VOXELS_PER_CELL - 1);
+            int height;
+
+            if (x >= artworkStart)
+            {
+                int rise = x - artworkStart + 1;
+
+                eastHeight = rise >= 6 ? DIORAMA_VOXELS_PER_CELL
+                                       : rise * DIORAMA_VOXELS_PER_CELL / 6;
+            }
+            else
+                eastHeight = 0;
+            if (eastHeight > 0 && eastHeight < DIORAMA_VOXELS_PER_CELL)
+            {
+                eastHeight = (eastHeight * eastHeight
+                            * (24 - eastHeight) + 64) / 128;
+                if (eastHeight < 1)
+                    eastHeight = 1;
+                if (eastHeight >= DIORAMA_VOXELS_PER_CELL)
+                    eastHeight = DIORAMA_VOXELS_PER_CELL - 1;
+            }
+            if (northHeight > 0 && northHeight < DIORAMA_VOXELS_PER_CELL)
+            {
+                northHeight = (northHeight * northHeight
+                             * (24 - northHeight) + 64) / 128;
+                if (northHeight < 1)
+                    northHeight = 1;
+                if (northHeight >= DIORAMA_VOXELS_PER_CELL)
+                    northHeight = DIORAMA_VOXELS_PER_CELL - 1;
+            }
+            if (profile == DIORAMA_TERRACE_HORIZONTAL)
+                height = northHeight;
+            else if (profile == DIORAMA_TERRACE_VERTICAL)
+                height = eastHeight;
+            else if (profile == DIORAMA_TERRACE_INNER)
+                height = (eastHeight * northHeight
+                        + DIORAMA_VOXELS_PER_CELL - 1)
+                       / DIORAMA_VOXELS_PER_CELL;
+            else if (profile == DIORAMA_TERRACE_OUTER)
+                height = DIORAMA_VOXELS_PER_CELL
+                       - ((DIORAMA_VOXELS_PER_CELL - eastHeight)
+                        * (DIORAMA_VOXELS_PER_CELL - northHeight)
+                        + DIORAMA_VOXELS_PER_CELL - 1)
+                       / DIORAMA_VOXELS_PER_CELL;
+            else
+                height = 0;
+            if (height > DIORAMA_VOXELS_PER_CELL)
+                height = DIORAMA_VOXELS_PER_CELL;
+
+            if (height > 0)
+            {
+                rows[row] |= 1u << x;
+                heights[row * DIORAMA_VOXELS_PER_CELL + x] = height;
+            }
+        }
+    }
+}
+
 uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *input)
 {
     uint64_t hash = FNV_OFFSET;
@@ -229,20 +332,32 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         hash = HashU16(hash, cell->structureY);
         hash = HashByte(hash, cell->structureWidth);
         hash = HashByte(hash, cell->structureHeight);
+        hash = HashByte(hash, cell->treeHullReady);
+        hash = HashByte(hash, cell->treeMaskDirect);
         hash = HashByte(hash, cell->structureRoofRows);
         hash = HashByte(hash, cell->structureLocalX);
         hash = HashByte(hash, cell->structureLocalY);
         hash = HashByte(hash, cell->southFacadeCount);
+        hash = HashByte(hash, cell->measuredAxis);
+        hash = HashU16(hash, cell->measuredExtentBands);
+        hash = HashByte(hash, cell->measuredPeriodBands);
+        hash = HashByte(hash, cell->measuredRoofBands);
+        hash = HashU16(hash, cell->measuredRunLocal);
+        hash = HashU16(hash, cell->measuredRunLength);
+        hash = HashByte(hash, cell->measuredFlags);
+        hash = HashByte(hash, cell->measuredBandCount);
         hash = HashByte(hash, cell->cliffEdgeMask);
         hash = HashByte(hash, cell->cliffBaseMask);
         hash = HashByte(hash, cell->cliffTransitionMask);
         hash = HashByte(hash, cell->cliffCornerMask);
+        hash = HashByte(hash, cell->terraceProfile);
         hash = HashFloat(hash, cell->groundHeight);
         hash = HashFloat(hash, cell->visualHeight);
         hash = HashFloat(hash, cell->featureHeight);
         hash = HashFloat(hash, cell->structureBodyHeight);
         hash = HashFloat(hash, cell->structureRoofHeight);
         hash = HashFloat(hash, cell->southFacadeUnitHeight);
+        hash = HashFloat(hash, cell->measuredConfidence);
         for (unsigned surface = 0; surface < cell->surfaceCount; surface++)
         {
             hash = HashFloat(hash, cell->surfaces[surface].bottomHeight);
@@ -268,10 +383,36 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         }
         for (unsigned row = 0; row < DIORAMA_VOXELS_PER_CELL; row++)
             hash = HashU16(hash, cell->foregroundAlpha[row]);
+        if (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+            for (unsigned pixel = 0;
+                 pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
+                hash = HashByte(hash, cell->mountainHeight[pixel]);
+        if (cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
+         || cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL)
+        {
+            hash = HashU16(hash, cell->treeMaterial.metatileId);
+            hash = HashByte(hash, cell->treeMaterial.layer);
+            hash = HashFloat(hash, cell->treeMaterial.u0);
+            hash = HashFloat(hash, cell->treeMaterial.v0);
+            hash = HashFloat(hash, cell->treeMaterial.u1);
+            hash = HashFloat(hash, cell->treeMaterial.v1);
+            for (unsigned pixel = 0;
+                 pixel < DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL; pixel++)
+                hash = HashByte(hash, cell->treeShade[pixel]);
+        }
         for (unsigned row = 0; row < cell->southFacadeCount; row++)
         {
             hash = HashU16(hash, cell->southFacadeMaterials[row].metatileId);
             hash = HashByte(hash, cell->southFacadeMaterials[row].layer);
+        }
+        for (unsigned band = 0; band < cell->measuredBandCount; band++)
+        {
+            hash = HashU16(hash, cell->measuredBands[band].metatileId);
+            hash = HashByte(hash, cell->measuredBands[band].layer);
+            hash = HashFloat(hash, cell->measuredBands[band].u0);
+            hash = HashFloat(hash, cell->measuredBands[band].v0);
+            hash = HashFloat(hash, cell->measuredBands[band].u1);
+            hash = HashFloat(hash, cell->measuredBands[band].v1);
         }
     }
     hash = HashU32(hash, input->pixelCount);
@@ -388,14 +529,43 @@ static bool BuildOccupancy(const struct DioramaTerrainChunkInput *input,
                     float topHeight = cell->visualHeight;
                     int16_t top;
                     int16_t bottom;
+                    int16_t ground = HeightToVoxel(cell->groundHeight);
 
+                    top = HeightToVoxel(topHeight);
+
+                    if (((cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
+                       || cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL)
+                      && cell->treeHullReady)
+                     || (cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
+                      && cell->structureWidth == 2))
+                    {
+                        if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY,
+                                        1, ground - 1, ground))
+                            return false;
+                        continue;
+                    }
+                    if (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART)
+                    {
+                        uint8_t mountainHeight = cell->mountainHeight[
+                            pixelY * DIORAMA_VOXELS_PER_CELL + pixelX];
+                        bool raised = mountainHeight != 0;
+                        int16_t mountainTop = ground + mountainHeight;
+
+                        if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY,
+                                        raised ? 0 : 1,
+                                        ground - 1,
+                                        raised ? mountainTop : ground))
+                            return false;
+                        continue;
+                    }
                     if (!DioramaRules_ProfileOccupies(cell->semanticProfile, pixelX, pixelY))
+                        continue;
+                    if ((cell->measuredFlags & DIORAMA_MEASURED_SILHOUETTE)
+                     && !(cell->foregroundAlpha[pixelY] & (1u << pixelX)))
                         continue;
                     if (cell->shape == DIORAMA_SHAPE_ROOF && cell->structureId != 0)
                     {
-                        float worldX = cell->mapX - 0.5f
-                                     + (pixelX + 0.5f) / DIORAMA_VOXELS_PER_CELL;
-                        topHeight = ResolveRoofHeight(cell, worldX);
+                        topHeight = ResolveRoofHeight(cell, pixelX, pixelY);
                     }
                     top = HeightToVoxel(topHeight);
                     bottom = top > 0 ? -1 : top - 1;
@@ -420,7 +590,7 @@ static bool BuildOccupancy(const struct DioramaTerrainChunkInput *input,
                         int16_t ledgeTop = HeightToVoxel(cell->groundHeight);
 
                         if (!AppendSpan(&count, cell, cellIndex, pixelX, pixelY,
-                                        0, ledgeTop - 1, ledgeTop))
+                                        0, -1, ledgeTop))
                             return false;
                     }
                     else if (cell->shape == DIORAMA_SHAPE_STAIRS)
@@ -622,7 +792,11 @@ static bool BuildCompressedOccupancyShell(const struct DioramaTerrainChunkInput 
                  || cell->shape == DIORAMA_SHAPE_STAIRS
                  || cell->shape == DIORAMA_SHAPE_BRIDGE
                  || cell->surfaceCount > 1
-                 || !DioramaRules_ProfileIsFullCell(cell->semanticProfile))
+                  || !DioramaRules_ProfileIsFullCell(cell->semanticProfile)
+                   || (cell->measuredFlags & (DIORAMA_MEASURED_SILHOUETTE
+                                            | DIORAMA_MEASURED_MOUNTAIN_ART))
+                  || cell->archetype == DIORAMA_ARCHETYPE_ROUND_HULL
+                  || cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL)
                     return false;
                 spans += DIORAMA_VOXELS_PER_CELL * DIORAMA_VOXELS_PER_CELL;
             }
@@ -795,6 +969,766 @@ static void FacePositions(const struct DioramaShellFace *face, float positions[4
     }
 }
 
+#define TREE_HULL_MAX_SIZE (DIORAMA_VOXELS_PER_CELL * 2)
+#define TREE_HULL_MAX_PIXELS (TREE_HULL_MAX_SIZE * TREE_HULL_MAX_SIZE)
+
+struct TreeHull
+{
+    int width;
+    int height;
+    int depth;
+    int originX;
+    int originZ;
+    int16_t ground;
+    bool directMask;
+    const struct DioramaTerrainCell *sourceCells[4];
+    uint8_t shade[TREE_HULL_MAX_PIXELS];
+    uint8_t mask[TREE_HULL_MAX_PIXELS];
+    uint8_t outside[TREE_HULL_MAX_PIXELS];
+    uint8_t selected[TREE_HULL_MAX_PIXELS];
+    uint8_t sourceRow[TREE_HULL_MAX_PIXELS];
+    int8_t zMin[TREE_HULL_MAX_PIXELS];
+    int8_t zMax[TREE_HULL_MAX_PIXELS];
+    uint16_t queue[TREE_HULL_MAX_PIXELS];
+};
+
+static const struct DioramaTerrainCell *FindInputCell(
+    const struct DioramaTerrainChunkInput *input, int mapX, int mapY)
+{
+    int x = mapX - input->chunkX * DIORAMA_TERRAIN_CHUNK_SIZE
+          + DIORAMA_TERRAIN_HALO;
+    int y = mapY - input->chunkY * DIORAMA_TERRAIN_CHUNK_SIZE
+          + DIORAMA_TERRAIN_HALO;
+    const struct DioramaTerrainCell *cell;
+
+    if (x < 0 || y < 0 || x >= DIORAMA_TERRAIN_INPUT_SIZE
+     || y >= DIORAMA_TERRAIN_INPUT_SIZE)
+        return NULL;
+    cell = GetCell(input, x, y);
+    if (!cell->present || cell->mapX != mapX || cell->mapY != mapY)
+        return NULL;
+    return cell;
+}
+
+static bool TreeShadeIsPassable(uint8_t shade, bool ditherFallback)
+{
+    if (ditherFallback)
+        return shade == DIORAMA_TREE_SHADE_OFF
+            || shade == DIORAMA_TREE_SHADE_LIGHT
+            || shade == DIORAMA_TREE_SHADE_WHITE;
+    return shade != DIORAMA_TREE_SHADE_BLACK;
+}
+
+static void FloodTreeOutside(struct TreeHull *hull, bool ditherFallback)
+{
+    int readIndex = 0;
+    int writeIndex = 0;
+    int x;
+    int y;
+
+    memset(hull->outside, 0, sizeof(hull->outside));
+#define SEED_TREE_PIXEL(index) do { \
+    int seedIndex = (index); \
+    if (!hull->outside[seedIndex] \
+     && TreeShadeIsPassable(hull->shade[seedIndex], ditherFallback)) \
+    { \
+        hull->outside[seedIndex] = 1; \
+        hull->queue[writeIndex++] = seedIndex; \
+    } \
+} while (0)
+    for (x = 0; x < hull->width; x++)
+    {
+        SEED_TREE_PIXEL(x);
+        SEED_TREE_PIXEL((hull->height - 1) * hull->width + x);
+    }
+    for (y = 0; y < hull->height; y++)
+    {
+        SEED_TREE_PIXEL(y * hull->width);
+        SEED_TREE_PIXEL(y * hull->width + hull->width - 1);
+    }
+    while (readIndex < writeIndex)
+    {
+        int index = hull->queue[readIndex++];
+        int pixelX = index % hull->width;
+        int neighbors[4] = {
+            pixelX > 0 ? index - 1 : -1,
+            pixelX + 1 < hull->width ? index + 1 : -1,
+            index >= hull->width ? index - hull->width : -1,
+            index + hull->width < hull->width * hull->height
+                ? index + hull->width : -1,
+        };
+
+        for (int side = 0; side < 4; side++)
+        {
+            int neighbor = neighbors[side];
+
+            if (neighbor >= 0 && !hull->outside[neighbor]
+             && TreeShadeIsPassable(hull->shade[neighbor], ditherFallback))
+            {
+                hull->outside[neighbor] = 1;
+                hull->queue[writeIndex++] = neighbor;
+            }
+        }
+    }
+#undef SEED_TREE_PIXEL
+}
+
+static bool KeepLargestUpperTreeComponent(struct TreeHull *hull)
+{
+    int pixelCount = hull->width * hull->height;
+    int bestSize = 0;
+
+    memset(hull->outside, 0, sizeof(hull->outside));
+    memset(hull->selected, 0, sizeof(hull->selected));
+    for (int start = 0; start < pixelCount; start++)
+    {
+        int readIndex = 0;
+        int writeIndex = 0;
+        bool upper = false;
+
+        if (!hull->mask[start] || hull->outside[start])
+            continue;
+        hull->outside[start] = 1;
+        hull->queue[writeIndex++] = start;
+        while (readIndex < writeIndex)
+        {
+            int index = hull->queue[readIndex++];
+            int x = index % hull->width;
+            int neighbors[4] = {
+                x > 0 ? index - 1 : -1,
+                x + 1 < hull->width ? index + 1 : -1,
+                index >= hull->width ? index - hull->width : -1,
+                index + hull->width < pixelCount ? index + hull->width : -1,
+            };
+
+            upper |= index / hull->width < hull->height / 2;
+            for (int side = 0; side < 4; side++)
+            {
+                int neighbor = neighbors[side];
+
+                if (neighbor >= 0 && hull->mask[neighbor] && !hull->outside[neighbor])
+                {
+                    hull->outside[neighbor] = 1;
+                    hull->queue[writeIndex++] = neighbor;
+                }
+            }
+        }
+        if (upper && writeIndex > bestSize)
+        {
+            memset(hull->selected, 0, sizeof(hull->selected));
+            for (int index = 0; index < writeIndex; index++)
+                hull->selected[hull->queue[index]] = 1;
+            bestSize = writeIndex;
+        }
+    }
+    memcpy(hull->mask, hull->selected, sizeof(hull->mask));
+    return bestSize != 0;
+}
+
+static bool BuildTreeSilhouette(struct TreeHull *hull)
+{
+    int enclosed = 0;
+    int any = 0;
+    int bottomRow = -1;
+    int pixelCount = hull->width * hull->height;
+    int y;
+
+    if (hull->directMask)
+    {
+        for (int index = 0; index < pixelCount; index++)
+            hull->mask[index] = hull->shade[index] != DIORAMA_TREE_SHADE_OFF;
+        if (!KeepLargestUpperTreeComponent(hull))
+            return false;
+    }
+    else
+    {
+        FloodTreeOutside(hull, false);
+        for (int index = 0; index < pixelCount; index++)
+        {
+            hull->mask[index] = !hull->outside[index];
+            enclosed += hull->mask[index]
+                     && hull->shade[index] != DIORAMA_TREE_SHADE_BLACK;
+        }
+        if (enclosed < pixelCount / 8)
+        {
+            FloodTreeOutside(hull, true);
+            for (int index = 0; index < pixelCount; index++)
+                hull->mask[index] = !hull->outside[index]
+                                 && hull->shade[index] != DIORAMA_TREE_SHADE_OFF;
+        }
+    }
+    memset(hull->zMin, -1, sizeof(hull->zMin));
+    memset(hull->zMax, -1, sizeof(hull->zMax));
+    memset(hull->sourceRow, 0, sizeof(hull->sourceRow));
+    for (y = 0; y < hull->height; y++)
+    {
+        int low = -1;
+        int high = -1;
+
+        for (int x = 0; x < hull->width; x++)
+            if (hull->mask[y * hull->width + x])
+            {
+                if (low < 0)
+                    low = x;
+                high = x;
+            }
+        if (low < 0)
+            continue;
+        bottomRow = y;
+        any = 1;
+        for (int x = low; x <= high; x++)
+        {
+            int index = y * hull->width + x;
+            float center;
+            float halfWidth;
+            float dx;
+            int chord = 1;
+
+            if (!hull->mask[index])
+                continue;
+            center = (low + high + 1) * 0.5f;
+            halfWidth = (high - low + 1) * 0.5f;
+            dx = x + 0.5f - center;
+            if (halfWidth * halfWidth > dx * dx)
+                chord = (int)floorf(2.0f * sqrtf(halfWidth * halfWidth - dx * dx) + 0.5f);
+            if (chord < 1)
+                chord = 1;
+            hull->zMin[index] = (int8_t)floorf(hull->depth * 0.5f - chord * 0.5f + 0.5f);
+            hull->zMax[index] = hull->zMin[index] + chord;
+            hull->sourceRow[index] = y;
+        }
+    }
+    if (!any)
+        return false;
+    for (y = bottomRow + 1; y < hull->height; y++)
+        for (int x = 0; x < hull->width; x++)
+        {
+            int source = bottomRow * hull->width + x;
+            int target = y * hull->width + x;
+
+            if (hull->zMin[source] < 0)
+                continue;
+            hull->zMin[target] = hull->zMin[source];
+            hull->zMax[target] = hull->zMax[source];
+            hull->sourceRow[target] = bottomRow;
+        }
+    return true;
+}
+
+static bool TreeSolidAt(const struct TreeHull *hull, int x, int y, int z)
+{
+    int index;
+
+    if (x < 0 || y < 0 || x >= hull->width || y >= hull->height)
+        return false;
+    index = y * hull->width + x;
+    return hull->zMin[index] >= 0 && z >= hull->zMin[index] && z < hull->zMax[index];
+}
+
+static const struct DioramaTerrainCell *TreeSourceCell(const struct TreeHull *hull,
+                                                        int pixelX, int pixelY)
+{
+    int cellX = pixelX / DIORAMA_VOXELS_PER_CELL;
+    int cellY = pixelY / DIORAMA_VOXELS_PER_CELL;
+    int cellsWide = hull->width / DIORAMA_VOXELS_PER_CELL;
+
+    return hull->sourceCells[cellY * cellsWide + cellX];
+}
+
+static struct DioramaTerrainMaterial TreePixelMaterial(const struct TreeHull *hull,
+                                                        int pixelX0, int pixelX1,
+                                                        int pixelY)
+{
+    const struct DioramaTerrainCell *cell = TreeSourceCell(hull, pixelX0, pixelY);
+    struct DioramaTerrainMaterial material = cell->treeMaterial;
+    int localX0 = pixelX0 % DIORAMA_VOXELS_PER_CELL;
+    int localX1 = (pixelX1 - 1) % DIORAMA_VOXELS_PER_CELL;
+    int localY = pixelY % DIORAMA_VOXELS_PER_CELL;
+    float v = material.v0 + (material.v1 - material.v0)
+            * localY / (DIORAMA_VOXELS_PER_CELL - 1);
+    float originalU0 = material.u0;
+    float originalU1 = material.u1;
+
+    material.u0 = originalU0 + (originalU1 - originalU0)
+                * localX0 / (DIORAMA_VOXELS_PER_CELL - 1);
+    material.u1 = originalU0 + (originalU1 - originalU0)
+                * localX1 / (DIORAMA_VOXELS_PER_CELL - 1);
+    material.v0 = material.v1 = v;
+    material.rotation = 0;
+    material.flags = 0;
+    return material;
+}
+
+static void TreeSideSource(const struct TreeHull *hull, int x, int y,
+                           int *sourceX, int *sourceY)
+{
+    int row = hull->sourceRow[y * hull->width + x];
+    int low = hull->width;
+    int high = -1;
+    int direction;
+
+    for (int candidate = 0; candidate < hull->width; candidate++)
+        if (hull->mask[row * hull->width + candidate])
+        {
+            if (candidate < low)
+                low = candidate;
+            high = candidate;
+        }
+    direction = x * 2 < low + high ? 1 : -1;
+    for (int step = 0; step <= 3; step++)
+    {
+        int candidate = x + direction * step;
+        int index;
+
+        if (candidate < 0 || candidate >= hull->width)
+            break;
+        index = row * hull->width + candidate;
+        if (!hull->mask[index])
+            break;
+        if (hull->shade[index] != DIORAMA_TREE_SHADE_BLACK)
+        {
+            *sourceX = candidate;
+            *sourceY = row;
+            return;
+        }
+    }
+    *sourceX = x;
+    *sourceY = row;
+}
+
+static void TreeTopSource(const struct TreeHull *hull, int x, int y,
+                          int *sourceX, int *sourceY)
+{
+    for (int row = y + 2; row <= y + 4 && row < hull->height; row++)
+    {
+        int index = row * hull->width + x;
+
+        if (hull->mask[index] && hull->shade[index] != DIORAMA_TREE_SHADE_BLACK)
+        {
+            *sourceX = x;
+            *sourceY = row;
+            return;
+        }
+    }
+    *sourceX = x;
+    *sourceY = hull->sourceRow[y * hull->width + x];
+}
+
+static bool AppendTreeFace(const struct DioramaTerrainChunkInput *input,
+                           struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                           uint32_t *vertexCount, struct DioramaTerrainMesh *mesh,
+                           const struct TreeHull *hull, int ownerX, int ownerZ,
+                           int axis, int sign, int plane, int uMin, int uMax,
+                           int16_t vMin, int16_t vMax,
+                           int sourceX0, int sourceX1, int sourceY, float shade)
+{
+    int ownerMinX = input->chunkX * DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL;
+    int ownerMinZ = input->chunkY * DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL;
+    struct DioramaShellFace face = {
+        .plane = plane, .uMin = uMin, .uMax = uMax, .vMin = vMin, .vMax = vMax,
+        .axis = axis, .sign = sign,
+    };
+    struct DioramaTerrainMaterial material;
+    float positions[4][3];
+
+    if (ownerX < ownerMinX
+     || ownerX >= ownerMinX + DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL
+     || ownerZ < ownerMinZ
+     || ownerZ >= ownerMinZ + DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL)
+        return true;
+    material = TreePixelMaterial(hull, sourceX0, sourceX1, sourceY);
+    if (material.layer == DIORAMA_MATERIAL_NONE)
+        return true;
+    FacePositions(&face, positions);
+    if (!AppendQuad(vertices, capacity, vertexCount, positions, &material, shade, 0.0f))
+        return false;
+    mesh->shellFaceCount++;
+    if (axis == 1 && sign > 0)
+        mesh->topFaceCount++;
+    else if (axis == 1)
+        mesh->bottomFaceCount++;
+    else
+        mesh->sideFaceCount++;
+    for (int corner = 0; corner < 4; corner++)
+    {
+        if (positions[corner][0] < mesh->bounds.minX) mesh->bounds.minX = positions[corner][0];
+        if (positions[corner][0] > mesh->bounds.maxX) mesh->bounds.maxX = positions[corner][0];
+        if (positions[corner][1] < mesh->bounds.minY) mesh->bounds.minY = positions[corner][1];
+        if (positions[corner][1] > mesh->bounds.maxY) mesh->bounds.maxY = positions[corner][1];
+        if (positions[corner][2] < mesh->bounds.minZ) mesh->bounds.minZ = positions[corner][2];
+        if (positions[corner][2] > mesh->bounds.maxZ) mesh->bounds.maxZ = positions[corner][2];
+    }
+    return true;
+}
+
+static bool AppendTreeHull(const struct DioramaTerrainChunkInput *input,
+                           struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                           uint32_t *vertexCount, struct DioramaTerrainMesh *mesh,
+                           struct TreeHull *hull)
+{
+    if (!BuildTreeSilhouette(hull))
+        return true;
+    for (int y = 0; y < hull->height; y++)
+    {
+        int x = 0;
+
+        while (x < hull->width)
+        {
+            int index = y * hull->width + x;
+            int end = x + 1;
+            int sourceY;
+            int worldY;
+
+            if (hull->zMin[index] < 0)
+            {
+                x++;
+                continue;
+            }
+            sourceY = hull->sourceRow[index];
+            while (end < hull->width
+                && end / DIORAMA_VOXELS_PER_CELL == x / DIORAMA_VOXELS_PER_CELL
+                && hull->zMin[y * hull->width + end] == hull->zMin[index]
+                && hull->zMax[y * hull->width + end] == hull->zMax[index]
+                && hull->sourceRow[y * hull->width + end] == sourceY)
+                end++;
+            worldY = hull->ground + hull->height - 1 - y;
+            if (!AppendTreeFace(input, vertices, capacity, vertexCount, mesh, hull,
+                    hull->originX + x, hull->originZ + hull->zMin[index],
+                    2, -1, hull->originZ + hull->zMin[index],
+                    hull->originX + x, hull->originX + end, worldY, worldY + 1,
+                    x, end, sourceY, 0.68f)
+             || !AppendTreeFace(input, vertices, capacity, vertexCount, mesh, hull,
+                    hull->originX + x, hull->originZ + hull->zMax[index] - 1,
+                    2, 1, hull->originZ + hull->zMax[index],
+                    hull->originX + x, hull->originX + end, worldY, worldY + 1,
+                    x, end, sourceY, 1.0f))
+                return false;
+            x = end;
+        }
+        for (int x = 0; x < hull->width; x++)
+        {
+            int index = y * hull->width + x;
+            int sourceY;
+            int worldX;
+            int worldY;
+            int sideX;
+            int sideY;
+
+            if (hull->zMin[index] < 0)
+                continue;
+            sourceY = hull->sourceRow[index];
+            worldX = hull->originX + x;
+            worldY = hull->ground + hull->height - 1 - y;
+            TreeSideSource(hull, x, y, &sideX, &sideY);
+            for (int direction = -1; direction <= 1; direction += 2)
+            {
+                int z = hull->zMin[index];
+
+                while (z < hull->zMax[index])
+                {
+                    int start;
+                    int chunk;
+
+                    while (z < hull->zMax[index]
+                        && TreeSolidAt(hull, x + direction, y, z))
+                        z++;
+                    start = z;
+                    chunk = DioramaTerrain_FloorDiv(hull->originZ + start,
+                        DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL);
+                    while (z < hull->zMax[index]
+                        && !TreeSolidAt(hull, x + direction, y, z)
+                        && DioramaTerrain_FloorDiv(hull->originZ + z,
+                            DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL) == chunk)
+                        z++;
+                    if (start < z
+                     && !AppendTreeFace(input, vertices, capacity, vertexCount, mesh, hull,
+                            worldX, hull->originZ + start, 0, direction,
+                            worldX + (direction > 0), hull->originZ + start,
+                            hull->originZ + z, worldY, worldY + 1,
+                            sideX, sideX + 1, sideY, 0.78f))
+                        return false;
+                }
+            }
+            for (int direction = -1; direction <= 1; direction += 2)
+            {
+                int z = hull->zMin[index];
+                bool wholeExposed = true;
+
+                for (int testZ = z; wholeExposed && testZ < hull->zMax[index]; testZ++)
+                    wholeExposed = !TreeSolidAt(hull, x, y + direction, testZ);
+                while (z < hull->zMax[index])
+                {
+                    int start;
+                    int sourceX = x;
+                    int sourceRow = sourceY;
+                    int chunk;
+                    bool deepRun;
+
+                    while (z < hull->zMax[index]
+                        && TreeSolidAt(hull, x, y + direction, z))
+                        z++;
+                    start = z;
+                    deepRun = direction < 0 && wholeExposed
+                           && hull->zMax[index] - hull->zMin[index] >= 3
+                           && z > hull->zMin[index] && z + 1 < hull->zMax[index];
+                    if (deepRun)
+                        TreeTopSource(hull, x, y, &sourceX, &sourceRow);
+                    chunk = DioramaTerrain_FloorDiv(hull->originZ + start,
+                        DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL);
+                    while (z < hull->zMax[index]
+                        && !TreeSolidAt(hull, x, y + direction, z)
+                        && DioramaTerrain_FloorDiv(hull->originZ + z,
+                            DIORAMA_TERRAIN_CHUNK_SIZE * DIORAMA_VOXELS_PER_CELL) == chunk)
+                    {
+                        bool deep = direction < 0 && wholeExposed
+                                 && hull->zMax[index] - hull->zMin[index] >= 3
+                                 && z > hull->zMin[index] && z + 1 < hull->zMax[index];
+
+                        if (deep != deepRun)
+                            break;
+                        z++;
+                    }
+                    if (start < z && (direction < 0 || y + 1 < hull->height)
+                     && !AppendTreeFace(input, vertices, capacity, vertexCount, mesh, hull,
+                            worldX, hull->originZ + start, 1, -direction,
+                            worldY + (direction < 0), worldX, worldX + 1,
+                            hull->originZ + start, hull->originZ + z,
+                            sourceX, sourceX + 1, sourceRow,
+                            direction < 0 ? 1.0f : 0.55f))
+                        return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+static bool AppendPixelQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                            uint32_t *count, const float positions[4][3], float shade,
+                            uint32_t color);
+
+bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
+                                   uint32_t capacity, uint32_t *vertexCount,
+                                   struct DioramaTerrainBounds *bounds)
+{
+    const int originX = 0;
+    const int originZ = (DIORAMA_VOXELS_PER_CELL * 2 - DIORAMA_TREE_MODEL_SIZE_Z) / 2;
+    const int ground = -DIORAMA_TREE_MODEL_MIN_Y;
+
+    if (vertices == NULL || vertexCount == NULL || bounds == NULL)
+        return false;
+    *vertexCount = 0;
+    bounds->minX = bounds->minY = bounds->minZ = FLT_MAX;
+    bounds->maxX = bounds->maxY = bounds->maxZ = -FLT_MAX;
+
+    for (uint32_t index = 0; index < gDioramaTreeModelFaceCount; index++)
+    {
+        const struct DioramaTreeModelFace *source = &gDioramaTreeModelFaces[index];
+        int minimum[3] = {0, 0, 0};
+        int maximum[3] = {0, 0, 0};
+        int uAxis = (source->axis + 1) % 3;
+        int vAxis = (source->axis + 2) % 3;
+        int xMin;
+        int xMax;
+        int zMin;
+        int zMax;
+        struct DioramaShellFace face = {0};
+        float positions[4][3];
+        float shade;
+
+        minimum[source->axis] = maximum[source->axis] = source->plane;
+        minimum[uAxis] = source->uMin;
+        maximum[uAxis] = source->uMax;
+        minimum[vAxis] = source->vMin;
+        maximum[vAxis] = source->vMax;
+        xMin = originX + minimum[0];
+        xMax = originX + maximum[0];
+        zMin = originZ + minimum[1];
+        zMax = originZ + maximum[1];
+
+        if (source->axis == 0)
+        {
+            face.axis = 0;
+            face.plane = xMin;
+            face.uMin = zMin;
+            face.uMax = zMax;
+            face.vMin = ground + minimum[2];
+            face.vMax = ground + maximum[2];
+            shade = 0.82f;
+        }
+        else if (source->axis == 1)
+        {
+            face.axis = 2;
+            face.plane = zMin;
+            face.uMin = xMin;
+            face.uMax = xMax;
+            face.vMin = ground + minimum[2];
+            face.vMax = ground + maximum[2];
+            shade = source->sign > 0 ? 0.72f : 1.0f;
+        }
+        else
+        {
+            face.axis = 1;
+            face.sign = source->sign;
+            face.plane = ground + minimum[2];
+            face.uMin = xMin;
+            face.uMax = xMax;
+            face.vMin = zMin;
+            face.vMax = zMax;
+            shade = source->sign > 0 ? 1.0f : 0.58f;
+        }
+        FacePositions(&face, positions);
+        if (!AppendPixelQuad(vertices, capacity, vertexCount, positions, shade, source->rgba))
+            return false;
+        for (int corner = 0; corner < 4; corner++)
+        {
+            if (positions[corner][0] < bounds->minX) bounds->minX = positions[corner][0];
+            if (positions[corner][0] > bounds->maxX) bounds->maxX = positions[corner][0];
+            if (positions[corner][1] < bounds->minY) bounds->minY = positions[corner][1];
+            if (positions[corner][1] > bounds->maxY) bounds->maxY = positions[corner][1];
+            if (positions[corner][2] < bounds->minZ) bounds->minZ = positions[corner][2];
+            if (positions[corner][2] > bounds->maxZ) bounds->maxZ = positions[corner][2];
+        }
+    }
+    return true;
+}
+
+static bool AppendVoxelTreeInstance(const struct DioramaTerrainChunkInput *input,
+                                    const struct DioramaTerrainCell *anchor,
+                                    struct DioramaTerrainMesh *mesh)
+{
+    int anchorY = anchor->mapY - (anchor->structureHeight == 1);
+    int ownerChunkX = DioramaTerrain_FloorDiv(anchor->mapX, DIORAMA_TERRAIN_CHUNK_SIZE);
+    int ownerChunkY = DioramaTerrain_FloorDiv(anchorY, DIORAMA_TERRAIN_CHUNK_SIZE);
+    struct DioramaTerrainTreeInstance *instance;
+    float minX;
+    float maxX;
+    float minY;
+    float maxY;
+    float minZ;
+    float maxZ;
+
+    if (ownerChunkX != input->chunkX || ownerChunkY != input->chunkY)
+        return true;
+    if (mesh->treeInstanceCount >= DIORAMA_TERRAIN_MAX_TREE_INSTANCES)
+        return false;
+    instance = &mesh->treeInstances[mesh->treeInstanceCount++];
+    instance->x = anchor->mapX;
+    instance->y = anchor->groundHeight;
+    instance->z = -anchorY;
+    minX = instance->x + (DIORAMA_TREE_MODEL_MIN_X - DIORAMA_VOXELS_PER_CELL / 2)
+         / (float)DIORAMA_VOXELS_PER_CELL;
+    maxX = instance->x + (DIORAMA_TREE_MODEL_MAX_X - DIORAMA_VOXELS_PER_CELL / 2)
+         / (float)DIORAMA_VOXELS_PER_CELL;
+    minY = instance->y;
+    maxY = instance->y + (DIORAMA_TREE_MODEL_MAX_Y - DIORAMA_TREE_MODEL_MIN_Y)
+         / (float)DIORAMA_VOXELS_PER_CELL;
+    minZ = instance->z + (DIORAMA_VOXELS_PER_CELL / 4 - DIORAMA_TREE_MODEL_MAX_Z)
+         / (float)DIORAMA_VOXELS_PER_CELL;
+    maxZ = instance->z + (DIORAMA_VOXELS_PER_CELL / 4 - DIORAMA_TREE_MODEL_MIN_Z)
+         / (float)DIORAMA_VOXELS_PER_CELL;
+    if (minX < mesh->bounds.minX) mesh->bounds.minX = minX;
+    if (maxX > mesh->bounds.maxX) mesh->bounds.maxX = maxX;
+    if (minY < mesh->bounds.minY) mesh->bounds.minY = minY;
+    if (maxY > mesh->bounds.maxY) mesh->bounds.maxY = maxY;
+    if (minZ < mesh->bounds.minZ) mesh->bounds.minZ = minZ;
+    if (maxZ > mesh->bounds.maxZ) mesh->bounds.maxZ = maxZ;
+    return true;
+}
+
+static bool AssembleTreeHull(const struct DioramaTerrainChunkInput *input,
+                             const struct DioramaTerrainCell *anchor,
+                             struct TreeHull *hull)
+{
+    int cellsWide = 1;
+    int cellsHigh = 1;
+    int bodyStart = 0;
+
+    memset(hull, 0, sizeof(*hull));
+    if (anchor->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL)
+    {
+        cellsWide = anchor->structureWidth;
+        cellsHigh = anchor->structureHeight >= 2 ? 2 : 1;
+        bodyStart = anchor->structureHeight - cellsHigh;
+        if (cellsWide < 1 || cellsWide > 2 || cellsHigh > 2
+         || anchor->structureLocalX != 0 || anchor->structureLocalY != bodyStart
+         || anchor->structureId == 0)
+            return false;
+    }
+    hull->width = cellsWide * DIORAMA_VOXELS_PER_CELL;
+    hull->height = cellsHigh * DIORAMA_VOXELS_PER_CELL;
+    hull->depth = hull->width;
+    hull->originX = anchor->mapX * DIORAMA_VOXELS_PER_CELL;
+    hull->originZ = anchor->mapY * DIORAMA_VOXELS_PER_CELL
+                  + (hull->height - hull->depth) / 2;
+    hull->ground = HeightToVoxel(anchor->groundHeight);
+    hull->directMask = anchor->treeMaskDirect;
+    for (int cellY = 0; cellY < cellsHigh; cellY++)
+        for (int cellX = 0; cellX < cellsWide; cellX++)
+        {
+            const struct DioramaTerrainCell *source = FindInputCell(
+                input, anchor->mapX + cellX, anchor->mapY + cellY);
+            int sourceIndex = cellY * cellsWide + cellX;
+
+            if (source == NULL || source->archetype != anchor->archetype
+             || (anchor->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
+              && source->structureId != anchor->structureId))
+                return false;
+            hull->sourceCells[sourceIndex] = source;
+            for (int pixelY = 0; pixelY < DIORAMA_VOXELS_PER_CELL; pixelY++)
+                for (int pixelX = 0; pixelX < DIORAMA_VOXELS_PER_CELL; pixelX++)
+                    hull->shade[(cellY * DIORAMA_VOXELS_PER_CELL + pixelY) * hull->width
+                              + cellX * DIORAMA_VOXELS_PER_CELL + pixelX]
+                        = source->treeShade[pixelY * DIORAMA_VOXELS_PER_CELL + pixelX];
+        }
+    return true;
+}
+
+static bool AppendTreeHulls(const struct DioramaTerrainChunkInput *input,
+                            struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                            uint32_t *vertexCount, struct DioramaTerrainMesh *mesh)
+{
+    struct TreeHull hull;
+
+    for (int y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
+        for (int x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
+        {
+            const struct DioramaTerrainCell *cell = GetCell(input, x, y);
+
+            if (!cell->present
+             || (cell->archetype != DIORAMA_ARCHETYPE_ROUND_HULL
+              && cell->archetype != DIORAMA_ARCHETYPE_GROUPED_HULL)
+             || !cell->treeHullReady)
+                continue;
+            if (cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL)
+            {
+                int bodyRows = cell->structureHeight >= 2 ? 2 : 1;
+                int bodyStart = cell->structureHeight - bodyRows;
+
+                if (cell->structureLocalX != 0 || cell->structureLocalY != bodyStart)
+                    continue;
+            }
+            {
+                uint32_t vertexStart = *vertexCount;
+                struct DioramaTerrainMesh meshBeforeHull = *mesh;
+                bool appended;
+
+                if (cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
+                 && cell->structureWidth == 2)
+                    appended = AppendVoxelTreeInstance(input, cell, mesh);
+                else
+                    appended = AssembleTreeHull(input, cell, &hull)
+                            && AppendTreeHull(input, vertices, capacity, vertexCount, mesh, &hull);
+                if (!appended)
+                {
+                    *vertexCount = vertexStart;
+                    *mesh = meshBeforeHull;
+                }
+            }
+        }
+    return true;
+}
+
 static bool AppendPixelQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
                             uint32_t *count, const float positions[4][3], float shade,
                             uint32_t color)
@@ -860,9 +1794,10 @@ static bool AppendPixelPrimitives(const struct DioramaTerrainChunkInput *input,
     return true;
 }
 
-static void FaceMaterial(const struct DioramaTerrainMaterial *source,
-                         const struct DioramaShellFace *face,
-                         struct DioramaTerrainMaterial *output)
+static void FaceMaterial(const struct DioramaTerrainCell *cell, uint8_t surface,
+                          const struct DioramaTerrainMaterial *source,
+                          const struct DioramaShellFace *face,
+                          struct DioramaTerrainMaterial *output)
 {
     const float inset = 0.02f / DIORAMA_VOXELS_PER_CELL;
     float uMin = 0.0f;
@@ -877,8 +1812,23 @@ static void FaceMaterial(const struct DioramaTerrainMaterial *source,
     {
         uMin = (face->uMin - sourcePixelX) / (float)DIORAMA_VOXELS_PER_CELL;
         uMax = (face->uMax - sourcePixelX) / (float)DIORAMA_VOXELS_PER_CELL;
-        vMin = (face->vMin - sourcePixelZ) / (float)DIORAMA_VOXELS_PER_CELL;
-        vMax = (face->vMax - sourcePixelZ) / (float)DIORAMA_VOXELS_PER_CELL;
+        if (surface == 0 && cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL)
+        {
+            int bodyRows = cell->structureHeight >= 2 ? 2 : 1;
+            int bodyStart = cell->structureHeight - bodyRows;
+            int32_t groupPixelZ = (cell->mapY - (cell->structureLocalY - bodyStart))
+                                * DIORAMA_VOXELS_PER_CELL;
+
+            vMin = (face->vMin - groupPixelZ)
+                 / (float)(bodyRows * DIORAMA_VOXELS_PER_CELL);
+            vMax = (face->vMax - groupPixelZ)
+                 / (float)(bodyRows * DIORAMA_VOXELS_PER_CELL);
+        }
+        else
+        {
+            vMin = (face->vMin - sourcePixelZ) / (float)DIORAMA_VOXELS_PER_CELL;
+            vMax = (face->vMax - sourcePixelZ) / (float)DIORAMA_VOXELS_PER_CELL;
+        }
     }
     else
     {
@@ -966,22 +1916,43 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
 
         if (cell == NULL || materialFace >= DIORAMA_MATERIAL_FACE_COUNT)
             return false;
-        sourceMaterial = surface == 0 ? &cell->materials[materialFace]
-                                      : &cell->underlayMaterials[materialFace];
-        if (sourceMaterial->layer == DIORAMA_MATERIAL_NONE)
-            continue;
         do
         {
             float positions[4][3];
             float shade;
             int corner;
+            unsigned measuredBand = 0;
 
-            if (face->axis != 1 && band.vMin + DIORAMA_VOXELS_PER_CELL < bandEnd)
+            if (face->axis != 1 && cell->measuredBandCount != 0)
+            {
+                int16_t boundary;
+
+                measuredBand = band.vMin < 0 ? 0 : band.vMin / 8;
+                if (measuredBand >= cell->measuredBandCount)
+                    measuredBand = cell->measuredBandCount - 1;
+                boundary = band.vMin < 0 ? 0 : (int16_t)((measuredBand + 1) * 8);
+                band.vMax = boundary < bandEnd ? boundary : bandEnd;
+                sourceMaterial = &cell->measuredBands[measuredBand];
+            }
+            else if (face->axis != 1 && band.vMin + DIORAMA_VOXELS_PER_CELL < bandEnd)
+            {
                 band.vMax = band.vMin + DIORAMA_VOXELS_PER_CELL;
+                sourceMaterial = surface == 0 ? &cell->materials[materialFace]
+                                              : &cell->underlayMaterials[materialFace];
+            }
             else
+            {
                 band.vMax = bandEnd;
+                sourceMaterial = surface == 0 ? &cell->materials[materialFace]
+                                              : &cell->underlayMaterials[materialFace];
+            }
+            if (sourceMaterial->layer == DIORAMA_MATERIAL_NONE)
+            {
+                band.vMin = band.vMax;
+                continue;
+            }
             FacePositions(&band, positions);
-            FaceMaterial(sourceMaterial, &band, &material);
+            FaceMaterial(cell, surface, sourceMaterial, &band, &material);
             if (cell->shape == DIORAMA_SHAPE_LEDGE && face->axis != 1)
             {
                 float sourceU0 = sourceMaterial->u0;
@@ -1007,6 +1978,11 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
             }
             shade = face->axis == 1 ? 1.0f
                   : (face->axis == 2 && face->sign < 0 ? 0.82f : 0.68f);
+            if (surface == 1 && face->axis == 1 && face->sign > 0
+             && cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
+             && cell->treeHullReady && cell->structureWidth == 2
+             && cell->structureLocalY >= cell->structureHeight - 2)
+                shade = 0.78f;
             if (!AppendQuad(vertices, vertexCapacity, &vertexCount, positions, &material, shade,
                             face->axis == 1 && face->sign > 0 && (face->flags & 1)
                                 ? 1.0f : 0.0f))
@@ -1044,13 +2020,14 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
         } while (face->axis != 1 && band.vMin < bandEnd);
     }
 
-    if (!AppendPixelPrimitives(input, vertices, vertexCapacity, &vertexCount, mesh))
+    if (!AppendTreeHulls(input, vertices, vertexCapacity, &vertexCount, mesh)
+     || !AppendPixelPrimitives(input, vertices, vertexCapacity, &vertexCount, mesh))
         return false;
 
     mesh->vertexCount = vertexCount;
     mesh->faceCount = mesh->topFaceCount + mesh->bottomFaceCount
                     + mesh->sideFaceCount + mesh->featureFaceCount;
-    if (mesh->faceCount == 0)
+    if (mesh->faceCount == 0 && mesh->treeInstanceCount == 0)
         memset(&mesh->bounds, 0, sizeof(mesh->bounds));
     mesh->geometryHash = FNV_OFFSET;
     for (uint32_t i = 0; i < vertexCount; i++)
@@ -1064,6 +2041,13 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].textureLayer);
         mesh->geometryHash = HashFloat(mesh->geometryHash, vertices[i].reflectionMask);
         mesh->geometryHash = HashU32(mesh->geometryHash, vertices[i].color);
+    }
+    mesh->geometryHash = HashU16(mesh->geometryHash, mesh->treeInstanceCount);
+    for (uint16_t i = 0; i < mesh->treeInstanceCount; i++)
+    {
+        mesh->geometryHash = HashFloat(mesh->geometryHash, mesh->treeInstances[i].x);
+        mesh->geometryHash = HashFloat(mesh->geometryHash, mesh->treeInstances[i].y);
+        mesh->geometryHash = HashFloat(mesh->geometryHash, mesh->treeInstances[i].z);
     }
     return true;
 }
