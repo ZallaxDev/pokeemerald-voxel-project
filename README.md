@@ -1,8 +1,10 @@
-# pokeemerald-multiplatform
+# Pokémon Emerald Voxel Project
 
 An experimental Windows, Linux, and Android port of the [Pokemon Emerald decompilation](https://github.com/pret/pokeemerald).
 
-The project runs the decompiled game code directly. It is not a bundled GBA emulator and does not include a commercial ROM.
+This repository is a fork of [pokeemerald-multiplatform](https://github.com/KamiKitsune420/pokeemerald-multiplatform), created and maintained by **Adel Spence (KamiKitsune420)**. It runs the decompiled game code directly through SDL2; it is not a bundled GBA emulator and does not include a commercial ROM.
+
+The main fork adds a desktop **Diorama renderer**: an OpenGL-based 3D presentation of the overworld that is built from the original Emerald maps, metatiles, palettes, behaviors, and sprites. The original game remains authoritative for gameplay, movement, collision, scripts, events, warps, encounters, and saves. The classic software-rendered 2D path remains available for the complete game and as a fallback for unsupported scenes.
 
 ## Platform Status
 
@@ -30,6 +32,7 @@ The project runs the decompiled game code directly. It is not a bundled GBA emul
 - Added Android rendering, frame pacing, audio output, writable save storage, and lifecycle handling.
 - Added an Android-native labeled multitouch overlay and SDL game-controller input.
 - Added launcher icons on Android and an embedded multi-resolution icon on Windows.
+- Added the desktop Diorama renderer, terrain meshing, OpenGL composition, and an explicit fallback to the original 2D renderer.
 
 ## Controls
 
@@ -48,9 +51,21 @@ The project runs the decompiled game code directly. It is not a bundled GBA emul
 
 Windows XInput controllers are supported by the SDL2 backend. Android supports SDL-compatible gamepads, including D-pad and left analog-stick movement. Native Linux currently uses keyboard input.
 
-## Windows Build
+### Diorama Controls
 
-The Windows target uses the 32-bit MinGW toolchain, SDL2, and ImageMagick. ImageMagick converts the PNG border assets to alpha-preserving BMP files supported by the Windows SDL2 build:
+The following controls are available in desktop Diorama builds:
+
+| Key or input | Action |
+| --- | --- |
+| `F3` | Toggle terrain mesh visualization and debug information |
+| `F4` | Toggle between Diorama mode and the original 2D renderer |
+| `,` | Decrease camera pitch |
+| `.` | Increase camera pitch |
+| Mouse wheel | Zoom the camera in or out |
+
+## Windows Build (Classic Renderer)
+
+The classic Windows target uses the 32-bit MinGW toolchain, SDL2, and ImageMagick. This build has not been tested and may not work. ImageMagick converts the PNG border assets to alpha-preserving BMP files supported by the Windows SDL2 build:
 
 ```sh
 make -f Makefile_pc -j4
@@ -62,7 +77,7 @@ Place `SDL2.dll` beside `pokeemerald.exe`. On Linux, the Windows build can be la
 ./launch.sh
 ```
 
-## Linux Build
+## Linux Build (Classic Renderer)
 
 The game data contains 32-bit pointers, so the native Linux target must currently be built as a 32-bit executable. Install a multilib C toolchain plus 32-bit SDL2 and SDL2_image development files, then run:
 
@@ -75,10 +90,34 @@ Linux objects are kept separately under `build/linux`, so they do not interfere 
 
 The resulting executable is `pokeemerald` in the repository root.
 
-### CachyOS / Arch Linux Diorama Build
+## Diorama Desktop Build
 
-The `feature/diorama` branch has been validated on CachyOS. Install the 32-bit
-runtime and development dependencies:
+The Diorama renderer is a separate desktop build configuration. Set `DIORAMA=1` explicitly to enable the OpenGL compositor and 3D overworld; leaving the variable unset or using `DIORAMA=0` builds the classic renderer. Diorama does not replace the original game logic or the software 2D path. It is currently supported on desktop Windows and Linux; the Android build remains on the classic renderer.
+
+### Windows Diorama Build (MSYS2)
+
+From an MSYS2 Git Bash shell, install the 32-bit MinGW SDL2 development packages and ImageMagick, then run. This build has not been tested and may not work:
+
+```sh
+make -f Makefile_pc DIORAMA=1 -j4 PREFIX= CPP=cpp SDL_DIR=/mingw32 \
+  TMP="C:/Users/<you>/AppData/Local/Temp" \
+  TEMP="C:/Users/<you>/AppData/Local/Temp"
+```
+
+The build uses the desktop OpenGL implementation supplied by Windows. Place `SDL2.dll` beside `pokeemerald.exe` before launching it. The same `./launch.sh` command can be used from Linux with Wine.
+
+### Linux Diorama Build
+
+The Linux Diorama target is also 32-bit and requires SDL2, SDL2_image, SDL2_mixer, and OpenGL development files for the 32-bit environment:
+
+```sh
+make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 \
+  PKG_CONFIG_32_PATH=/usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig \
+  -j4
+./pokeemerald
+```
+
+On CachyOS or Arch Linux, install the validated dependencies first:
 
 ```sh
 sudo pacman -S --needed base-devel pkgconf sdl2_image sdl2_mixer \
@@ -87,9 +126,7 @@ sudo pacman -S --needed base-devel pkgconf sdl2_image sdl2_mixer \
 sudo pacman -U https://archive.archlinux.org/packages/l/lib32-sdl2_image/lib32-sdl2_image-2.8.12-1-x86_64.pkg.tar.zst
 ```
 
-`lib32-sdl2_image` is no longer in the current multilib repositories; the
-second command installs the matching archived official package. Build and run
-the diorama target with:
+`lib32-sdl2_image` is no longer in the current multilib repositories; the second command installs the matching archived official package. Build and run the Diorama target with:
 
 ```sh
 make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 \
@@ -98,9 +135,16 @@ make -f Makefile_pc NATIVE_LINUX=1 DIORAMA=1 \
 ./pokeemerald
 ```
 
-The `PKG_CONFIG_32_PATH` override is required because the diorama branch
-defaults to Ubuntu's i386 pkg-config directory. For the classic renderer, omit
-`DIORAMA=1` and use the same `PKG_CONFIG_32_PATH` override.
+The `PKG_CONFIG_32_PATH` override is required when the Makefile defaults to Ubuntu's i386 pkg-config directory. The resulting executable is `pokeemerald` in the repository root, with Diorama objects stored separately under `build/linux-diorama`.
+
+To build the matching classic Linux target on the same system, omit `DIORAMA=1`:
+
+```sh
+make -f Makefile_pc NATIVE_LINUX=1 \
+  PKG_CONFIG_32_PATH=/usr/lib32/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig \
+  -j"$(nproc)"
+./pokeemerald
+```
 
 ## Display Settings
 
